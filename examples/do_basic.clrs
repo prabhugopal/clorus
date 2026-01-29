@@ -1,0 +1,43 @@
+;; do expression examples
+;; Demonstrates sequential evaluation with side effects
+
+;; Simple do - evaluates multiple expressions, returns last value
+(do
+  (def x 10)
+  (def y 20)
+  (+ x y))
+;; => 30
+
+;; do with side effects (future: when we have println)
+;; (do
+;;   (println "Starting calculation...")
+;;   (def result (* 5 6))
+;;   (println "Result:" result)
+;;   result)
+
+;; Nested do expressions
+(do
+  (do
+    (def a 1)
+    (def b 2))
+  (do
+    (def c 3)
+    (+ a b c)))
+;; => 6
+
+;; do in let body
+(let [x 10]
+  (do
+    (def y 20)
+    (* x y)))
+;; => 200
+
+;; do in if branches
+(if true
+  (do
+    (def success 1)
+    success)
+  (do
+    (def failure 0)
+    failure))
+;; => 1

@@ -1,0 +1,16 @@
+[package]
+name = "clorus"
+version = "0.1.0"
+edition = "2024"
+description = "Clojure-inspired systems programming language"
+license = "MIT"
+
+[dependencies]
+clorus-syntax = { path = "../clorus-syntax" }
+clorus-codegen = { path = "../clorus-codegen" }
+
+# Re-export inkwell for users
+inkwell = { workspace = true }
+
+[dev-dependencies]
+clorus-runtime = { path = "../clorus-runtime" }

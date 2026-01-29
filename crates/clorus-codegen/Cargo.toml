@@ -1,0 +1,11 @@
+[package]
+name = "clorus-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "LLVM code generation for Clorus language"
+license = "MIT"
+
+[dependencies]
+clorus-syntax = { path = "../clorus-syntax" }
+clorus-runtime = { path = "../clorus-runtime" }
+inkwell = { workspace = true }

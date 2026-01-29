@@ -1,0 +1,38 @@
+;; Test destructuring implementation
+;; Phase 1: Simple vector destructuring
+
+;; Test 1: Simple vector destructuring
+(def result1
+  (let [[a b c] [10 20 30]]
+    (+ (+ a b) c)))  ; Should be 60
+
+(println "Test 1 - Simple destructuring:" result1)
+
+;; Test 2: Ignore pattern
+(def result2
+  (let [[a _ c] [1 2 3]]
+    (+ a c)))  ; Should be 4
+
+(println "Test 2 - Ignore pattern:" result2)
+
+;; Test 3: Nested destructuring
+(def result3
+  (let [[x [y z]] [1 [2 3]]]
+    (+ (+ x y) z)))  ; Should be 6
+
+(println "Test 3 - Nested destructuring:" result3)
+
+;; Test 4: Simple binding still works
+(def result4
+  (let [x 42]
+    x))  ; Should be 42
+
+(println "Test 4 - Simple binding:" result4)
+
+;; Test 5: Mixed patterns
+(def result5
+  (let [[a b] [5 10]
+        c 15]
+    (+ (+ a b) c)))  ; Should be 30
+
+(println "Test 5 - Mixed patterns:" result5)

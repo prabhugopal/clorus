@@ -1,0 +1,5 @@
+(do
+  (defrecord Person [name age])
+  (def alice (->Person "Alice" 30))
+  (def bob (->Person "Bob" 25))
+  (:name alice))

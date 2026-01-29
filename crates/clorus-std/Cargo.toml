@@ -1,0 +1,10 @@
+[package]
+name = "clorus-std"
+version = "0.1.0"
+edition = "2021"
+description = "Rust standard library wrappers for Clorus"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]

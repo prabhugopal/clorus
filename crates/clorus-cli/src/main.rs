@@ -1,0 +1,105 @@
+mod commands;
+mod manifest;
+mod rust_ffi;
+mod interface;
+
+use std::env;
+
+// Import Value FFI types from runtime
+use clorus_runtime::value::Value;
+
+// Force inclusion of runtime FFI symbols for JIT execution
+// This prevents the linker from stripping them, making them visible to LLVM JIT
+#[used]
+static FORCE_LINK_AGENT: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::agent::clorus_agent;
+#[used]
+static FORCE_LINK_CHAN: unsafe extern "C" fn(i64) -> *mut Value = clorus_runtime::channel::clorus_chan;
+#[used]
+static FORCE_LINK_CHAN_PUT: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::channel::clorus_chan_put;
+#[used]
+static FORCE_LINK_CHAN_TAKE: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::channel::clorus_chan_take;
+#[used]
+static FORCE_LINK_CHAN_CLOSE: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::channel::clorus_chan_close;
+#[used]
+static FORCE_LINK_ALTS: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::channel::clorus_alts;
+#[used]
+static FORCE_LINK_GO: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::go_block::clorus_go;
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        print_help();
+        return;
+    }
+
+    let result = match args[1].as_str() {
+        "new" => {
+            if args.len() < 3 {
+                eprintln!("Error: 'clorus new' requires a project name");
+                eprintln!("Usage: clorus new <name>");
+                std::process::exit(1);
+            }
+            commands::new(&args[2])
+        }
+        "build" => commands::build(),
+        "run" => {
+            // Check for --debug flag
+            let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
+            commands::run(debug)
+        }
+        "check" => commands::check(),
+        "repl" => commands::repl(),
+        "help" | "--help" | "-h" => {
+            print_help();
+            return;
+        }
+        "version" | "--version" | "-V" => {
+            println!("clorus {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        cmd => {
+            eprintln!("Error: unknown command '{}'", cmd);
+            eprintln!();
+            eprintln!("Usage: clorus <command>");
+            eprintln!();
+            eprintln!("Run 'clorus help' for more information");
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = result {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn print_help() {
+    println!("Clorus {}", env!("CARGO_PKG_VERSION"));
+    println!("A Clojure-inspired systems programming language");
+    println!();
+    println!("USAGE:");
+    println!("    clorus <command> [options]");
+    println!();
+    println!("COMMANDS:");
+    println!("    new <name>    Create a new Clorus project");
+    println!("    build         Compile the current project (JIT mode)");
+    println!("    run           Compile and run the current project");
+    println!("    check         Check syntax without building");
+    println!("    repl          Start an interactive REPL");
+    println!("    help          Print this help message");
+    println!("    version       Print version information");
+    println!();
+    println!("OPTIONS:");
+    println!("    -h, --help       Print help information");
+    println!("    -V, --version    Print version information");
+    println!("    -d, --debug      Enable debug mode (memory tracking)");
+    println!();
+    println!("EXAMPLES:");
+    println!("    clorus new my-project    Create a new project");
+    println!("    clorus run               Run the current project");
+    println!("    clorus run --debug       Run with memory tracking");
+    println!("    clorus check             Check for syntax errors");
+    println!();
+    println!("See https://github.com/yourusername/clorus for more information");
+}

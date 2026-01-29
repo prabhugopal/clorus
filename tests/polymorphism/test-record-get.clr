@@ -1,0 +1,4 @@
+(do
+  (defrecord Person [name age])
+  (def alice (->Person "Alice" 30))
+  (get alice :name))

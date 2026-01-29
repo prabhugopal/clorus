@@ -1,0 +1,19 @@
+;; Test collection access functions
+
+;; Test with vectors
+(def my-vec [10 20 30 40 50])
+
+(println "Vector:" my-vec)
+(println "Count:" (count my-vec))
+(println "First:" (first my-vec))
+(println "Last:" (last my-vec))
+(println "nth 2:" (nth my-vec 2))
+
+;; Test with maps
+(def my-map {:name "Alice" :age 30})
+
+(println "\nMap:" my-map)
+(println "Count:" (count my-map))
+(println "Get name:" (get my-map :name))
+(println "Get missing:" (get my-map :missing))
+(println "Get with default:" (get my-map :missing "N/A"))

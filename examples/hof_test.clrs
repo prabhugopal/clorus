@@ -1,0 +1,24 @@
+;; Test higher-order functions
+
+;; Define helper functions
+(defn double [x] (* x 2))
+(defn add [x y] (+ x y))
+(defn gt-ten [x] (> x 10))
+
+;; Test map - double each number
+(def numbers [1 2 3 4 5])
+(def doubled (map double numbers))
+
+;; Test filter - keep numbers greater than 10
+(def mixed [5 15 8 20 12 3])
+(def big-nums (filter gt-ten mixed))
+
+;; Test reduce - sum all numbers
+(def to-sum [1 2 3 4 5])
+(def total (reduce add 0 to-sum))
+
+;; Results (can be checked via REPL)
+doubled    ; Should be [2 4 6 8 10]
+big-nums   ; Should be [15 20 12]
+total      ; Should be 15
+

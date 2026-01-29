@@ -1,0 +1,8 @@
+; Async demo with smol runtime!
+(use rust.async-demo)
+
+; Call async function (blocking wrapper)
+(def greeting (async-demo/hello-blocking))
+
+; Print the result
+greeting

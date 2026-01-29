@@ -1,0 +1,12 @@
+; Test Rust FFI - calling Rust functions from Clorus!
+(use rust.example)
+
+; Test basic arithmetic from Rust
+(def sum (example/add 10 20))
+(def product (example/multiply 6 7))
+
+; Calculate factorial(5) = 120
+(def fact (example/factorial 5))
+
+; Return the factorial result
+fact

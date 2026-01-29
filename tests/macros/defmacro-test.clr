@@ -1,0 +1,23 @@
+;; Test defmacro - user-defined macros
+
+;; Define a 'when' macro (like if but without else clause)
+(defmacro when [test & body]
+  `(if ~test (do ~@body) nil))
+
+;; Define an 'unless' macro (opposite of when)
+(defmacro unless [test & body]
+  `(if ~test nil (do ~@body)))
+
+;; Define a simple 'my-let' macro
+(defmacro my-let [bindings & body]
+  `(let ~bindings ~@body))
+
+;; Note: For now, these macros parse correctly but won't expand yet
+;; Full macro expansion requires:
+;; 1. Macro registry to store macro definitions
+;; 2. Macro expansion phase that substitutes parameters
+;; 3. Compile-time evaluation of macro bodies
+
+;; These are placeholders showing the syntax works
+(def x 10)
+(def y 20)

@@ -1,0 +1,12 @@
+[package]
+name = "clorus-runtime"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime library for Clorus - persistent data structures with reference counting"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+
+[dev-dependencies]

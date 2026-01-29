@@ -1,0 +1,15 @@
+;; Test agent creation and deref
+(def my-agent (agent 42))
+(println "Agent created with value 42")
+(println "Current value:" @my-agent)
+
+;; Test agent with vector
+(def log-agent (agent []))
+(println "Log agent created with empty vector")
+(println "Log agent value:" @log-agent)
+
+;; Test agent error checking
+(def error-result (agent-error my-agent))
+(println "Agent error (should be nil):" error-result)
+
+(println "Agent tests complete!")

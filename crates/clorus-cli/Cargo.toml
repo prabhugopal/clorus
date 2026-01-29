@@ -1,0 +1,20 @@
+[package]
+name = "clorus-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Clorus CLI tool and demo"
+
+[[bin]]
+name = "clorus"
+path = "src/main.rs"
+
+[dependencies]
+clorus = { path = "../clorus" }
+clorus-syntax = { path = "../clorus-syntax" }
+clorus-codegen = { path = "../clorus-codegen" }
+clorus-runtime = { path = "../clorus-runtime" }
+clorus-ffi-gen = { path = "../clorus-ffi-gen" }
+inkwell = { workspace = true }
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+libloading = "0.8"

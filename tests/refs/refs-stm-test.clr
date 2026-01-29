@@ -1,0 +1,61 @@
+;; Integration test for Refs & STM (Software Transactional Memory)
+;; Tests coordinated updates to multiple refs within transactions
+
+(println "=== Refs & STM Integration Test ===")
+
+;; Test 1: Basic ref creation and deref
+(println "\n Test 1: Basic ref creation and deref")
+(def counter (ref 0))
+(println "@counter:" @counter)
+;; Expected: 0
+
+;; Test 2: Simple ref-set in transaction
+(println "\nTest 2: Simple ref-set in transaction")
+(dosync
+  (ref-set counter 10))
+(println "@counter after ref-set:" @counter)
+;; Expected: 10
+
+;; Test 3: alter with inc
+(println "\nTest 3: alter with inc")
+(defn inc [x] (+ x 1))
+(dosync
+  (alter counter inc))
+(println "@counter after alter inc:" @counter)
+;; Expected: 11
+
+;; Test 4: alter with subtraction
+(println "\nTest 4: alter with subtraction")
+(defn dec [x] (- x 1))
+(dosync
+  (alter counter dec))
+(println "@counter after alter dec:" @counter)
+;; Expected: 10
+
+;; Test 5: Multiple refs - coordinated update (Bank account transfer)
+(println "\nTest 5: Multiple refs - coordinated update")
+(def account-a (ref 1000))
+(def account-b (ref 500))
+(println "Initial balances:")
+(println "  account-a:" @account-a)
+(println "  account-b:" @account-b)
+
+;; Transfer 100 from account-a to account-b
+(dosync
+  (alter account-a (fn [x] (- x 100)))
+  (alter account-b (fn [x] (+ x 100))))
+
+(println "After transfer:")
+(println "  account-a:" @account-a)
+(println "  account-b:" @account-b)
+;; Expected: account-a: 900, account-b: 600
+
+;; Test 6: Multiple operations in one transaction
+(println "\nTest 6: Multiple operations in one transaction")
+(def total (ref 0))
+(dosync
+  (ref-set total (+ @account-a @account-b)))
+(println "Total of both accounts:" @total)
+;; Expected: 1500 (900 + 600)
+
+(println "\n=== All Refs & STM tests completed ===")

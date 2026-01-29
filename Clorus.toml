@@ -1,0 +1,11 @@
+[package]
+name = "go-closure-test"
+version = "0.1.0"
+authors = []
+
+[build]
+entry = "test-multimethod-simple.clr"
+
+[link]
+libraries = []
+frameworks = []

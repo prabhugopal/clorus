@@ -1,0 +1,6 @@
+[package]
+name = "rust-ffi-demo"
+version = "0.1.0"
+
+[rust-dependencies]
+example-rust-lib = { path = "../../crates/example-rust-lib" }

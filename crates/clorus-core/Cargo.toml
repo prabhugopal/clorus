@@ -1,0 +1,11 @@
+[package]
+name = "clorus-core"
+version = "0.1.0"
+edition = "2021"
+description = "Clojure-style core functions for Clorus"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+clorus-runtime = { path = "../clorus-runtime" }

@@ -1,0 +1,720 @@
+;; ============================================================================
+;; Clorus Lazy Sequence Library
+;; ============================================================================
+;;
+;; A comprehensive implementation of lazy sequences for Clorus, demonstrating
+;; that advanced features can be built in pure Clorus without runtime changes.
+;;
+;; Key Features:
+;; - Lazy evaluation with automatic caching
+;; - Infinite sequences (range, repeat, cycle, iterate)
+;; - Lazy transformations (map, filter, take, drop, etc.)
+;; - Memory efficient (constant space for infinite sequences)
+;; - Composable operations
+;;
+;; Version: 1.0.0
+;; Date: January 27, 2026
+;; ============================================================================
+
+(ns clorus.lazy
+  "Lazy sequence operations for Clorus")
+
+;; ============================================================================
+;; SECTION 1: Core Construction and Type Checking
+;; ============================================================================
+
+(defn lazy-seq? [x]
+  "Check if x is a lazy sequence.
+
+  A lazy sequence is a map with :type :lazy-seq.
+
+  Examples:
+    (lazy-seq? (make-lazy (fn [] 42)))  ; => true
+    (lazy-seq? [1 2 3])                 ; => false"
+  (and (get x :type) (= (get x :type) :lazy-seq)))
+
+(defn make-lazy [thunk]
+  "Create a lazy sequence from a thunk (zero-argument function).
+
+  The thunk will only be called once, and its result is cached.
+
+  Parameters:
+    thunk - A function that takes no arguments and returns a value
+
+  Returns:
+    A lazy sequence that will compute its value when forced
+
+  Examples:
+    (def my-lazy (make-lazy (fn [] (+ 1 2))))
+    (force my-lazy)  ; => 3 (computes)
+    (force my-lazy)  ; => 3 (uses cache)"
+  {:type :lazy-seq
+   :realized (atom false)
+   :value (atom nil)
+   :thunk thunk})
+
+(defn force [lazy-seq]
+  "Realize a lazy sequence by computing its value if not already done.
+
+  If the lazy sequence has already been realized, returns the cached value.
+  If not, calls the thunk, caches the result, and returns it.
+
+  For non-lazy values, returns the value unchanged.
+
+  Parameters:
+    lazy-seq - A lazy sequence or any value
+
+  Returns:
+    The realized value
+
+  Examples:
+    (def ls (make-lazy (fn [] 42)))
+    (force ls)  ; => 42"
+  (if (lazy-seq? lazy-seq)
+    (if @(get lazy-seq :realized)
+      @(get lazy-seq :value)
+      (do
+        (reset! (get lazy-seq :value) ((get lazy-seq :thunk)))
+        (reset! (get lazy-seq :realized) true)
+        @(get lazy-seq :value)))
+    lazy-seq))
+
+(defn lazy-cons [head tail-thunk]
+  "Cons an element onto a lazy tail.
+
+  Creates a lazy sequence with a realized head and a lazy tail.
+  The tail-thunk is a zero-argument function that returns the tail.
+
+  Parameters:
+    head - The first element
+    tail-thunk - A function that returns the rest of the sequence
+
+  Returns:
+    A lazy sequence
+
+  Examples:
+    (def ones (lazy-cons 1 (fn [] ones)))
+    (lazy-first ones)  ; => 1"
+  {:type :lazy-seq
+   :realized (atom true)
+   :value (atom {:head head
+                 :tail (make-lazy tail-thunk)})
+   :thunk (fn [] {:head head :tail (make-lazy tail-thunk)})})
+
+;; ============================================================================
+;; SECTION 2: Basic Accessors
+;; ============================================================================
+
+(defn lazy-first [ls]
+  "Get the first element of a lazy sequence.
+
+  Forces the sequence to realize its first element.
+  Works with both lazy sequences and regular collections.
+
+  Parameters:
+    ls - A lazy sequence or regular collection
+
+  Returns:
+    The first element, or nil if empty
+
+  Examples:
+    (lazy-first (lazy-cons 1 (fn [] nil)))  ; => 1
+    (lazy-first nil)                         ; => nil"
+  (if (lazy-seq? ls)
+    (let [val (force ls)]
+      (if val (get val :head) nil))
+    (first ls)))
+
+(defn lazy-rest [ls]
+  "Get the rest of a lazy sequence (all elements after the first).
+
+  Returns a lazy sequence representing the tail.
+  Works with both lazy sequences and regular collections.
+
+  Parameters:
+    ls - A lazy sequence or regular collection
+
+  Returns:
+    A lazy sequence of remaining elements
+
+  Examples:
+    (def nums (lazy-cons 1 (fn [] (lazy-cons 2 (fn [] nil)))))
+    (lazy-first (lazy-rest nums))  ; => 2"
+  (if (lazy-seq? ls)
+    (let [val (force ls)]
+      (if val (get val :tail) nil))
+    (rest ls)))
+
+(defn lazy-empty? [ls]
+  "Check if a lazy sequence is empty.
+
+  Forces the sequence to determine if it has any elements.
+
+  Parameters:
+    ls - A lazy sequence or regular collection
+
+  Returns:
+    true if empty, false otherwise
+
+  Examples:
+    (lazy-empty? nil)                      ; => true
+    (lazy-empty? (lazy-cons 1 (fn [] nil))); => false"
+  (if (lazy-seq? ls)
+    (let [val (force ls)]
+      (= val nil))
+    (= (count ls) 0)))
+
+(defn lazy-nth [ls n]
+  "Get the nth element of a lazy sequence (0-indexed).
+
+  Forces elements up to position n.
+
+  Parameters:
+    ls - A lazy sequence
+    n - Index (0-based)
+
+  Returns:
+    The element at position n, or nil if sequence is shorter
+
+  Examples:
+    (lazy-nth (lazy-range 0) 5)  ; => 5"
+  (if (<= n 0)
+    (lazy-first ls)
+    (if (lazy-empty? ls)
+      nil
+      (lazy-nth (lazy-rest ls) (- n 1)))))
+
+;; ============================================================================
+;; SECTION 3: Infinite Sequence Constructors
+;; ============================================================================
+
+(defn lazy-range
+  "Create a lazy sequence of numbers.
+
+  Arities:
+    (lazy-range)        ; => 0, 1, 2, 3, ... (infinite from 0)
+    (lazy-range start)  ; => start, start+1, start+2, ... (infinite)
+    (lazy-range start end) ; => start, start+1, ..., end-1 (finite)
+
+  Examples:
+    (realize-n 5 (lazy-range))         ; => [0 1 2 3 4]
+    (realize-n 3 (lazy-range 10))      ; => [10 11 12]
+    (realize (lazy-range 5 10))        ; => [5 6 7 8 9]"
+  ([]
+   (lazy-range 0))
+  ([start]
+   (lazy-cons start (fn [] (lazy-range (+ start 1)))))
+  ([start end]
+   (if (>= start end)
+     nil
+     (lazy-cons start (fn [] (lazy-range (+ start 1) end))))))
+
+(defn lazy-repeat [x]
+  "Create an infinite lazy sequence repeating x.
+
+  Parameters:
+    x - The value to repeat
+
+  Returns:
+    Infinite lazy sequence: x, x, x, ...
+
+  Examples:
+    (realize-n 5 (lazy-repeat 42))  ; => [42 42 42 42 42]"
+  (lazy-cons x (fn [] (lazy-repeat x))))
+
+(defn lazy-cycle [coll]
+  "Create an infinite lazy sequence cycling through coll.
+
+  Parameters:
+    coll - A collection to cycle through
+
+  Returns:
+    Infinite lazy sequence cycling through elements
+
+  Examples:
+    (realize-n 7 (lazy-cycle [1 2 3]))  ; => [1 2 3 1 2 3 1]"
+  (defn cycle-from [remaining orig]
+    (if (= (count remaining) 0)
+      (cycle-from orig orig)
+      (lazy-cons (first remaining)
+                 (fn [] (cycle-from (rest remaining) orig)))))
+  (cycle-from coll coll))
+
+(defn lazy-iterate [f x]
+  "Create an infinite lazy sequence: x, (f x), (f (f x)), ...
+
+  Parameters:
+    f - Function to apply repeatedly
+    x - Initial value
+
+  Returns:
+    Infinite lazy sequence of iterated applications
+
+  Examples:
+    (realize-n 5 (lazy-iterate (fn [n] (* n 2)) 1))  ; => [1 2 4 8 16]
+    (realize-n 4 (lazy-iterate (fn [n] (+ n 1)) 0))  ; => [0 1 2 3]"
+  (lazy-cons x (fn [] (lazy-iterate f (f x)))))
+
+(defn lazy-repeatedly [f]
+  "Create an infinite lazy sequence by repeatedly calling f.
+
+  Parameters:
+    f - A zero-argument function to call repeatedly
+
+  Returns:
+    Infinite lazy sequence of function results
+
+  Examples:
+    (realize-n 3 (lazy-repeatedly (fn [] 42)))  ; => [42 42 42]"
+  (lazy-cons (f) (fn [] (lazy-repeatedly f))))
+
+;; ============================================================================
+;; SECTION 4: Lazy Transformations
+;; ============================================================================
+
+(defn lazy-map [f coll]
+  "Lazily apply f to each element of coll.
+
+  Returns a lazy sequence where elements are computed on demand.
+
+  Parameters:
+    f - Function to apply to each element
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence of transformed elements
+
+  Examples:
+    (def doubled (lazy-map (fn [x] (* x 2)) (lazy-range)))
+    (realize-n 5 doubled)  ; => [0 2 4 6 8]"
+  (if (lazy-seq? coll)
+    (if (lazy-empty? coll)
+      nil
+      (lazy-cons (f (lazy-first coll))
+                 (fn [] (lazy-map f (lazy-rest coll)))))
+    ;; Regular collection
+    (if (= (count coll) 0)
+      nil
+      (lazy-cons (f (first coll))
+                 (fn [] (lazy-map f (rest coll)))))))
+
+(defn lazy-filter [pred coll]
+  "Lazily filter elements of coll using predicate pred.
+
+  Returns a lazy sequence containing only elements for which pred returns true.
+
+  Parameters:
+    pred - Predicate function
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence of filtered elements
+
+  Examples:
+    (defn even? [n] (= (- n (* 2 (/ n 2))) 0))
+    (def evens (lazy-filter even? (lazy-range)))
+    (realize-n 5 evens)  ; => [0 2 4 6 8]"
+  (if (lazy-seq? coll)
+    (if (lazy-empty? coll)
+      nil
+      (if (pred (lazy-first coll))
+        (lazy-cons (lazy-first coll)
+                   (fn [] (lazy-filter pred (lazy-rest coll))))
+        (lazy-filter pred (lazy-rest coll))))
+    ;; Regular collection
+    (if (= (count coll) 0)
+      nil
+      (if (pred (first coll))
+        (lazy-cons (first coll)
+                   (fn [] (lazy-filter pred (rest coll))))
+        (lazy-filter pred (rest coll))))))
+
+(defn lazy-remove [pred coll]
+  "Lazily remove elements of coll for which pred returns true.
+
+  Opposite of lazy-filter.
+
+  Parameters:
+    pred - Predicate function
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence excluding filtered elements
+
+  Examples:
+    (defn odd? [n] (not= (- n (* 2 (/ n 2))) 0))
+    (realize-n 5 (lazy-remove odd? (lazy-range 10)))  ; => [0 2 4 6 8]"
+  (lazy-filter (fn [x] (not (pred x))) coll))
+
+(defn lazy-take [n coll]
+  "Take first n elements from coll.
+
+  Returns a lazy sequence of at most n elements.
+
+  Parameters:
+    n - Number of elements to take
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence of first n elements
+
+  Examples:
+    (realize (lazy-take 5 (lazy-range)))  ; => [0 1 2 3 4]"
+  (if (or (<= n 0) (lazy-empty? coll))
+    nil
+    (lazy-cons (lazy-first coll)
+               (fn [] (lazy-take (- n 1) (lazy-rest coll))))))
+
+(defn lazy-take-while [pred coll]
+  "Take elements from coll while pred returns true.
+
+  Stops at the first element where pred returns false.
+
+  Parameters:
+    pred - Predicate function
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence of elements while pred is true
+
+  Examples:
+    (realize (lazy-take-while (fn [x] (< x 5)) (lazy-range)))  ; => [0 1 2 3 4]"
+  (if (lazy-empty? coll)
+    nil
+    (if (pred (lazy-first coll))
+      (lazy-cons (lazy-first coll)
+                 (fn [] (lazy-take-while pred (lazy-rest coll))))
+      nil)))
+
+(defn lazy-drop [n coll]
+  "Drop first n elements from coll.
+
+  Returns a lazy sequence starting after n elements.
+
+  Parameters:
+    n - Number of elements to drop
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence after dropping n elements
+
+  Examples:
+    (realize-n 3 (lazy-drop 5 (lazy-range)))  ; => [5 6 7]"
+  (if (<= n 0)
+    coll
+    (if (lazy-empty? coll)
+      nil
+      (lazy-drop (- n 1) (lazy-rest coll)))))
+
+(defn lazy-drop-while [pred coll]
+  "Drop elements from coll while pred returns true.
+
+  Returns the sequence starting from the first element where pred is false.
+
+  Parameters:
+    pred - Predicate function
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence after dropping while pred is true
+
+  Examples:
+    (realize-n 3 (lazy-drop-while (fn [x] (< x 5)) (lazy-range)))  ; => [5 6 7]"
+  (if (lazy-empty? coll)
+    nil
+    (if (pred (lazy-first coll))
+      (lazy-drop-while pred (lazy-rest coll))
+      coll)))
+
+(defn lazy-take-nth [n coll]
+  "Take every nth element from coll.
+
+  Parameters:
+    n - Take every nth element (1-indexed)
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence of every nth element
+
+  Examples:
+    (realize-n 5 (lazy-take-nth 2 (lazy-range)))  ; => [0 2 4 6 8]"
+  (if (lazy-empty? coll)
+    nil
+    (lazy-cons (lazy-first coll)
+               (fn [] (lazy-take-nth n (lazy-drop n coll))))))
+
+;; ============================================================================
+;; SECTION 5: Lazy Combination Operations
+;; ============================================================================
+
+(defn lazy-concat [& colls]
+  "Concatenate lazy sequences together.
+
+  Parameters:
+    colls - Variable number of collections
+
+  Returns:
+    Lazy sequence of all elements from all collections
+
+  Examples:
+    (realize (lazy-concat (lazy-range 0 3) (lazy-range 10 13)))  ; => [0 1 2 10 11 12]"
+  (defn concat-helper [remaining]
+    (if (= (count remaining) 0)
+      nil
+      (let [first-coll (first remaining)]
+        (if (lazy-empty? first-coll)
+          (concat-helper (rest remaining))
+          (lazy-cons (lazy-first first-coll)
+                     (fn [] (concat-helper (conj (rest remaining) (lazy-rest first-coll)))))))))
+  (concat-helper colls))
+
+(defn lazy-interleave [& colls]
+  "Interleave elements from multiple collections.
+
+  Takes one element from each collection in turn.
+  Stops when any collection is exhausted.
+
+  Parameters:
+    colls - Variable number of collections
+
+  Returns:
+    Lazy sequence with interleaved elements
+
+  Examples:
+    (realize (lazy-interleave (lazy-range 0 3) (lazy-range 10 13)))  ; => [0 10 1 11 2 12]"
+  (defn all-non-empty? [cs]
+    (if (= (count cs) 0)
+      true
+      (if (lazy-empty? (first cs))
+        false
+        (all-non-empty? (rest cs)))))
+
+  (defn interleave-helper [cs]
+    (if (all-non-empty? cs)
+      (lazy-cons (lazy-first (first cs))
+                 (fn []
+                   (if (= (count (rest cs)) 0)
+                     (lazy-interleave (lazy-rest (first cs)))
+                     (apply lazy-interleave (conj (rest cs) (lazy-rest (first cs)))))))
+      nil))
+
+  (interleave-helper colls))
+
+(defn lazy-interpose [sep coll]
+  "Insert separator between elements of coll.
+
+  Parameters:
+    sep - Separator to insert
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence with separator between elements
+
+  Examples:
+    (realize (lazy-interpose :sep (lazy-range 0 3)))  ; => [0 :sep 1 :sep 2]"
+  (if (lazy-empty? coll)
+    nil
+    (lazy-cons (lazy-first coll)
+               (fn []
+                 (if (lazy-empty? (lazy-rest coll))
+                   nil
+                   (lazy-cons sep
+                              (fn [] (lazy-interpose sep (lazy-rest coll)))))))))
+
+;; ============================================================================
+;; SECTION 6: Realization and Conversion
+;; ============================================================================
+
+(defn realize [lazy-seq]
+  "Fully realize a lazy sequence into a vector.
+
+  WARNING: Do not use on infinite sequences!
+  Use realize-n for infinite sequences.
+
+  Parameters:
+    lazy-seq - A lazy sequence
+
+  Returns:
+    Vector of all elements
+
+  Examples:
+    (realize (lazy-range 0 5))  ; => [0 1 2 3 4]"
+  (loop [result []
+         current lazy-seq]
+    (if (lazy-empty? current)
+      result
+      (recur (conj result (lazy-first current))
+             (lazy-rest current)))))
+
+(defn realize-n [n lazy-seq]
+  "Realize first n elements of a lazy sequence into a vector.
+
+  Safe to use on infinite sequences.
+
+  Parameters:
+    n - Number of elements to realize
+    lazy-seq - A lazy sequence
+
+  Returns:
+    Vector of first n elements
+
+  Examples:
+    (realize-n 5 (lazy-range))  ; => [0 1 2 3 4]"
+  (loop [result []
+         current lazy-seq
+         remaining n]
+    (if (or (<= remaining 0) (lazy-empty? current))
+      result
+      (recur (conj result (lazy-first current))
+             (lazy-rest current)
+             (- remaining 1)))))
+
+(defn to-lazy [coll]
+  "Convert an eager collection to a lazy sequence.
+
+  Parameters:
+    coll - An eager collection (vector, list, etc.)
+
+  Returns:
+    Lazy sequence wrapping the collection
+
+  Examples:
+    (def ls (to-lazy [1 2 3 4 5]))
+    (realize-n 3 ls)  ; => [1 2 3]"
+  (if (= (count coll) 0)
+    nil
+    (lazy-cons (first coll)
+               (fn [] (to-lazy (rest coll))))))
+
+;; ============================================================================
+;; SECTION 7: Utility Functions
+;; ============================================================================
+
+(defn lazy-count [lazy-seq]
+  "Count elements in a lazy sequence.
+
+  WARNING: This fully realizes the sequence! Don't use on infinite sequences.
+
+  Parameters:
+    lazy-seq - A lazy sequence
+
+  Returns:
+    Number of elements
+
+  Examples:
+    (lazy-count (lazy-range 0 10))  ; => 10"
+  (loop [current lazy-seq
+         cnt 0]
+    (if (lazy-empty? current)
+      cnt
+      (recur (lazy-rest current) (+ cnt 1)))))
+
+(defn lazy-reduce [f init lazy-seq]
+  "Reduce a lazy sequence with function f and initial value init.
+
+  WARNING: Fully realizes the sequence! Don't use on infinite sequences.
+
+  Parameters:
+    f - Binary reduction function
+    init - Initial accumulator value
+    lazy-seq - A lazy sequence
+
+  Returns:
+    Final reduced value
+
+  Examples:
+    (lazy-reduce + 0 (lazy-range 0 5))  ; => 10"
+  (loop [acc init
+         current lazy-seq]
+    (if (lazy-empty? current)
+      acc
+      (recur (f acc (lazy-first current))
+             (lazy-rest current)))))
+
+;; ============================================================================
+;; SECTION 8: Advanced Operations
+;; ============================================================================
+
+(defn lazy-distinct [coll]
+  "Remove duplicate elements from a lazy sequence.
+
+  Preserves order, keeping first occurrence of each element.
+  Uses a set to track seen elements.
+
+  Parameters:
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence without duplicates
+
+  Examples:
+    (realize (lazy-distinct (lazy-cycle [1 2 3])))  ; Infinite but deduped!"
+  (defn distinct-helper [remaining seen]
+    (if (lazy-empty? remaining)
+      nil
+      (let [elem (lazy-first remaining)]
+        (if (contains? seen elem)
+          (distinct-helper (lazy-rest remaining) seen)
+          (lazy-cons elem
+                     (fn [] (distinct-helper (lazy-rest remaining)
+                                             (conj seen elem))))))))
+  (distinct-helper coll #{}))
+
+(defn lazy-partition [n coll]
+  "Partition a lazy sequence into chunks of n elements.
+
+  Parameters:
+    n - Chunk size
+    coll - A collection (lazy or eager)
+
+  Returns:
+    Lazy sequence of vectors, each of size n (last may be smaller)
+
+  Examples:
+    (realize (lazy-partition 3 (lazy-range 0 10)))  ; => [[0 1 2] [3 4 5] [6 7 8] [9]]"
+  (if (lazy-empty? coll)
+    nil
+    (let [chunk (realize-n n coll)]
+      (if (= (count chunk) 0)
+        nil
+        (lazy-cons chunk
+                   (fn [] (lazy-partition n (lazy-drop n coll))))))))
+
+;; ============================================================================
+;; Examples and Common Use Cases
+;; ============================================================================
+
+;; Example 1: Fibonacci sequence
+(def fibs
+  (lazy-cons 0
+    (fn []
+      (lazy-cons 1
+        (fn []
+          (lazy-map +
+                    fibs
+                    (lazy-rest fibs)))))))
+
+;; Example 2: Prime numbers (Sieve of Eratosthenes)
+(defn sieve [s]
+  (lazy-cons (lazy-first s)
+    (fn []
+      (sieve (lazy-filter
+               (fn [x] (not= (- x (* (/ x (lazy-first s)) (lazy-first s))) 0))
+               (lazy-rest s))))))
+
+(def primes (sieve (lazy-range 2)))
+
+;; Example 3: Powers of 2
+(def powers-of-2 (lazy-iterate (fn [x] (* x 2)) 1))
+
+;; Example 4: Composing operations
+(defn squares-of-evens [n]
+  "Get first n squares of even numbers"
+  (realize-n n
+    (lazy-map (fn [x] (* x x))
+      (lazy-filter (fn [x] (= (- x (* 2 (/ x 2))) 0))
+        (lazy-range)))))
+
+;; ============================================================================
+;; End of Clorus Lazy Sequence Library
+;; ============================================================================

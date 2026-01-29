@@ -1,0 +1,21 @@
+[workspace]
+members = [
+    "crates/clorus-syntax",
+    "crates/clorus-codegen",
+    "crates/clorus-runtime",
+    "crates/clorus-errors",
+    "crates/clorus-std",
+    "crates/clorus-core",
+    "crates/clorus-macros",
+    "crates/clorus",
+    "crates/clorus-cli",
+    "crates/clorus-repl",
+    "crates/clorus-ffi-gen",
+    "crates/example-rust-lib",
+    "crates/async-demo",
+]
+resolver = "2"
+
+[workspace.dependencies]
+anyhow = "1.0.99"
+inkwell = { version = "0.6.0", features = ["llvm18-1"] }

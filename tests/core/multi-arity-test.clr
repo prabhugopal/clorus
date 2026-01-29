@@ -1,0 +1,35 @@
+;; Test multi-arity functions
+
+;; Multi-arity defn: different behavior based on number of arguments
+(defn greet
+  ([] "Hello!")
+  ([name] (str "Hello, " name "!"))
+  ([greeting name] (str greeting ", " name "!")))
+
+;; Test all three arities
+(def result1 (greet))
+(def result2 (greet "Alice"))
+(def result3 (greet "Hi" "Bob"))
+
+;; Multi-arity with variadic
+(defn sum
+  ([] 0)
+  ([x] x)
+  ([x y] (+ x y))
+  ([x y & rest] (+ x (+ y 1))))
+
+(def sum1 (sum))
+(def sum2 (sum 5))
+(def sum3 (sum 5 10))
+(def sum4 (sum 5 10 15))
+
+;; Multi-arity anonymous function
+(def multi-fn
+  (fn
+    ([] 0)
+    ([x] (* x 2))
+    ([x y] (+ x y))))
+
+(def fn-result1 (multi-fn))
+(def fn-result2 (multi-fn 3))
+(def fn-result3 (multi-fn 3 7))

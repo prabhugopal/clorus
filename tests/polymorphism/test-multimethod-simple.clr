@@ -1,0 +1,22 @@
+;; Define a multimethod that dispatches on :type
+(defmulti area (fn [shape] (get shape :type)))
+
+;; Implement for circle
+(defmethod area :circle [shape]
+  (get shape :radius))
+
+;; Implement for rectangle
+(defmethod area :rectangle [shape]
+  (* (get shape :width) (get shape :height)))
+
+;; Test with shapes
+(do
+  (def circle {:type :circle :radius 5})
+  (def rect {:type :rectangle :width 10 :height 3})
+
+  ;; Call the methods directly (manual dispatch for MVP)
+  (def circle-area (area_circle circle))
+  (def rect-area (area_rectangle rect))
+
+  ;; Return sum for verification
+  (+ circle-area rect-area))  ;; Should return 35 (5 + 30)

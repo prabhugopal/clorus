@@ -1,0 +1,14 @@
+[package]
+name = "clorus-ffi-gen"
+version = "0.1.0"
+edition = "2024"
+description = "Automatic FFI binding generator for Clorus"
+
+[[bin]]
+name = "clorus-ffi-gen"
+path = "src/main.rs"
+
+[dependencies]
+syn = { version = "2.0", features = ["full", "visit"] }
+quote = "1.0"
+proc-macro2 = "1.0"

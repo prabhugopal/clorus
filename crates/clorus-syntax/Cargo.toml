@@ -1,0 +1,9 @@
+[package]
+name = "clorus-syntax"
+version = "0.1.0"
+edition = "2024"
+description = "Syntax parsing for Clorus language (lexer, parser, AST)"
+license = "MIT"
+
+[dependencies]
+# No external dependencies - pure Rust

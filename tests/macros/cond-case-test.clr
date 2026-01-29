@@ -1,0 +1,55 @@
+;; Test cond and case macros
+
+;; Test 1: cond - multi-way conditional
+(def x 5)
+
+(def result
+  (cond
+    (< x 0) "negative"
+    (= x 0) "zero"
+    (< x 10) "small positive"
+    (< x 100) "medium positive"
+    :else "large positive"))
+
+(println "Result for x=5:" result)
+
+;; Test 2: case - pattern matching
+(def day 3)
+
+(def day-name
+  (case day
+    1 "Monday"
+    2 "Tuesday"
+    3 "Wednesday"
+    4 "Thursday"
+    5 "Friday"
+    6 "Saturday"
+    7 "Sunday"
+    "Unknown"))
+
+(println "Day" day "is" day-name)
+
+;; Test 3: Nested cond
+(def age 25)
+(def income 50000)
+
+(def tax-bracket
+  (cond
+    (< age 18) "minor - no tax"
+    (< income 20000) "low income - 10%"
+    (< income 50000) "middle income - 20%"
+    (< income 100000) "upper-middle - 30%"
+    :else "high income - 40%"))
+
+(println "Tax bracket:" tax-bracket)
+
+;; Test 4: case with no default (returns nil if no match)
+(def status-code 200)
+
+(def status-message
+  (case status-code
+    200 "OK"
+    404 "Not Found"
+    500 "Internal Server Error"))
+
+(println "Status:" status-message)

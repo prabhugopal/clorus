@@ -1,0 +1,3 @@
+(do (def sum (atom 0)) (dotimes [i 5] (reset! sum (+ @sum i))) @sum)
+(do (def product (atom 1)) (dotimes [i 5] (reset! product (* @product (+ i 1)))) @product)
+(do (def counter (atom 0)) (loop [i 0] (if (< i 10) (do (reset! counter (+ @counter 1)) (recur (+ i 1))) @counter)))

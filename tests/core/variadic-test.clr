@@ -1,0 +1,20 @@
+;; Test variadic functions
+(defn sum [x & rest]
+  (+ x 1))
+
+(def result1 (sum 5))
+(def result2 (sum 5 10))
+(def result3 (sum 5 10 15))
+
+;; Test anonymous variadic function
+(def var-fn (fn [a & more]
+  (* a 2)))
+
+(def result4 (var-fn 3))
+(def result5 (var-fn 3 7 9))
+
+;; Test fixed params only (should still work)
+(defn add [x y]
+  (+ x y))
+
+(def result6 (add 10 20))

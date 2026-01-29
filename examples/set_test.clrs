@@ -1,0 +1,15 @@
+;; Test set implementation
+
+;; Create a simple set
+(def my-set #{1 2 3})
+
+;; Create a set with different types
+(def mixed-set #{:a :b :c})
+
+;; Test set literals
+#{1 2 3 4 5}
+#{:name :age :email}
+#{"hello" "world"}
+
+;; Empty set
+#{}

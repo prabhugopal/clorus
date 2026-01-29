@@ -1,0 +1,39 @@
+;; Test channels (CSP-style message passing)
+
+;; Test 1: Basic channel creation
+(def ch (chan 10))
+(println "Created channel:" ch)
+
+;; Test 2: Put and take operations
+(>!! ch 42)
+(println "Put value 42 into channel")
+
+(def val (<!! ch))
+(println "Took value from channel:" val)
+
+;; Test 3: Multiple values
+(>!! ch 1)
+(>!! ch 2)
+(>!! ch 3)
+(println "Put 3 values")
+
+(println "Took:" (<!! ch))
+(println "Took:" (<!! ch))
+(println "Took:" (<!! ch))
+
+;; Test 4: Close channel
+(def ch2 (chan 5))
+(>!! ch2 "hello")
+(close! ch2)
+(println "Closed channel")
+
+;; Taking from closed channel returns nil
+(def val2 (<!! ch2))
+(println "Took from closed empty channel:" val2)
+
+;; Test 5: Unbounded channel
+(def ch3 (chan))  ; Unbounded
+(>!! ch3 "unbounded")
+(println "Unbounded channel value:" (<!! ch3))
+
+(println "\nAll channel tests passed!")

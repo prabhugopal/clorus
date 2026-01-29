@@ -1,0 +1,7 @@
+[package]
+name = "clorus-errors"
+version = "0.1.0"
+edition = "2021"
+description = "Beautiful error reporting for Clorus"
+
+[dependencies]

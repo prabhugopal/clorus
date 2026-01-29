@@ -1,0 +1,24 @@
+;; Anonymous function (fn) examples
+;; Demonstrates basic lambda functionality
+
+;; Simple identity function
+(def identity-fn (fn [x] x))
+
+;; Lambda with arithmetic
+(def double (fn [x] (* x 2)))
+
+;; Lambda with multiple parameters
+(def add (fn [x y] (+ x y)))
+
+;; Lambda with no parameters
+(def get-constant (fn [] 42))
+
+;; Nested lambdas
+(def adder (fn [x] (fn [y] (+ x y))))
+
+;; TODO: Once we have function calling support, we can test:
+;; (identity-fn 5)       => 5
+;; (double 10)           => 20
+;; (add 3 4)             => 7
+;; (get-constant)        => 42
+;; ((adder 5) 3)         => 8

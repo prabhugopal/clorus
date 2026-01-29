@@ -1,0 +1,53 @@
+;; Test full macro expansion system
+;; User-defined macros with parameter substitution
+
+;; Define a 'when' macro (like if but without else clause)
+;; (when test body...) expands to (if test (do body...) nil)
+(defmacro when [test & body]
+  `(if ~test (do ~@body) nil))
+
+;; Define an 'unless' macro (opposite of when)
+;; (unless test body...) expands to (if test nil (do body...))
+(defmacro unless [test & body]
+  `(if ~test nil (do ~@body)))
+
+;; Test case 1: Using 'when' macro
+;; (when (< x 10) (println "Small") (println "Number"))
+;; Should expand to: (if (< x 10) (do (println "Small") (println "Number")) nil)
+
+(def x 5)
+
+(when (< x 10)
+  (println "x is small")
+  (println "x is less than 10"))
+
+;; Test case 2: Using 'unless' macro
+;; (unless (> x 100) (println "Not big"))
+;; Should expand to: (if (> x 100) nil (do (println "Not big")))
+
+(unless (> x 100)
+  (println "x is not big"))
+
+;; Test case 3: Define a more complex macro
+;; 'let1' - simplified let that only binds one variable
+(defmacro let1 [name value & body]
+  `(let [~name ~value] ~@body))
+
+(let1 y 42
+  (println y)
+  (+ y 8))
+
+;; Test case 4: Macro that generates code with unquote
+(defmacro twice [expr]
+  `(do ~expr ~expr))
+
+(twice (println "Hello"))
+
+;; Test case 5: Test that macros can use rest parameters
+(defmacro my-do [& exprs]
+  `(do ~@exprs))
+
+(my-do
+  (def a 10)
+  (def b 20)
+  (+ a b))

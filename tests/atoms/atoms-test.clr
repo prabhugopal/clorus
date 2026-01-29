@@ -1,0 +1,8 @@
+;; Test atoms
+(def counter (atom 0))
+(def result1 @counter)
+(def result2 (reset! counter 10))
+(def result3 @counter)
+(def inc-fn (fn [x] (+ x 1)))
+(def result4 (swap! counter inc-fn))
+(def result5 @counter)

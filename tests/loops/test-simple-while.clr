@@ -1,0 +1,4 @@
+(def sum (atom 0))
+(dotimes [i 5]
+  (reset! sum (+ @sum i)))
+@sum

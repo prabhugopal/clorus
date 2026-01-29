@@ -1,0 +1,39 @@
+;; Comprehensive set tests
+
+;; Test 1: Basic set creation
+(def my-set #{1 2 3})
+(count my-set)  ; Should be 3
+
+;; Test 2: Adding elements
+(def new-set (conj my-set 4))
+(count new-set)  ; Should be 4
+
+;; Test 3: Duplicate elements (sets don't allow duplicates)
+(def dup-set (conj my-set 1))
+(count dup-set)  ; Should still be 3
+
+;; Test 4: Removing elements
+(def smaller-set (disj my-set 2))
+(count smaller-set)  ; Should be 2
+
+;; Test 5: Contains check
+(contains? my-set 2)     ; Should be true
+(contains? my-set 10)    ; Should be false
+
+;; Test 6: Empty set
+(def empty-set #{})
+(count empty-set)  ; Should be 0
+
+;; Test 7: Sets with different types
+(def keyword-set #{:a :b :c})
+(count keyword-set)  ; Should be 3
+
+(def string-set #{"hello" "world"})
+(count string-set)  ; Should be 2
+
+;; Test 8: Mixed operations
+(def test-set #{1 2 3})
+(def with-four (conj test-set 4))
+(def with-five (conj with-four 5))
+(def without-two (disj with-five 2))
+(count without-two)  ; Should be 4 (1, 3, 4, 5)
