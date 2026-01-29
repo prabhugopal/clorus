@@ -44,9 +44,17 @@ fn main() {
         }
         "build" => commands::build(),
         "run" => {
-            // Check for --debug flag
+            // Check for --debug flag and collect extra args
             let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
-            commands::run(debug)
+
+            // Collect arguments after "run" (excluding --debug flags)
+            let extra_args: Vec<String> = args[2..]
+                .iter()
+                .filter(|arg| *arg != "--debug" && *arg != "-d")
+                .map(|s| s.clone())
+                .collect();
+
+            commands::run(debug, extra_args)
         }
         "check" => commands::check(),
         "repl" => commands::repl(),
@@ -96,10 +104,11 @@ fn print_help() {
     println!("    -d, --debug      Enable debug mode (memory tracking)");
     println!();
     println!("EXAMPLES:");
-    println!("    clorus new my-project    Create a new project");
-    println!("    clorus run               Run the current project");
-    println!("    clorus run --debug       Run with memory tracking");
-    println!("    clorus check             Check for syntax errors");
+    println!("    clorus new my-project       Create a new project");
+    println!("    clorus run                  Run the current project");
+    println!("    clorus run arg1 arg2        Run with arguments passed to -main");
+    println!("    clorus run --debug          Run with memory tracking");
+    println!("    clorus check                Check for syntax errors");
     println!();
     println!("See https://github.com/yourusername/clorus for more information");
 }

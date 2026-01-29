@@ -469,7 +469,7 @@ fn load_and_compile_modules<'ctx>(
 }
 
 
-pub fn run(debug: bool) -> Result<(), String> {
+pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
     let entry_path = Path::new(&manifest.build.entry);
 
@@ -699,6 +699,50 @@ pub fn run(debug: bool) -> Result<(), String> {
                 last_result_ptr = result;
             }
         }
+    }
+
+    // Look for -main function and call it with args if present
+    let main_fn_name = "-main";
+    let main_fn_result = unsafe {
+        // Try to find the -main function
+        type MainFunc = unsafe extern "C" fn(*mut u8) -> *mut u8;
+        engine.get_function::<MainFunc>(main_fn_name).ok()
+    };
+
+    if let Some(main_fn) = main_fn_result {
+        if debug {
+            println!("   [DEBUG] Found -main function, calling with {} args", extra_args.len());
+        }
+
+        // Build a vector of string Values from extra_args
+        unsafe {
+            use clorus_runtime::vector::{clorus_vector_empty, clorus_vector_conj};
+            use clorus_runtime::value::{Value, clorus_value_string};
+
+            // Create empty vector
+            let mut args_vec = clorus_vector_empty();
+
+            // Add each argument as a string Value
+            for arg in &extra_args {
+                let c_str = std::ffi::CString::new(arg.as_str())
+                    .map_err(|_| "Invalid argument string".to_string())?;
+                let arg_val = clorus_value_string(c_str.as_ptr());
+
+                // Conj to vector
+                args_vec = clorus_vector_conj(args_vec, arg_val);
+            }
+
+            // Call -main with the args vector (cast to *mut u8)
+            last_result_ptr = main_fn.call(args_vec as *mut u8);
+
+            if debug {
+                println!("   [DEBUG] -main returned successfully");
+            }
+        }
+    } else if !extra_args.is_empty() {
+        // Warn if args were provided but no -main found
+        eprintln!("Warning: Command line arguments provided but no -main function found");
+        eprintln!("         Define (defn -main [& args] ...) to accept arguments");
     }
 
     // Display the result
