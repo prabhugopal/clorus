@@ -573,6 +573,34 @@ pub extern "C" fn clorus_vector_count(vec_val: *mut Value) -> u64 {
     }
 }
 
+/// Create a new vector containing elements from start_index to end
+/// Used for rest parameter destructuring: [a b & rest]
+#[no_mangle]
+pub extern "C" fn clorus_vector_rest(vec_val: *mut Value, start_index: u64) -> *mut Value {
+    if vec_val.is_null() {
+        return clorus_vector_empty();
+    }
+
+    unsafe {
+        let vec_ptr = (*vec_val).as_ptr() as *mut PersistentVector;
+        let count = (*vec_ptr).count();
+
+        // If start_index >= count, return empty vector
+        if start_index >= count {
+            return clorus_vector_empty();
+        }
+
+        // Build new vector with remaining elements
+        let mut result = PersistentVector::empty();
+        for i in start_index..count {
+            let elem = PersistentVector::nth(vec_ptr, i);
+            result = PersistentVector::conj(result, elem);
+        }
+
+        Value::from_ptr(ValueTag::Vector, result as *mut u8)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

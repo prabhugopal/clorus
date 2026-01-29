@@ -9,9 +9,10 @@ use rustyline::history::DefaultHistory;
 use rustyline::{Editor, Helper};
 use rustyline::completion::Pair;
 use rustyline::hint::HistoryHinter;
+use std::path::Path;
 
 // Import Value FFI function from runtime
-use clorus_runtime::value::{clorus_value_as_number, clorus_value_nil, clorus_value_bool, Value, ValueTag};
+use clorus_runtime::value::{clorus_value_as_number, Value};
 
 // Force inclusion of core FFI symbols
 // This prevents the linker from stripping them, making them visible to LLVM JIT
@@ -239,8 +240,78 @@ fn main() {
     };
     println!();
 
+    // Process Rust FFI dependencies if in a project
+    let mut _rust_ffi_libs = Vec::new();
+    let mut rust_ffi_result = None;
+    if project.is_some() {
+        // Check if Clorus.toml exists
+        if Path::new("Clorus.toml").exists() {
+            // Load full manifest to get rust-dependencies
+            match clorus_cli::manifest::Manifest::find_in_current_dir() {
+                Ok(manifest) => {
+                    // Process Rust dependencies (build FFI wrappers if needed)
+                    match clorus_cli::rust_ffi::RustFfiProcessor::process_dependencies(&manifest, false) {
+                        Ok(rust_ffi) => {
+                            if !rust_ffi.libraries.is_empty() {
+                                println!("Processing {} Rust FFI libraries...", rust_ffi.libraries.len());
+
+                                // Load the dynamic libraries
+                                for lib_path in rust_ffi.get_dynamic_lib_paths() {
+                                    match load_dynamic_library(lib_path.as_path()) {
+                                        Ok(lib) => {
+                                            println!("✓ Loaded Rust library: {}", lib_path.file_name().unwrap().to_string_lossy());
+                                            _rust_ffi_libs.push(lib);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("⚠ Failed to load {}: {}", lib_path.display(), e);
+                                        }
+                                    }
+                                }
+                                println!();
+
+                                // Store rust_ffi for later registration with REPL
+                                rust_ffi_result = Some(rust_ffi);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("⚠ Warning: Could not process Rust FFI: {}", e);
+                            eprintln!("  Rust library functions will not be available in REPL.");
+                            println!();
+                        }
+                    }
+                }
+                Err(_) => {
+                    // No manifest or parsing error, continue without FFI
+                }
+            }
+        }
+    }
+
     let context = Context::create();
     let mut repl_engine = ReplEngine::new(&context);
+
+    // Register Rust FFI libraries with REPL engine
+    if let Some(rust_ffi) = rust_ffi_result {
+        use clorus::codegen::{RustLibrary, RustFunction, RustParam};
+
+        for lib in &rust_ffi.libraries {
+            let lib_name = lib.name.clone().replace("_ffi", "").replace('_', "-");
+
+            let rust_lib = RustLibrary {
+                name: lib_name,
+                functions: lib.functions.iter().map(|f| RustFunction {
+                    name: f.name.clone(),
+                    params: f.params.iter().map(|p| RustParam {
+                        name: p.name.clone(),
+                        type_name: p.type_name.clone(),
+                    }).collect(),
+                    return_type: f.return_type.clone(),
+                }).collect(),
+            };
+
+            repl_engine.register_rust_library(rust_lib);
+        }
+    }
 
     // Load project entry file if in a project directory
     if let Some(ref config) = project {
@@ -248,12 +319,68 @@ fn main() {
             println!("Loading {}...", config.build.entry);
             match std::fs::read_to_string(&config.build.entry) {
                 Ok(source) => {
-                    // Try to evaluate the entire file
-                    // The REPL engine will process only the first expression,
-                    // but at least namespace and some definitions might load
-                    match repl_engine.eval(&source) {
-                        Ok(_) => println!("✓ Project entry loaded"),
-                        Err(e) => eprintln!("⚠ Error loading project: {}", e),
+                    // Split source into individual top-level forms and evaluate each
+                    // This mimics Clojure's behavior of loading files
+                    let lines: Vec<&str> = source.lines().collect();
+                    let mut current_form = String::new();
+                    let mut paren_depth = 0;
+                    let mut in_string = false;
+                    let mut escape_next = false;
+                    let mut forms_loaded = 0;
+                    let mut had_error = false;
+
+                    for line in lines {
+                        let trimmed = line.trim();
+
+                        // Skip empty lines and comments when not building a form
+                        if current_form.is_empty() && (trimmed.is_empty() || trimmed.starts_with(';')) {
+                            continue;
+                        }
+
+                        current_form.push_str(line);
+                        current_form.push('\n');
+
+                        // Track parentheses depth and strings
+                        for ch in line.chars() {
+                            if escape_next {
+                                escape_next = false;
+                                continue;
+                            }
+                            if ch == '\\' {
+                                escape_next = true;
+                                continue;
+                            }
+                            if ch == '"' {
+                                in_string = !in_string;
+                            }
+                            if !in_string {
+                                if ch == '(' || ch == '[' || ch == '{' {
+                                    paren_depth += 1;
+                                } else if ch == ')' || ch == ']' || ch == '}' {
+                                    paren_depth -= 1;
+                                }
+                            }
+                        }
+
+                        // When we have a complete form (paren_depth returns to 0)
+                        if paren_depth == 0 && !current_form.trim().is_empty() {
+                            match repl_engine.eval_init(&current_form) {
+                                Ok(_) => {
+                                    forms_loaded += 1;
+                                }
+                                Err(e) => {
+                                    eprintln!("⚠ Error loading form: {}", e);
+                                    had_error = true;
+                                }
+                            }
+                            current_form.clear();
+                        }
+                    }
+
+                    if !had_error {
+                        println!("✓ Project loaded ({} forms)", forms_loaded);
+                    } else {
+                        println!("⚠ Project loaded with errors ({} forms)", forms_loaded);
                     }
                 }
                 Err(e) => {
@@ -758,6 +885,28 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
         {
             libloading::Library::new(&lib_path)
                 .map_err(|e| format!("Failed to load clorus-runtime library: {}", e))
+        }
+    }
+}
+
+/// Load a dynamic library with RTLD_GLOBAL flag on Unix
+fn load_dynamic_library(lib_path: &std::path::Path) -> Result<libloading::Library, String> {
+    unsafe {
+        #[cfg(unix)]
+        {
+            use libloading::os::unix::Library as UnixLibrary;
+            use libloading::os::unix::RTLD_GLOBAL;
+            use libloading::os::unix::RTLD_NOW;
+
+            UnixLibrary::open(Some(lib_path), RTLD_NOW | RTLD_GLOBAL)
+                .map(|lib| lib.into())
+                .map_err(|e| format!("Failed to load library {}: {}", lib_path.display(), e))
+        }
+
+        #[cfg(not(unix))]
+        {
+            libloading::Library::new(lib_path)
+                .map_err(|e| format!("Failed to load library {}: {}", lib_path.display(), e))
         }
     }
 }

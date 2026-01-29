@@ -278,6 +278,10 @@ impl<'ctx> CodeGen<'ctx> {
         let vec_count_type = i64_type.fn_type(&[i8_ptr_type.into()], false);
         self.module.add_function("clorus_vector_count", vec_count_type, None);
 
+        // clorus_vector_rest(vec: *mut Value, start_index: u64) -> *mut Value
+        let vec_rest_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i64_type.into()], false);
+        self.module.add_function("clorus_vector_rest", vec_rest_type, None);
+
         // clorus_list_empty() -> *mut Value
         let list_empty_type = i8_ptr_type.fn_type(&[], false);
         self.module.add_function("clorus_list_empty", list_empty_type, None);
