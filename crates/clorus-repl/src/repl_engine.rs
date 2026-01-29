@@ -70,30 +70,23 @@ impl<'ctx> ReplEngine<'ctx> {
     }
 
     pub fn eval(&mut self, input: &str) -> Result<EvalResult, String> {
-        eprintln!("[DEBUG] eval() called");
         // Add to history
         self.history.push(input.to_string());
-        eprintln!("[DEBUG] added to history");
 
         // Parse the new input to validate it
         let exprs = parse(input)?;
-        eprintln!("[DEBUG] parsed {} expressions", exprs.len());
         if exprs.is_empty() {
             return Err("No expression to evaluate".to_string());
         }
 
-        // Determine the kind of expression for output formatting
-        // Use the LAST expression, not the first (important for files with ns + definitions)
-        let last_expr = exprs.last().unwrap();
-        eprintln!("[DEBUG] got last expr");
-        let eval_kind = match last_expr {
+        // Determine the kind of expression for output formatting (use first expression)
+        let eval_kind = match &exprs[0] {
             Expr::Def { name, .. } => EvalKind::Def(name.clone()),
             Expr::Defn { name, .. } => EvalKind::Defn(name.clone()),
             Expr::Ns { .. } => EvalKind::Namespace,
             Expr::Require { .. } | Expr::Use { .. } => EvalKind::Import,
             _ => EvalKind::Value,
         };
-        eprintln!("[DEBUG] determined eval_kind");
 
         // Handle special namespace commands
         match &exprs[0] {
@@ -111,15 +104,11 @@ impl<'ctx> ReplEngine<'ctx> {
                     println!("Note: Rust imports in ns will be supported soon");
                 }
 
-                // If there are more expressions after ns, continue processing them
-                // If ns is the only expression, return nil
-                if exprs.len() == 1 {
-                    return Ok(EvalResult {
-                        value: std::ptr::null_mut(),
-                        kind: eval_kind,
-                    });
-                }
-                // Otherwise, fall through to process remaining expressions
+                // Return nil (represented as null pointer for now)
+                return Ok(EvalResult {
+                    value: std::ptr::null_mut(),
+                    kind: eval_kind,
+                });
             }
 
             Expr::Require { specs } => {
@@ -128,15 +117,11 @@ impl<'ctx> ReplEngine<'ctx> {
                     self.process_require(spec);
                 }
 
-                // If there are more expressions after require, continue processing them
-                // If require is the only expression, return nil
-                if exprs.len() == 1 {
-                    return Ok(EvalResult {
-                        value: std::ptr::null_mut(),
-                        kind: eval_kind,
-                    });
-                }
-                // Otherwise, fall through to process remaining expressions
+                // Return nil
+                return Ok(EvalResult {
+                    value: std::ptr::null_mut(),
+                    kind: eval_kind,
+                });
             }
 
             _ => {} // Continue with normal evaluation
@@ -174,63 +159,47 @@ impl<'ctx> ReplEngine<'ctx> {
         let mut latest_fn_name = String::new();
         let mut def_fn_names = Vec::new();
 
-        eprintln!("[DEBUG] starting history loop, history.len()={}", self.history.len());
         for (i, historical_input) in self.history.iter().enumerate() {
-            eprintln!("[DEBUG] processing history [{}]", i);
             let historical_exprs = parse(historical_input)?;
-            eprintln!("[DEBUG] parsed {} historical expressions", historical_exprs.len());
             if historical_exprs.is_empty() {
                 continue;
             }
 
-            // Process ALL expressions from this history entry, not just the first one
-            // This is crucial when loading files with multiple definitions
-            for (expr_idx, expr) in historical_exprs.iter().enumerate() {
-                eprintln!("[DEBUG] processing expr [{}][{}]", i, expr_idx);
-                // Expand macros before compiling
-                let expanded_expr = expand_macros(expr);
-                eprintln!("[DEBUG] expanded macros");
+            // Process only the first expression from each history entry
+            let expr = &historical_exprs[0];
 
-                // Check if this is a def or defn expression
-                let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
+            // Expand macros before compiling
+            let expanded_expr = expand_macros(expr);
 
-                // For the latest history entry's last expression, save its function name for execution
-                let is_latest = i == self.history.len() - 1 && expr_idx == historical_exprs.len() - 1;
-                eprintln!("[DEBUG] is_latest={}, is_def_or_defn={}", is_latest, is_def_or_defn);
+            // Check if this is a def or defn expression
+            let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
 
-                if is_latest {
-                    let fn_name = format!("eval_{}", self.expr_count);
-                    self.expr_count += 1;
-                    eprintln!("[DEBUG] compiling latest as {}", fn_name);
-                    codegen.wrap_in_function(&expanded_expr, &fn_name)?;
-                    latest_fn_name = fn_name;
-                } else {
-                    // For older expressions that define globals or functions,
-                    // we need to compile and sometimes execute them
-                    let fn_name = format!("history_{}_{}", i, expr_idx);
-                    eprintln!("[DEBUG] compiling historical as {}", fn_name);
-                    codegen.wrap_in_function(&expanded_expr, &fn_name)?;
+            // For the latest expression, save its function name for execution
+            if i == self.history.len() - 1 {
+                let fn_name = format!("eval_{}", self.expr_count);
+                self.expr_count += 1;
+                codegen.wrap_in_function(&expanded_expr, &fn_name)?;
+                latest_fn_name = fn_name;
+            } else {
+                // For older expressions that define globals or functions,
+                // we need to compile and sometimes execute them
+                let fn_name = format!("history_{}", i);
+                codegen.wrap_in_function(&expanded_expr, &fn_name)?;
 
-                    // If it's a def, we need to execute it to set the global value
-                    if is_def_or_defn {
-                        def_fn_names.push(fn_name);
-                    }
+                // If it's a def, we need to execute it to set the global value
+                if is_def_or_defn {
+                    def_fn_names.push(fn_name);
                 }
             }
         }
-        eprintln!("[DEBUG] finished history loop");
 
         // Create JIT engine
-        eprintln!("[DEBUG] creating JIT engine");
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
             .map_err(|e| format!("JIT error: {}", e))?;
-        eprintln!("[DEBUG] created JIT engine");
 
         // Execute historical def/defn statements to initialize globals and functions
-        eprintln!("[DEBUG] executing {} def/defn statements", def_fn_names.len());
         for fn_name in &def_fn_names {
-            eprintln!("[DEBUG] executing {}", fn_name);
             unsafe {
                 type EvalFunc = unsafe extern "C" fn() -> *mut u8;
                 if let Ok(jit_fn) = engine.get_function::<EvalFunc>(fn_name) {
@@ -238,26 +207,13 @@ impl<'ctx> ReplEngine<'ctx> {
                 }
             }
         }
-        eprintln!("[DEBUG] finished executing defs");
 
         // Execute the latest expression and return its result
-        if latest_fn_name.is_empty() {
-            eprintln!("[DEBUG] no latest_fn_name, returning nil");
-            // No expression to return (shouldn't happen, but be safe)
-            return Ok(EvalResult {
-                value: std::ptr::null_mut(),
-                kind: eval_kind,
-            });
-        }
-
-        eprintln!("[DEBUG] executing latest: {}", latest_fn_name);
         unsafe {
             type EvalFunc = unsafe extern "C" fn() -> *mut u8;
             let jit_fn = engine.get_function::<EvalFunc>(&latest_fn_name)
                 .map_err(|e| format!("Function not found: {}", e))?;
-            eprintln!("[DEBUG] calling function");
             let value = jit_fn.call();
-            eprintln!("[DEBUG] function returned, creating result");
             Ok(EvalResult { value, kind: eval_kind })
         }
     }

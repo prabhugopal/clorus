@@ -231,34 +231,6 @@ fn main() {
     let context = Context::create();
     let mut repl_engine = ReplEngine::new(&context);
 
-    // Load project entry file if in a project directory
-    // The file's (ns ...) form will set the namespace
-    if let Some(ref config) = project {
-        // Load the project entry file
-        if std::path::Path::new(&config.build.entry).exists() {
-            println!("Loading {}...", config.build.entry);
-            match std::fs::read_to_string(&config.build.entry) {
-                Ok(source) => {
-                    match repl_engine.eval(&source) {
-                        Ok(_) => println!("✓ Project loaded successfully"),
-                        Err(e) => {
-                            eprintln!("⚠ Error loading project: {}", e);
-                            eprintln!("  Continuing with empty REPL...");
-                        }
-                    }
-                }
-                Err(e) => {
-                    eprintln!("⚠ Could not read {}: {}", config.build.entry, e);
-                    eprintln!("  Continuing with empty REPL...");
-                }
-            }
-            println!();
-        } else {
-            // No entry file - set derived namespace as fallback
-            repl_engine.set_namespace(&config.namespace());
-        }
-    }
-
     // Create rustyline editor with autocomplete
     let mut rl = Editor::<ClorusHelper, DefaultHistory>::new().unwrap();
     rl.set_helper(Some(ClorusHelper::new()));
