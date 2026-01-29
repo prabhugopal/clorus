@@ -207,6 +207,17 @@ fn main() {
     println!("Tip: Use TAB for autocomplete, ↑↓ for history");
     println!();
 
+    // Load clorus-runtime library FIRST (required for Value* operations)
+    let _runtime_lib = match load_runtime_library() {
+        Ok(_lib) => {
+            // Keep library loaded for the duration of REPL
+        }
+        Err(e) => {
+            eprintln!("⚠ Warning: Could not load runtime library: {}", e);
+            eprintln!("  The REPL may not function correctly.");
+        }
+    };
+
     // Load clorus-std library for rust.fs support
     let _std_lib = match load_std_library() {
         Ok(_) => {
@@ -230,6 +241,28 @@ fn main() {
 
     let context = Context::create();
     let mut repl_engine = ReplEngine::new(&context);
+
+    // Load project entry file if in a project directory
+    if let Some(ref config) = project {
+        if std::path::Path::new(&config.build.entry).exists() {
+            println!("Loading {}...", config.build.entry);
+            match std::fs::read_to_string(&config.build.entry) {
+                Ok(source) => {
+                    // Try to evaluate the entire file
+                    // The REPL engine will process only the first expression,
+                    // but at least namespace and some definitions might load
+                    match repl_engine.eval(&source) {
+                        Ok(_) => println!("✓ Project entry loaded"),
+                        Err(e) => eprintln!("⚠ Error loading project: {}", e),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠ Could not read {}: {}", config.build.entry, e);
+                }
+            }
+            println!();
+        }
+    }
 
     // Create rustyline editor with autocomplete
     let mut rl = Editor::<ClorusHelper, DefaultHistory>::new().unwrap();
@@ -622,6 +655,109 @@ fn load_core_library() -> Result<libloading::Library, String> {
         {
             libloading::Library::new(&lib_path)
                 .map_err(|e| format!("Failed to load clorus-core library: {}", e))
+        }
+    }
+}
+
+/// Load clorus-runtime dynamic library to make Value* operations available to JIT
+fn load_runtime_library() -> Result<libloading::Library, String> {
+    use std::env;
+    use std::path::Path;
+
+    // Determine library file name based on platform
+    #[cfg(target_os = "macos")]
+    let lib_name = "libclorus_runtime.dylib";
+
+    #[cfg(target_os = "linux")]
+    let lib_name = "libclorus_runtime.so";
+
+    #[cfg(target_os = "windows")]
+    let lib_name = "clorus_runtime.dll";
+
+    // Try to find the library in multiple locations
+    let mut lib_path = None;
+
+    // 1. Try current project's target/release
+    let release_path = Path::new("target/release").join(lib_name);
+    if release_path.exists() {
+        lib_path = Some(release_path);
+    }
+
+    // 2. Try current project's target/debug
+    if lib_path.is_none() {
+        let debug_path = Path::new("target/debug").join(lib_name);
+        if debug_path.exists() {
+            lib_path = Some(debug_path);
+        }
+    }
+
+    // 3. Try to find it relative to the clorus executable (for installed version)
+    if lib_path.is_none() {
+        if let Ok(exe_path) = env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                // Check ../lib/ directory (typical installation layout)
+                let installed_path = exe_dir.parent()
+                    .map(|p| p.join("lib").join(lib_name));
+                if let Some(p) = installed_path {
+                    if p.exists() {
+                        lib_path = Some(p);
+                    }
+                }
+
+                // Check same directory as executable
+                if lib_path.is_none() {
+                    let same_dir = exe_dir.join(lib_name);
+                    if same_dir.exists() {
+                        lib_path = Some(same_dir);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Try workspace target directory (for development)
+    if lib_path.is_none() {
+        // Walk up to find workspace root
+        let mut current = env::current_dir().ok();
+        while let Some(dir) = current {
+            let workspace_release = dir.join("target/release").join(lib_name);
+            if workspace_release.exists() {
+                lib_path = Some(workspace_release);
+                break;
+            }
+            let workspace_debug = dir.join("target/debug").join(lib_name);
+            if workspace_debug.exists() {
+                lib_path = Some(workspace_debug);
+                break;
+            }
+            current = dir.parent().map(|p| p.to_path_buf());
+        }
+    }
+
+    let lib_path = lib_path.ok_or_else(|| {
+        format!(
+            "clorus-runtime library not found.\nSearched:\n  - target/release/{}\n  - target/debug/{}\n  - Installed library directory\n  - Workspace target directories",
+            lib_name, lib_name
+        )
+    })?;
+
+    // Load with RTLD_GLOBAL so JIT can find symbols
+    unsafe {
+        #[cfg(unix)]
+        {
+            use libloading::os::unix::Library as UnixLibrary;
+            use libloading::os::unix::RTLD_GLOBAL;
+            use libloading::os::unix::RTLD_NOW;
+
+            UnixLibrary::open(Some(&lib_path), RTLD_NOW | RTLD_GLOBAL)
+                .map(|lib| lib.into())
+                .map_err(|e| format!("Failed to load clorus-runtime library: {}", e))
+        }
+
+        #[cfg(not(unix))]
+        {
+            libloading::Library::new(&lib_path)
+                .map_err(|e| format!("Failed to load clorus-runtime library: {}", e))
         }
     }
 }
