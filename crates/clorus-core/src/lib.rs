@@ -35,8 +35,10 @@ pub use clorus_runtime::keyword::{
     clorus_keyword_name,
 };
 pub use clorus_runtime::value::{
-    clorus_value_number,
-    clorus_value_as_number,
+    clorus_value_long,
+    clorus_value_double,
+    clorus_value_as_long,
+    clorus_value_as_double,
     clorus_value_string,
     clorus_value_as_cstring,
     clorus_retain,

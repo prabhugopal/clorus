@@ -1,0 +1,139 @@
+;; Clorus Test Framework
+;; Provides testing utilities similar to clojure.test
+
+(ns clorus.test)
+
+;; Global test registry - stores all registered tests
+(def *tests* (atom {}))
+
+;; Global test results - stores results of last test run
+(def *test-results* (atom {:passed 0 :failed 0 :errors []}))
+
+;; Register a test
+;; Usage: (deftest my-test (fn [] ...test assertions...))
+(defn deftest [test-name test-fn]
+  (swap! *tests* assoc test-name test-fn)
+  test-name)
+
+;; Clear all registered tests (useful for REPL development)
+(defn clear-tests! []
+  (reset! *tests* {})
+  (reset! *test-results* {:passed 0 :failed 0 :errors []}))
+
+;; Assertion: Check equality
+;; Returns {:pass true} or {:pass false :message "..."}
+(defn assert-eq [expected actual]
+  (if (= expected actual)
+    {:pass true}
+    {:pass false
+     :message (str "Expected: " expected ", Got: " actual)}))
+
+;; Assertion: Check truth
+(defn assert-true [value]
+  (if value
+    {:pass true}
+    {:pass false
+     :message (str "Expected truthy value, got: " value)}))
+
+;; Assertion: Check falsity
+(defn assert-false [value]
+  (if (not value)
+    {:pass true}
+    {:pass false
+     :message (str "Expected falsy value, got: " value)}))
+
+;; Assertion: Check nil
+(defn assert-nil [value]
+  (if (nil? value)
+    {:pass true}
+    {:pass false
+     :message (str "Expected nil, got: " value)}))
+
+;; Assertion: Check not nil
+(defn assert-not-nil [value]
+  (if (not (nil? value))
+    {:pass true}
+    {:pass false
+     :message (str "Expected non-nil value, got nil")}))
+
+;; Helper: Run a single test and return result
+(defn run-single-test [test-name test-fn]
+  (println (str "  Testing: " test-name))
+  (let [result (test-fn)]
+    (if (:pass result)
+      (do
+        (println "    ✓ PASS")
+        {:name test-name :passed true})
+      (do
+        (println (str "    ✗ FAIL: " (:message result)))
+        {:name test-name :passed false :message (:message result)}))))
+
+;; Run all registered tests
+(defn run-tests []
+  (println "\n=== Running Tests ===\n")
+
+  ;; Reset results
+  (reset! *test-results* {:passed 0 :failed 0 :errors []})
+
+  ;; Get all tests
+  (let [tests @*tests*
+        test-count (count tests)]
+
+    (if (= test-count 0)
+      (println "No tests registered.")
+      (do
+        (println (str "Running " test-count " tests...\n"))
+
+        ;; Run each test
+        (loop [remaining-tests tests
+               passed 0
+               failed 0
+               errors []]
+          (if (empty? remaining-tests)
+            ;; All tests done - print summary
+            (do
+              (println (str "\n=== Test Summary ==="))
+              (println (str "Total: " test-count))
+              (println (str "Passed: " passed))
+              (println (str "Failed: " failed))
+
+              (if (> failed 0)
+                (do
+                  (println "\nFailed tests:")
+                  (loop [err-list errors]
+                    (if (empty? err-list)
+                      nil
+                      (let [err (first err-list)]
+                        (println (str "  - " (:name err) ": " (:message err)))
+                        (recur (rest err-list))))))
+                nil)
+
+              ;; Return results
+              (let [results {:passed passed :failed failed :errors errors}]
+                (reset! *test-results* results)
+                results))
+
+            ;; Run next test
+            (let [test-entry (first remaining-tests)
+                  test-name (first test-entry)
+                  test-fn (first (rest test-entry))
+                  result (run-single-test test-name test-fn)]
+              (if (:passed result)
+                (recur (rest remaining-tests) (+ passed 1) failed errors)
+                (recur (rest remaining-tests) passed (+ failed 1) (conj errors result))))))))))
+
+;; Helper: Quick test macro-like function
+;; Usage: (test "my test" (assert-eq 4 (+ 2 2)))
+(defn test [description assertion-result]
+  (if (:pass assertion-result)
+    (do
+      (println (str "✓ " description))
+      true)
+    (do
+      (println (str "✗ " description))
+      (println (str "  " (:message assertion-result)))
+      false)))
+
+;; Export test result accessor
+(defn test-results []
+  @*test-results*)

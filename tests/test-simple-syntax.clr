@@ -1,0 +1,7 @@
+(def tests (atom []))
+(defn add-test [name fn]
+  (swap\! tests conj {:name name :fn fn}))
+
+(add-test "test1" (fn [] {:pass true}))
+
+(println @tests)

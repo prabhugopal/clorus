@@ -7,7 +7,7 @@ use inkwell::values::{FloatValue, FunctionValue, PointerValue, GlobalValue, Basi
 use inkwell::basic_block::BasicBlock;
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::AddressSpace;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Import namespace context
 use crate::namespace_context::NamespaceContext;
@@ -438,19 +438,51 @@ impl<'ctx> CodeGen<'ctx> {
         let alts_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
         self.module.add_function("clorus_alts", alts_type, None);
 
+        // Function-related
+        // clorus_function_new(func_ptr: *const u8, arity: i32, env: *const *mut Value, env_size: u32) -> *mut Value
+        let function_new_type = i8_ptr_type.fn_type(
+            &[
+                i8_ptr_type.into(),
+                self.context.i32_type().into(),
+                i8_ptr_type.ptr_type(AddressSpace::default()).into(),
+                self.context.i32_type().into()
+            ],
+            false
+        );
+        self.module.add_function("clorus_function_new", function_new_type, None);
+
+        // clorus_function_call(func: *mut Value, args: *const *mut Value, arg_count: i32) -> *mut Value
+        let function_call_type = i8_ptr_type.fn_type(
+            &[
+                i8_ptr_type.into(),
+                i8_ptr_type.ptr_type(AddressSpace::default()).into(),
+                self.context.i32_type().into()
+            ],
+            false
+        );
+        self.module.add_function("clorus_function_call", function_call_type, None);
+
         // Go block functions
         // clorus_go(func: *mut Value, captures: *mut Value) -> *mut Value
         let go_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
         self.module.add_function("clorus_go", go_type, None);
 
         // Value creation functions
-        // clorus_value_number(n: f64) -> *mut Value
-        let value_number_type = i8_ptr_type.fn_type(&[self.context.f64_type().into()], false);
-        self.module.add_function("clorus_value_number", value_number_type, None);
+        // clorus_value_long(n: i64) -> *mut Value
+        let value_long_type = i8_ptr_type.fn_type(&[self.context.i64_type().into()], false);
+        self.module.add_function("clorus_value_long", value_long_type, None);
 
-        // clorus_value_as_number(val: *mut Value) -> f64
-        let value_as_number_type = self.context.f64_type().fn_type(&[i8_ptr_type.into()], false);
-        self.module.add_function("clorus_value_as_number", value_as_number_type, None);
+        // clorus_value_double(n: f64) -> *mut Value
+        let value_double_type = i8_ptr_type.fn_type(&[self.context.f64_type().into()], false);
+        self.module.add_function("clorus_value_double", value_double_type, None);
+
+        // clorus_value_as_long(val: *mut Value) -> i64
+        let value_as_long_type = self.context.i64_type().fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_value_as_long", value_as_long_type, None);
+
+        // clorus_value_as_double(val: *mut Value) -> f64
+        let value_as_double_type = self.context.f64_type().fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_value_as_double", value_as_double_type, None);
 
         // clorus_value_string(ptr: *const c_char) -> *mut Value
         let value_string_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
@@ -475,6 +507,10 @@ impl<'ctx> CodeGen<'ctx> {
         // clorus_value_bool(b: f64) -> *mut Value
         let bool_type = i8_ptr_type.fn_type(&[self.context.f64_type().into()], false);
         self.module.add_function("clorus_value_bool", bool_type, None);
+
+        // clorus_value_boolean(b: bool) -> *mut Value
+        let bool_type_from_bool = i8_ptr_type.fn_type(&[self.context.bool_type().into()], false);
+        self.module.add_function("clorus_value_boolean", bool_type_from_bool, None);
 
         // Collection access functions
         // clorus_get(coll: *mut Value, key: *mut Value) -> *mut Value
@@ -678,6 +714,62 @@ impl<'ctx> CodeGen<'ctx> {
         // clorus_compare_strings(s1: *mut Value, s2: *mut Value) -> i64
         let compare_strings_type = i64_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
         self.module.add_function("clorus_compare_strings", compare_strings_type, None);
+
+        // Arithmetic operations (all take *mut Value, *mut Value and return *mut Value)
+        let binary_op_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
+
+        // clorus_add(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_add", binary_op_type, None);
+
+        // clorus_sub(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_sub", binary_op_type, None);
+
+        // clorus_mul(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_mul", binary_op_type, None);
+
+        // clorus_div(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_div", binary_op_type, None);
+
+        // clorus_mod(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_mod", binary_op_type, None);
+
+        // Comparison operations
+        // clorus_lt(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_lt", binary_op_type, None);
+
+        // clorus_lte(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_lte", binary_op_type, None);
+
+        // clorus_gt(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_gt", binary_op_type, None);
+
+        // clorus_gte(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_gte", binary_op_type, None);
+
+        // Bitwise operations
+        // clorus_bit_and(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_bit_and", binary_op_type, None);
+
+        // clorus_bit_or(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_bit_or", binary_op_type, None);
+
+        // clorus_bit_xor(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_bit_xor", binary_op_type, None);
+
+        // clorus_bit_shift_left(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_bit_shift_left", binary_op_type, None);
+
+        // clorus_bit_shift_right(a: *mut Value, b: *mut Value) -> *mut Value
+        self.module.add_function("clorus_bit_shift_right", binary_op_type, None);
+
+        // Unary operations
+        // clorus_bit_not(a: *mut Value) -> *mut Value
+        let unary_op_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_bit_not", unary_op_type, None);
+
+        // clorus_print_value(val: *mut Value) -> *mut Value
+        let print_value_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_print_value", print_value_type, None);
     }
 
     /// Declare rust.fs module functions
@@ -831,9 +923,9 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Helper: Create a Value from an f64
     fn create_value_from_float(&self, float_val: FloatValue<'ctx>) -> inkwell::values::PointerValue<'ctx> {
-        let value_number_fn = self.module.get_function("clorus_value_number").unwrap();
+        let value_double_fn = self.module.get_function("clorus_value_double").unwrap();
         let call_result = self.builder.build_call(
-            value_number_fn,
+            value_double_fn,
             &[float_val.into()],
             "value_from_float"
         ).unwrap();
@@ -842,9 +934,9 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Helper: Extract f64 from a Value
     fn extract_float_from_value(&self, value_ptr: inkwell::values::PointerValue<'ctx>) -> FloatValue<'ctx> {
-        let value_as_number_fn = self.module.get_function("clorus_value_as_number").unwrap();
+        let value_as_double_fn = self.module.get_function("clorus_value_as_double").unwrap();
         let call_result = self.builder.build_call(
-            value_as_number_fn,
+            value_as_double_fn,
             &[value_ptr.into()],
             "float_from_value"
         ).unwrap();
@@ -887,7 +979,14 @@ impl<'ctx> CodeGen<'ctx> {
     fn compile_quoted(&mut self, expr: &Expr) -> Result<PointerValue<'ctx>, String> {
         match expr {
             // Literals are returned as-is
-            Expr::Number(n) => {
+            Expr::Long(n) => {
+                let value_long_fn = self.module.get_function("clorus_value_long")
+                    .ok_or("clorus_value_long not declared")?;
+                let long_val = self.context.i64_type().const_int(*n as u64, false);
+                let result = self.builder.build_call(value_long_fn, &[long_val.into()], "value_long").unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+            Expr::Double(n) => {
                 let float_val = self.context.f64_type().const_float(*n);
                 Ok(self.box_number(float_val))
             }
@@ -1115,7 +1214,12 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             // Literals: same as quote
-            Expr::Number(n) => {
+            Expr::Long(n) => {
+                let float_val = self.context.f64_type().const_float(*n as f64);
+                Ok(self.box_number(float_val))
+            }
+
+            Expr::Double(n) => {
                 let float_val = self.context.f64_type().const_float(*n);
                 Ok(self.box_number(float_val))
             }
@@ -1350,7 +1454,12 @@ impl<'ctx> CodeGen<'ctx> {
                 self.collect_free_vars(body, free_vars, seen, &new_bound);
             }
             Expr::Call { func, args } => {
-                // func is a String (function name), not an expression
+                // func is a String (function name) - check if it's a free variable
+                if !bound.contains(func) && !seen.contains(func) && self.variables.contains_key(func) {
+                    free_vars.push(func.clone());
+                    seen.insert(func.clone());
+                }
+                // Check arguments for free variables
                 for arg in args {
                     self.collect_free_vars(arg, free_vars, seen, bound);
                 }
@@ -1410,7 +1519,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // No binding - just evaluate for side effects
             }
 
-            Pattern::Vector { elements, rest } => {
+            Pattern::Vector { elements, rest, as_binding: _ } => {
                 // Get clorus_vector_nth function
                 let nth_fn = self.module.get_function("clorus_vector_nth")
                     .ok_or("clorus_vector_nth not declared")?;
@@ -1452,7 +1561,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
 
-            Pattern::Map { bindings: pattern_bindings } => {
+            Pattern::Map { bindings: pattern_bindings, defaults: _ } => {
                 // Get map_get and keyword functions
                 let get_fn = self.module.get_function("clorus_map_get")
                     .ok_or("clorus_map_get not declared")?;
@@ -1464,6 +1573,8 @@ impl<'ctx> CodeGen<'ctx> {
                     let key_str = match key {
                         MapPatternKey::Keyword(k) => k,
                         MapPatternKey::Symbol(s) => s,
+                        MapPatternKey::Str(s) => s,
+                        MapPatternKey::Sym(s) => s,
                     };
 
                     // Create keyword for lookup
@@ -1496,7 +1607,7 @@ impl<'ctx> CodeGen<'ctx> {
         match pattern {
             Pattern::Symbol(name) => vec![name.clone()],
             Pattern::Ignore => vec![],
-            Pattern::Vector { elements, rest } => {
+            Pattern::Vector { elements, rest, as_binding: _ } => {
                 let mut names = Vec::new();
                 for elem in elements {
                     names.extend(Self::collect_pattern_names(elem));
@@ -1506,7 +1617,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
                 names
             }
-            Pattern::Map { bindings } => {
+            Pattern::Map { bindings, defaults: _ } => {
                 let mut names = Vec::new();
                 for (_, value_pattern) in bindings {
                     names.extend(Self::collect_pattern_names(value_pattern));
@@ -1520,15 +1631,27 @@ impl<'ctx> CodeGen<'ctx> {
     /// All expressions now return boxed values
     pub fn compile_expr(&mut self, expr: &Expr) -> Result<PointerValue<'ctx>, String> {
         match expr {
-            Expr::Number(n) => {
-                // Box number into Value*
-                let float_type = self.context.f64_type();
-                let float_val = float_type.const_float(*n);
+            Expr::Long(n) => {
+                // Box long integer into Value* using clorus_value_long
+                let value_long_fn = self.module.get_function("clorus_value_long")
+                    .ok_or("clorus_value_long not declared")?;
+                let long_val = self.context.i64_type().const_int(*n as u64, false);
+                let result = self.builder.build_call(
+                    value_long_fn,
+                    &[long_val.into()],
+                    "value_long"
+                ).unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
+            Expr::Double(n) => {
+                // Box double into Value* using clorus_value_double
+                let float_val = self.context.f64_type().const_float(*n);
                 Ok(self.box_number(float_val))
             }
 
             Expr::Symbol(name) => {
-                // Variable reference - check globals first, then locals
+                // Variable reference - check globals first, then locals, then functions
                 // Variables now store Value* instead of f64
                 if let Some(global) = self.globals.get(name) {
                     // Load Value* from global variable
@@ -1548,6 +1671,43 @@ impl<'ctx> CodeGen<'ctx> {
                         name
                     ).unwrap();
                     Ok(val.into_pointer_value())
+                } else if let Some(function) = self.functions.get(name) {
+                    // Function reference - wrap in function value
+                    // Call clorus_function_new with the function pointer and arity
+                    let func_new_fn = self.module.get_function("clorus_function_new")
+                        .ok_or("clorus_function_new not declared")?;
+
+                    // Get function pointer (cast to *const u8)
+                    let func_ptr = function.as_global_value().as_pointer_value();
+                    let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let func_ptr_cast = self.builder.build_pointer_cast(
+                        func_ptr,
+                        i8_ptr_type,
+                        "func_ptr_cast"
+                    ).unwrap();
+
+                    // Get arity from function type
+                    // For top-level defn functions, arity = param_count
+                    // (they don't have an environment parameter)
+                    let fn_type = function.get_type();
+                    let arity = fn_type.count_param_types();
+                    let arity_val = self.context.i32_type().const_int(arity as u64, false);
+
+                    // Empty environment (nullptr)
+                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let env_ptr = value_ptr_type.const_null();
+
+                    // env_size = 0
+                    let env_size = self.context.i32_type().const_int(0, false);
+
+                    // Call clorus_function_new
+                    let func_val = self.builder.build_call(
+                        func_new_fn,
+                        &[func_ptr_cast.into(), arity_val.into(), env_ptr.into(), env_size.into()],
+                        "func_value"
+                    ).unwrap();
+
+                    Ok(func_val.try_as_basic_value().left().unwrap().into_pointer_value())
                 } else {
                     Err(format!("Undefined variable: {}", name))
                 }
@@ -1782,7 +1942,7 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(result)
             }
 
-            Expr::Def { name, value } => {
+            Expr::Def { name, value, metadata: _ } => {
                 // Compile the value (returns Value*)
                 let val = self.compile_expr(value)?;
 
@@ -1980,11 +2140,32 @@ impl<'ctx> CodeGen<'ctx> {
                 let lambda_name = format!("_lambda_{}", self.lambda_counter);
                 self.lambda_counter += 1;
 
-                // Create function type: all parameters are Value*, return is Value*
+                // Find free variables (captured from outer scope)
+                // Build bound set: function parameters + rest param
+                let mut bound = HashSet::new();
+                for param in params {
+                    match param {
+                        Pattern::Symbol(name) => { bound.insert(name.clone()); }
+                        _ => {} // TODO: Handle destructuring patterns
+                    }
+                }
+                if let Some(rest_name) = rest_param {
+                    bound.insert(rest_name.clone());
+                }
+
+                // Find free variables in body
+                let mut free_vars = Vec::new();
+                let mut seen = HashSet::new();
+                self.collect_free_vars(body, &mut free_vars, &mut seen, &bound);
+
+                // Create function type: all parameters are Value*, plus environment parameter as LAST arg
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                let param_types: Vec<_> = params.iter()
+                let mut param_types: Vec<_> = params.iter()
                     .map(|_| value_ptr_type.into())
                     .collect();
+
+                // Add environment parameter as the LAST parameter
+                param_types.push(value_ptr_type.into());
 
                 // If there's a rest parameter, the function is variadic
                 let is_variadic = rest_param.is_some();
@@ -2035,32 +2216,113 @@ impl<'ctx> CodeGen<'ctx> {
                     self.variables.insert(rest_name.clone(), rest_alloca);
                 }
 
+                // Unpack captured variables from environment (LAST parameter)
+                if !free_vars.is_empty() {
+                    let env_param = function.get_nth_param(params.len() as u32)
+                        .unwrap()
+                        .into_pointer_value();
+
+                    for (i, var_name) in free_vars.iter().enumerate() {
+                        // Each captured variable is a *mut Value in the environment
+                        // Environment is passed as a *mut Value pointing to the first element
+                        // We need to offset by i to get to the i-th captured variable
+
+                        let offset = self.context.i64_type().const_int(i as u64, false);
+                        let var_ptr = unsafe {
+                            self.builder.build_gep(
+                                value_ptr_type,
+                                env_param,
+                                &[offset],
+                                &format!("env_{}", var_name)
+                            ).unwrap()
+                        };
+
+                        // Load the value from environment
+                        let var_value = self.builder.build_load(
+                            value_ptr_type,
+                            var_ptr,
+                            &format!("load_{}", var_name)
+                        ).unwrap().into_pointer_value();
+
+                        // Store in local variable
+                        let alloca = self.create_entry_block_alloca(var_name);
+                        self.builder.build_store(alloca, var_value).unwrap();
+                        self.variables.insert(var_name.clone(), alloca);
+                    }
+                }
+
                 // Compile function body (returns Value*)
                 let result = self.compile_expr(body)?;
                 self.builder.build_return(Some(&result)).unwrap();
 
                 // Restore previous state
-                self.variables = saved_vars;
+                self.variables = saved_vars.clone();
                 if let Some(block) = saved_block {
                     self.builder.position_at_end(block);
                 }
 
-                // TODO: For now, return the function pointer as a boxed number
-                // This is a temporary solution until we have proper Function values in runtime
-                // In the future, we'll return a Value* with tag=Function that stores the fn pointer
+                // Build environment array with captured values
+                let env_ptr = if !free_vars.is_empty() {
+                    // Allocate array for environment: [*mut Value; free_vars.len()]
+                    let env_array_type = value_ptr_type.array_type(free_vars.len() as u32);
+                    let env_array = self.builder.build_alloca(env_array_type, "env_array").unwrap();
+
+                    for (i, var_name) in free_vars.iter().enumerate() {
+                        // Get the value from current scope
+                        let var_value = if let Some(var_ptr) = saved_vars.get(var_name) {
+                            self.builder.build_load(value_ptr_type, *var_ptr, var_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else if let Some(global) = self.globals.get(var_name) {
+                            self.builder.build_load(value_ptr_type, global.as_pointer_value(), var_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else {
+                            return Err(format!("Captured variable not found: {}", var_name));
+                        };
+
+                        // Store in environment array
+                        let elem_ptr = unsafe {
+                            self.builder.build_gep(
+                                env_array_type,
+                                env_array,
+                                &[
+                                    self.context.i32_type().const_zero(),
+                                    self.context.i32_type().const_int(i as u64, false)
+                                ],
+                                &format!("env_elem_{}", i)
+                            ).unwrap()
+                        };
+                        self.builder.build_store(elem_ptr, var_value).unwrap();
+                    }
+
+                    // Cast to *const *mut Value
+                    self.builder.build_pointer_cast(
+                        env_array,
+                        value_ptr_type.ptr_type(AddressSpace::default()),
+                        "env_ptr"
+                    ).unwrap()
+                } else {
+                    // No captures - pass null
+                    value_ptr_type.ptr_type(AddressSpace::default()).const_null()
+                };
+
+                // Create a proper Function value using clorus_function_new
+                // clorus_function_new(func_ptr: *const u8, arity: i32, env: *const *mut Value, env_size: u32) -> *mut Value
+                let function_new_fn = self.module.get_function("clorus_function_new")
+                    .ok_or("clorus_function_new not declared")?;
+
                 let fn_ptr = function.as_global_value().as_pointer_value();
-                let fn_ptr_as_int = self.builder.build_ptr_to_int(
-                    fn_ptr,
-                    self.context.i64_type(),
-                    "fn_ptr_to_int"
-                ).unwrap();
-                let fn_ptr_as_float = self.builder.build_unsigned_int_to_float(
-                    fn_ptr_as_int,
-                    self.context.f64_type(),
-                    "fn_ptr_to_float"
+                let arity = self.context.i32_type().const_int(params.len() as u64, false);
+                let env_size = self.context.i32_type().const_int(free_vars.len() as u64, false);
+
+                let func_val = self.builder.build_call(
+                    function_new_fn,
+                    &[fn_ptr.into(), arity.into(), env_ptr.into(), env_size.into()],
+                    "new_function"
                 ).unwrap();
 
-                Ok(self.box_number(fn_ptr_as_float))
+                Ok(func_val.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             Expr::FnMulti { arities } => {
@@ -2586,7 +2848,8 @@ impl<'ctx> CodeGen<'ctx> {
                 let dispatch_str = match dispatch_value.as_ref() {
                     Expr::Keyword(k) => k.clone(),
                     Expr::Symbol(s) => s.clone(),
-                    Expr::Number(n) => format!("{}", *n as i64),
+                    Expr::Long(n) => format!("{}", *n),
+                    Expr::Double(n) => format!("{}", *n as i64),
                     Expr::String(s) => s.replace("-", "_").replace(" ", "_"),
                     _ => return Err("Dispatch value must be a keyword, symbol, number, or string".to_string()),
                 };
@@ -2757,8 +3020,11 @@ impl<'ctx> CodeGen<'ctx> {
                     "-" => return self.compile_sub(args),
                     "*" => return self.compile_mul(args),
                     "/" => return self.compile_div(args),
+                    "mod" => return self.compile_mod(args),
                     "<" => return self.compile_lt(args),
                     ">" => return self.compile_gt(args),
+                    "<=" => return self.compile_lte(args),
+                    ">=" => return self.compile_gte(args),
                     "=" => return self.compile_eq(args),
                     _ => {}
                 }
@@ -2837,8 +3103,8 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Check if this is a clorus.core function call
                 let core_functions = [
-                    "slurp", "spit", "get", "nth", "first", "rest", "last", "count",
-                    "map", "filter", "reduce", "apply", "conj", "disj", "contains?",
+                    "slurp", "spit", "get", "nth", "first", "rest", "last", "count", "empty?",
+                    "map", "filter", "reduce", "apply", "conj", "disj", "contains?", "concat", "assoc", "dissoc",
                     "atom", "reset!", "swap!",
                     // Agent operations
                     "agent", "send", "await", "await-for", "agent-error",
@@ -2855,6 +3121,69 @@ impl<'ctx> CodeGen<'ctx> {
                 ];
                 if core_functions.contains(&func.as_str()) {
                     return self.compile_core_call(func, args);
+                }
+
+                // Check if function name is a local variable (parameter or let-binding)
+                // This allows first-class functions: (fn [f] (f 42))
+                if let Some(var_ptr) = self.variables.get(func).cloned() {
+                    // It's a variable - use dynamic dispatch via clorus_function_call
+                    let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let func_val = self.builder.build_load(i8_ptr_type, var_ptr, "load_func_var")
+                        .unwrap()
+                        .into_pointer_value();
+
+                    // Compile arguments
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        arg_values.push(self.compile_expr(arg)?);
+                    }
+
+                    // Create array of argument pointers
+                    let arg_count = arg_values.len();
+                    let args_array_ptr = if arg_count > 0 {
+                        let array_type = i8_ptr_type.array_type(arg_count as u32);
+                        let array_alloca = self.builder.build_alloca(array_type, "args_array").unwrap();
+
+                        for (i, arg_val) in arg_values.iter().enumerate() {
+                            let elem_ptr = unsafe {
+                                self.builder.build_gep(
+                                    array_type,
+                                    array_alloca,
+                                    &[
+                                        self.context.i32_type().const_zero(),
+                                        self.context.i32_type().const_int(i as u64, false)
+                                    ],
+                                    &format!("arg_{}_ptr", i)
+                                ).unwrap()
+                            };
+                            self.builder.build_store(elem_ptr, *arg_val).unwrap();
+                        }
+
+                        self.builder.build_pointer_cast(
+                            array_alloca,
+                            i8_ptr_type.ptr_type(AddressSpace::default()),
+                            "args_array_cast"
+                        ).unwrap()
+                    } else {
+                        i8_ptr_type.ptr_type(AddressSpace::default()).const_null()
+                    };
+
+                    // Call clorus_function_call
+                    let function_call_fn = self.module.get_function("clorus_function_call")
+                        .ok_or("clorus_function_call not declared")?;
+
+                    let arg_count_val = self.context.i32_type().const_int(arg_count as u64, false);
+
+                    let call_result = self.builder.build_call(
+                        function_call_fn,
+                        &[func_val.into(), args_array_ptr.into(), arg_count_val.into()],
+                        "dynamic_call"
+                    ).unwrap();
+
+                    return Ok(call_result.try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value());
                 }
 
                 // Check if this is a referred symbol (imported via :refer)
@@ -3097,22 +3426,33 @@ impl<'ctx> CodeGen<'ctx> {
 
     fn compile_add(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
         if args.is_empty() {
-            return Ok(self.box_number(self.context.f64_type().const_float(0.0)));
+            // (+ ) => 0 (as Long)
+            let value_long_fn = self.module.get_function("clorus_value_long")
+                .ok_or("clorus_value_long not declared")?;
+            let zero = self.context.i64_type().const_zero();
+            let result = self.builder.build_call(value_long_fn, &[zero.into()], "zero").unwrap();
+            return Ok(result.try_as_basic_value().left().unwrap().into_pointer_value());
         }
 
-        // Unbox first argument
-        let first_val_ptr = self.compile_expr(&args[0])?;
-        let mut result = self.unbox_number(first_val_ptr);
+        // Get clorus_add function
+        let add_fn = self.module.get_function("clorus_add")
+            .ok_or("clorus_add not declared")?;
 
-        // Add remaining arguments
+        // Compile first argument
+        let mut result = self.compile_expr(&args[0])?;
+
+        // Add remaining arguments using clorus_add
         for arg in &args[1..] {
             let val_ptr = self.compile_expr(arg)?;
-            let val = self.unbox_number(val_ptr);
-            result = self.builder.build_float_add(result, val, "add").unwrap();
+            let call_result = self.builder.build_call(
+                add_fn,
+                &[result.into(), val_ptr.into()],
+                "add"
+            ).unwrap();
+            result = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
         }
 
-        // Box result
-        Ok(self.box_number(result))
+        Ok(result)
     }
 
     fn compile_sub(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
@@ -3120,46 +3460,66 @@ impl<'ctx> CodeGen<'ctx> {
             return Err("- requires at least one argument".to_string());
         }
 
-        // Unbox first argument
-        let first_val_ptr = self.compile_expr(&args[0])?;
-        let mut result = self.unbox_number(first_val_ptr);
+        let sub_fn = self.module.get_function("clorus_sub")
+            .ok_or("clorus_sub not declared")?;
+
+        let mut result = self.compile_expr(&args[0])?;
 
         if args.len() == 1 {
-            // Unary negation: (- 5) => -5
-            let zero = self.context.f64_type().const_float(0.0);
-            let negated = self.builder.build_float_sub(zero, result, "neg").unwrap();
-            return Ok(self.box_number(negated));
+            // Unary negation: (- 5) => (0 - 5)
+            let value_long_fn = self.module.get_function("clorus_value_long")
+                .ok_or("clorus_value_long not declared")?;
+            let zero = self.context.i64_type().const_zero();
+            let zero_val = self.builder.build_call(value_long_fn, &[zero.into()], "zero").unwrap()
+                .try_as_basic_value().left().unwrap().into_pointer_value();
+
+            let call_result = self.builder.build_call(
+                sub_fn,
+                &[zero_val.into(), result.into()],
+                "neg"
+            ).unwrap();
+            return Ok(call_result.try_as_basic_value().left().unwrap().into_pointer_value());
         }
 
         // Subtract remaining arguments
         for arg in &args[1..] {
             let val_ptr = self.compile_expr(arg)?;
-            let val = self.unbox_number(val_ptr);
-            result = self.builder.build_float_sub(result, val, "sub").unwrap();
+            let call_result = self.builder.build_call(
+                sub_fn,
+                &[result.into(), val_ptr.into()],
+                "sub"
+            ).unwrap();
+            result = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
         }
 
-        // Box result
-        Ok(self.box_number(result))
+        Ok(result)
     }
 
     fn compile_mul(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
         if args.is_empty() {
-            return Ok(self.box_number(self.context.f64_type().const_float(1.0)));
+            let value_long_fn = self.module.get_function("clorus_value_long")
+                .ok_or("clorus_value_long not declared")?;
+            let one = self.context.i64_type().const_int(1, false);
+            let result = self.builder.build_call(value_long_fn, &[one.into()], "one").unwrap();
+            return Ok(result.try_as_basic_value().left().unwrap().into_pointer_value());
         }
 
-        // Unbox first argument
-        let first_val_ptr = self.compile_expr(&args[0])?;
-        let mut result = self.unbox_number(first_val_ptr);
+        let mul_fn = self.module.get_function("clorus_mul")
+            .ok_or("clorus_mul not declared")?;
 
-        // Multiply remaining arguments
+        let mut result = self.compile_expr(&args[0])?;
+
         for arg in &args[1..] {
             let val_ptr = self.compile_expr(arg)?;
-            let val = self.unbox_number(val_ptr);
-            result = self.builder.build_float_mul(result, val, "mul").unwrap();
+            let call_result = self.builder.build_call(
+                mul_fn,
+                &[result.into(), val_ptr.into()],
+                "mul"
+            ).unwrap();
+            result = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
         }
 
-        // Box result
-        Ok(self.box_number(result))
+        Ok(result)
     }
 
     fn compile_div(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
@@ -3167,19 +3527,42 @@ impl<'ctx> CodeGen<'ctx> {
             return Err("/ requires at least two arguments".to_string());
         }
 
-        // Unbox first argument
-        let first_val_ptr = self.compile_expr(&args[0])?;
-        let mut result = self.unbox_number(first_val_ptr);
+        let div_fn = self.module.get_function("clorus_div")
+            .ok_or("clorus_div not declared")?;
 
-        // Divide by remaining arguments
+        let mut result = self.compile_expr(&args[0])?;
+
         for arg in &args[1..] {
             let val_ptr = self.compile_expr(arg)?;
-            let val = self.unbox_number(val_ptr);
-            result = self.builder.build_float_div(result, val, "div").unwrap();
+            let call_result = self.builder.build_call(
+                div_fn,
+                &[result.into(), val_ptr.into()],
+                "div"
+            ).unwrap();
+            result = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
         }
 
-        // Box result
-        Ok(self.box_number(result))
+        Ok(result)
+    }
+
+    fn compile_mod(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
+        if args.len() != 2 {
+            return Err("mod requires exactly two arguments".to_string());
+        }
+
+        let mod_fn = self.module.get_function("clorus_mod")
+            .ok_or("clorus_mod not declared")?;
+
+        let left = self.compile_expr(&args[0])?;
+        let right = self.compile_expr(&args[1])?;
+
+        let call_result = self.builder.build_call(
+            mod_fn,
+            &[left.into(), right.into()],
+            "mod"
+        ).unwrap();
+
+        Ok(call_result.try_as_basic_value().left().unwrap().into_pointer_value())
     }
 
     fn compile_lt(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
@@ -3237,6 +3620,58 @@ impl<'ctx> CodeGen<'ctx> {
         ).unwrap();
 
         // Box result
+        Ok(self.box_number(bool_as_float))
+    }
+
+    fn compile_lte(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
+        if args.len() != 2 {
+            return Err("<= requires exactly two arguments".to_string());
+        }
+
+        let left_ptr = self.compile_expr(&args[0])?;
+        let right_ptr = self.compile_expr(&args[1])?;
+        let left = self.unbox_number(left_ptr);
+        let right = self.unbox_number(right_ptr);
+
+        let cmp = self.builder.build_float_compare(
+            FloatPredicate::OLE,
+            left,
+            right,
+            "lte"
+        ).unwrap();
+
+        let bool_as_float = self.builder.build_unsigned_int_to_float(
+            cmp,
+            self.context.f64_type(),
+            "bool_to_float"
+        ).unwrap();
+
+        Ok(self.box_number(bool_as_float))
+    }
+
+    fn compile_gte(&mut self, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
+        if args.len() != 2 {
+            return Err(">= requires exactly two arguments".to_string());
+        }
+
+        let left_ptr = self.compile_expr(&args[0])?;
+        let right_ptr = self.compile_expr(&args[1])?;
+        let left = self.unbox_number(left_ptr);
+        let right = self.unbox_number(right_ptr);
+
+        let cmp = self.builder.build_float_compare(
+            FloatPredicate::OGE,
+            left,
+            right,
+            "gte"
+        ).unwrap();
+
+        let bool_as_float = self.builder.build_unsigned_int_to_float(
+            cmp,
+            self.context.f64_type(),
+            "bool_to_float"
+        ).unwrap();
+
         Ok(self.box_number(bool_as_float))
     }
 
@@ -4047,6 +4482,45 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(self.box_number(count_float))
             }
 
+            "empty?" => {
+                // empty? takes 1 arg: collection
+                if args.len() != 1 {
+                    return Err("empty? requires 1 argument: collection".to_string());
+                }
+
+                let coll_ptr = self.compile_expr(&args[0])?;
+
+                let count_fn = self.module.get_function("clorus_count")
+                    .ok_or("clorus_count not declared")?;
+
+                let count_result = self.builder.build_call(
+                    count_fn,
+                    &[coll_ptr.into()],
+                    "count_call"
+                ).unwrap();
+
+                // count returns i64, compare with 0
+                let count_i64 = count_result.try_as_basic_value().left().unwrap().into_int_value();
+                let zero = self.context.i64_type().const_zero();
+                let is_empty = self.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    count_i64,
+                    zero,
+                    "is_empty"
+                ).unwrap();
+
+                // Convert bool to Value* (boolean)
+                let value_bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    value_bool_fn,
+                    &[is_empty.into()],
+                    "empty_bool"
+                ).unwrap();
+
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
             "conj" => {
                 // conj takes 2 args: collection, element
                 if args.len() != 2 {
@@ -4094,6 +4568,49 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
+            "assoc" => {
+                // assoc takes 3 args: map, key, value
+                if args.len() != 3 {
+                    return Err("assoc requires 3 arguments: map, key, value".to_string());
+                }
+
+                let map_ptr = self.compile_expr(&args[0])?;
+                let key_ptr = self.compile_expr(&args[1])?;
+                let val_ptr = self.compile_expr(&args[2])?;
+
+                let assoc_fn = self.module.get_function("clorus_map_assoc")
+                    .ok_or("clorus_map_assoc not declared")?;
+
+                let result = self.builder.build_call(
+                    assoc_fn,
+                    &[map_ptr.into(), key_ptr.into(), val_ptr.into()],
+                    "map_assoc_call"
+                ).unwrap();
+
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
+            "dissoc" => {
+                // dissoc takes 2 args: map, key
+                if args.len() != 2 {
+                    return Err("dissoc requires 2 arguments: map, key".to_string());
+                }
+
+                let map_ptr = self.compile_expr(&args[0])?;
+                let key_ptr = self.compile_expr(&args[1])?;
+
+                let dissoc_fn = self.module.get_function("clorus_map_dissoc")
+                    .ok_or("clorus_map_dissoc not declared")?;
+
+                let result = self.builder.build_call(
+                    dissoc_fn,
+                    &[map_ptr.into(), key_ptr.into()],
+                    "map_dissoc_call"
+                ).unwrap();
+
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
             "contains?" => {
                 // contains? takes 2 args: set, element
                 if args.len() != 2 {
@@ -4121,19 +4638,8 @@ impl<'ctx> CodeGen<'ctx> {
                     return Err("map requires 2 arguments: function, collection".to_string());
                 }
 
-                // For now, only support direct function references or inline lambdas
-                let func_name = match &args[0] {
-                    Expr::Symbol(name) => name.clone(),
-                    Expr::Fn { .. } => {
-                        return Err("Inline functions in map not yet supported. Use defn first.".to_string());
-                    }
-                    _ => return Err("map requires a function as first argument".to_string()),
-                };
-
-                // Get the function
-                let function = self.functions.get(&func_name)
-                    .ok_or_else(|| format!("Function not found: {}", func_name))?
-                    .clone();
+                // Compile the function expression - supports both named functions and inline lambdas
+                let func_val = self.compile_expr(&args[0])?;
 
                 // Compile the collection
                 let coll_ptr = self.compile_expr(&args[1])?;
@@ -4205,10 +4711,37 @@ impl<'ctx> CodeGen<'ctx> {
                 ).unwrap()
                 .try_as_basic_value().left().unwrap().into_pointer_value();
 
-                // Call function with element
+                // Call function with element using dynamic dispatch
+                let function_call_fn = self.module.get_function("clorus_function_call")
+                    .ok_or("clorus_function_call not declared")?;
+
+                // Create args array with single element
+                let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let args_array_type = i8_ptr_type.array_type(1);
+                let args_array = self.builder.build_alloca(args_array_type, "map_args").unwrap();
+
+                let elem_ptr = unsafe {
+                    self.builder.build_gep(
+                        args_array_type,
+                        args_array,
+                        &[
+                            self.context.i32_type().const_zero(),
+                            self.context.i32_type().const_zero()
+                        ],
+                        "elem_ptr"
+                    ).unwrap()
+                };
+                self.builder.build_store(elem_ptr, elem).unwrap();
+
+                let args_array_ptr = self.builder.build_pointer_cast(
+                    args_array,
+                    i8_ptr_type.ptr_type(AddressSpace::default()),
+                    "args_cast"
+                ).unwrap();
+
                 let mapped_val = self.builder.build_call(
-                    function,
-                    &[elem.into()],
+                    function_call_fn,
+                    &[func_val.into(), args_array_ptr.into(), self.context.i32_type().const_int(1, false).into()],
                     "mapped"
                 ).unwrap()
                 .try_as_basic_value().left().unwrap().into_pointer_value();
@@ -4257,14 +4790,8 @@ impl<'ctx> CodeGen<'ctx> {
                     return Err("filter requires 2 arguments: function, collection".to_string());
                 }
 
-                let func_name = match &args[0] {
-                    Expr::Symbol(name) => name.clone(),
-                    _ => return Err("filter requires a function as first argument".to_string()),
-                };
-
-                let function = self.functions.get(&func_name)
-                    .ok_or_else(|| format!("Function not found: {}", func_name))?
-                    .clone();
+                // Compile the predicate function - supports both named functions and inline lambdas
+                let func_val = self.compile_expr(&args[0])?;
 
                 let coll_ptr = self.compile_expr(&args[1])?;
 
@@ -4311,8 +4838,39 @@ impl<'ctx> CodeGen<'ctx> {
                 let elem = self.builder.build_call(nth_fn, &[coll_ptr.into(), current_index.into()], "elem")
                     .unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
 
-                let pred_result = self.builder.build_call(function, &[elem.into()], "pred_result")
-                    .unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+                // Call predicate using dynamic dispatch
+                let function_call_fn = self.module.get_function("clorus_function_call")
+                    .ok_or("clorus_function_call not declared")?;
+
+                let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let args_array_type = i8_ptr_type.array_type(1);
+                let args_array = self.builder.build_alloca(args_array_type, "filter_args").unwrap();
+
+                let elem_ptr = unsafe {
+                    self.builder.build_gep(
+                        args_array_type,
+                        args_array,
+                        &[
+                            self.context.i32_type().const_zero(),
+                            self.context.i32_type().const_zero()
+                        ],
+                        "elem_ptr"
+                    ).unwrap()
+                };
+                self.builder.build_store(elem_ptr, elem).unwrap();
+
+                let args_array_ptr = self.builder.build_pointer_cast(
+                    args_array,
+                    i8_ptr_type.ptr_type(AddressSpace::default()),
+                    "args_cast"
+                ).unwrap();
+
+                let pred_result = self.builder.build_call(
+                    function_call_fn,
+                    &[func_val.into(), args_array_ptr.into(), self.context.i32_type().const_int(1, false).into()],
+                    "pred_result"
+                ).unwrap()
+                .try_as_basic_value().left().unwrap().into_pointer_value();
 
                 // Check if truthy (not nil and not false/0.0)
                 // First check if nil
@@ -4374,14 +4932,8 @@ impl<'ctx> CodeGen<'ctx> {
                     return Err("reduce requires 2 or 3 arguments: function, [init], collection".to_string());
                 }
 
-                let func_name = match &args[0] {
-                    Expr::Symbol(name) => name.clone(),
-                    _ => return Err("reduce requires a function as first argument".to_string()),
-                };
-
-                let function = self.functions.get(&func_name)
-                    .ok_or_else(|| format!("Function not found: {}", func_name))?
-                    .clone();
+                // Compile the reducing function - supports both named functions and inline lambdas
+                let func_val = self.compile_expr(&args[0])?;
 
                 let (init_expr, coll_expr) = if args.len() == 3 {
                     (&args[1], &args[2])
@@ -4431,9 +4983,54 @@ impl<'ctx> CodeGen<'ctx> {
                 let current_acc = self.builder.build_load(init_val.get_type(), acc_alloca, "current_acc")
                     .unwrap().into_pointer_value();
 
-                // Call function with (acc, elem)
-                let new_acc = self.builder.build_call(function, &[current_acc.into(), elem.into()], "new_acc")
-                    .unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+                // Call reducing function with (acc, elem) using dynamic dispatch
+                let function_call_fn = self.module.get_function("clorus_function_call")
+                    .ok_or("clorus_function_call not declared")?;
+
+                let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let args_array_type = i8_ptr_type.array_type(2);
+                let args_array = self.builder.build_alloca(args_array_type, "reduce_args").unwrap();
+
+                // Store acc as first arg
+                let acc_ptr = unsafe {
+                    self.builder.build_gep(
+                        args_array_type,
+                        args_array,
+                        &[
+                            self.context.i32_type().const_zero(),
+                            self.context.i32_type().const_zero()
+                        ],
+                        "acc_ptr"
+                    ).unwrap()
+                };
+                self.builder.build_store(acc_ptr, current_acc).unwrap();
+
+                // Store elem as second arg
+                let elem_ptr = unsafe {
+                    self.builder.build_gep(
+                        args_array_type,
+                        args_array,
+                        &[
+                            self.context.i32_type().const_zero(),
+                            self.context.i32_type().const_int(1, false)
+                        ],
+                        "elem_ptr"
+                    ).unwrap()
+                };
+                self.builder.build_store(elem_ptr, elem).unwrap();
+
+                let args_array_ptr = self.builder.build_pointer_cast(
+                    args_array,
+                    i8_ptr_type.ptr_type(AddressSpace::default()),
+                    "args_cast"
+                ).unwrap();
+
+                let new_acc = self.builder.build_call(
+                    function_call_fn,
+                    &[func_val.into(), args_array_ptr.into(), self.context.i32_type().const_int(2, false).into()],
+                    "new_acc"
+                ).unwrap()
+                .try_as_basic_value().left().unwrap().into_pointer_value();
                 self.builder.build_store(acc_alloca, new_acc).unwrap();
 
                 let next_index = self.builder.build_int_add(
@@ -4767,11 +5364,11 @@ impl<'ctx> CodeGen<'ctx> {
                 let timeout_expr = self.compile_expr(&args[1])?;
 
                 // Extract number value
-                let value_as_number_fn = self.module.get_function("clorus_value_as_number")
-                    .ok_or("clorus_value_as_number not declared")?;
+                let value_as_double_fn = self.module.get_function("clorus_value_as_double")
+                    .ok_or("clorus_value_as_double not declared")?;
 
                 let timeout_f64 = self.builder.build_call(
-                    value_as_number_fn,
+                    value_as_double_fn,
                     &[timeout_expr.into()],
                     "timeout_as_f64"
                 ).unwrap().try_as_basic_value().left().unwrap().into_float_value();
@@ -4806,11 +5403,11 @@ impl<'ctx> CodeGen<'ctx> {
                     let cap_expr = self.compile_expr(&args[0])?;
 
                     // Extract number value
-                    let value_as_number_fn = self.module.get_function("clorus_value_as_number")
-                        .ok_or("clorus_value_as_number not declared")?;
+                    let value_as_double_fn = self.module.get_function("clorus_value_as_double")
+                        .ok_or("clorus_value_as_double not declared")?;
 
                     let cap_f64 = self.builder.build_call(
-                        value_as_number_fn,
+                        value_as_double_fn,
                         &[cap_expr.into()],
                         "cap_as_f64"
                     ).unwrap().try_as_basic_value().left().unwrap().into_float_value();
@@ -5050,15 +5647,8 @@ impl<'ctx> CodeGen<'ctx> {
                     return Err("apply requires 2 arguments: function, collection".to_string());
                 }
 
-                // Get the function to apply
-                let func_name = match &args[0] {
-                    Expr::Symbol(name) => name.clone(),
-                    _ => return Err("apply requires a function as first argument".to_string()),
-                };
-
-                let function = self.functions.get(&func_name)
-                    .ok_or_else(|| format!("Function not found: {}", func_name))?
-                    .clone();
+                // Compile the function expression - supports both named functions and closures
+                let func_val = self.compile_expr(&args[0])?;
 
                 // Compile the collection
                 let coll_ptr = self.compile_expr(&args[1])?;
@@ -5080,7 +5670,6 @@ impl<'ctx> CodeGen<'ctx> {
                 // Build argument vector by extracting each element
                 // For now, support up to 10 arguments
                 let max_args = 10usize;
-                let mut arg_values = Vec::new();
 
                 // Create a loop to extract arguments
                 let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
@@ -5160,7 +5749,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_store(index_alloca, next_index).unwrap();
                 self.builder.build_unconditional_branch(loop_block).unwrap();
 
-                // After loop: call function with extracted arguments
+                // After loop: call function with extracted arguments using dynamic dispatch
                 self.builder.position_at_end(end_block);
 
                 // Load actual count
@@ -5170,47 +5759,27 @@ impl<'ctx> CodeGen<'ctx> {
                     "actual_count"
                 ).unwrap().into_int_value();
 
-                // For MVP, dynamically construct argument list based on count
-                // Load arguments from array and call function
-                // Since we can't dynamically build argument lists easily, we'll need to
-                // handle common cases (0-10 args)
-
-                // For now, let's just support fixed-arity calls
-                // Convert count to constant
-                let count_const = self.builder.build_int_compare(
-                    inkwell::IntPredicate::EQ,
-                    actual_count,
-                    self.context.i64_type().const_int(1, false),
-                    "is_one"
+                // Cast arg_array to *const *mut Value for clorus_function_call
+                let args_array_ptr = self.builder.build_pointer_cast(
+                    arg_array,
+                    value_ptr_type.ptr_type(AddressSpace::default()),
+                    "args_array_cast"
                 ).unwrap();
 
-                // Build argument vector dynamically
-                // For simplicity in MVP, just handle up to 5 arguments
-                for i in 0..5 {
-                    let elem_ptr = unsafe {
-                        self.builder.build_gep(
-                            arg_array_type,
-                            arg_array,
-                            &[
-                                self.context.i64_type().const_zero(),
-                                self.context.i64_type().const_int(i, false)
-                            ],
-                            &format!("load_arg_{}", i)
-                        ).unwrap()
-                    };
-                    let arg_val = self.builder.build_load(
-                        value_ptr_type,
-                        elem_ptr,
-                        &format!("arg_{}", i)
-                    ).unwrap().into_pointer_value();
-                    arg_values.push(arg_val.into());
-                }
+                // Cast count to i32 for clorus_function_call
+                let count_i32 = self.builder.build_int_cast(
+                    actual_count,
+                    self.context.i32_type(),
+                    "count_i32"
+                ).unwrap();
 
-                // Call function with arguments
-                // NOTE: This is a simplified version - full dynamic dispatch needs runtime support
+                // Call clorus_function_call for dynamic dispatch
+                let function_call_fn = self.module.get_function("clorus_function_call")
+                    .ok_or("clorus_function_call not declared")?;
+
                 let result = self.builder.build_call(
-                    function,
-                    &arg_values[..std::cmp::min(arg_values.len(), 5)],
+                    function_call_fn,
+                    &[func_val.into(), args_array_ptr.into(), count_i32.into()],
                     "apply_call"
                 ).unwrap();
 
@@ -5325,14 +5894,58 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "concat" => {
-                if args.len() != 1 {
-                    return Err("concat requires 1 argument: vector of collections".to_string());
+                if args.is_empty() {
+                    // (concat) with no args returns empty vector
+                    let vec_empty_fn = self.module.get_function("clorus_vector_empty")
+                        .ok_or("clorus_vector_empty not declared")?;
+                    let result = self.builder.build_call(vec_empty_fn, &[], "empty_vec").unwrap();
+                    return Ok(result.try_as_basic_value().left().unwrap().into_pointer_value());
                 }
-                let colls_vec = self.compile_expr(&args[0])?;
-                let concat_fn = self.module.get_function("clorus_concat")
-                    .ok_or("clorus_concat not declared")?;
-                let result = self.builder.build_call(concat_fn, &[colls_vec.into()], "concat_call").unwrap();
-                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+
+                // (concat coll1 coll2 ...) - concatenate multiple collections
+                // For now, support 2 collections
+                if args.len() == 2 {
+                    let coll1 = self.compile_expr(&args[0])?;
+                    let coll2 = self.compile_expr(&args[1])?;
+
+                    // Build a vector containing the two collections
+                    let vec_empty_fn = self.module.get_function("clorus_vector_empty")
+                        .ok_or("clorus_vector_empty not declared")?;
+                    let vec_conj_fn = self.module.get_function("clorus_vector_conj")
+                        .ok_or("clorus_vector_conj not declared")?;
+
+                    let vec = self.builder.build_call(vec_empty_fn, &[], "concat_vec").unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+                    let vec = self.builder.build_call(vec_conj_fn, &[vec.into(), coll1.into()], "vec1").unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+                    let vec = self.builder.build_call(vec_conj_fn, &[vec.into(), coll2.into()], "vec2").unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    let concat_fn = self.module.get_function("clorus_concat")
+                        .ok_or("clorus_concat not declared")?;
+                    let result = self.builder.build_call(concat_fn, &[vec.into()], "concat_call").unwrap();
+                    Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+                } else {
+                    // For more than 2 args, build a vector of all collections
+                    let vec_empty_fn = self.module.get_function("clorus_vector_empty")
+                        .ok_or("clorus_vector_empty not declared")?;
+                    let vec_conj_fn = self.module.get_function("clorus_vector_conj")
+                        .ok_or("clorus_vector_conj not declared")?;
+
+                    let mut vec = self.builder.build_call(vec_empty_fn, &[], "concat_vec").unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    for arg in args {
+                        let coll = self.compile_expr(arg)?;
+                        vec = self.builder.build_call(vec_conj_fn, &[vec.into(), coll.into()], "vec_conj").unwrap()
+                            .try_as_basic_value().left().unwrap().into_pointer_value();
+                    }
+
+                    let concat_fn = self.module.get_function("clorus_concat")
+                        .ok_or("clorus_concat not declared")?;
+                    let result = self.builder.build_call(concat_fn, &[vec.into()], "concat_call").unwrap();
+                    Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+                }
             }
 
             "interleave" => {
@@ -5812,7 +6425,7 @@ mod tests {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
 
-        let expr = Expr::Number(42.0);
+        let expr = Expr::Double(42.0);
 
         // Wrap in function to provide basic block context
         let result = codegen.wrap_in_function(&expr, "test_number");

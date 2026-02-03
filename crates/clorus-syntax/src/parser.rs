@@ -47,10 +47,16 @@ impl Parser {
 
     pub fn parse_expr(&mut self) -> Result<Expr, String> {
         match self.current_token() {
-            Token::Number(n) => {
+            Token::Long(n) => {
                 let num = *n;
                 self.advance();
-                Ok(Expr::Number(num))
+                Ok(Expr::Long(num))
+            }
+
+            Token::Double(n) => {
+                let num = *n;
+                self.advance();
+                Ok(Expr::Double(num))
             }
 
             Token::String(s) => {
@@ -134,6 +140,24 @@ impl Parser {
             Token::ShorthandFnStart => {
                 self.advance(); // CRITICAL: Consume the ShorthandFnStart token!
                 self.parse_shorthand_fn()
+            }
+
+            Token::VarQuote => {
+                self.advance(); // Consume the #' token
+                let var_symbol = self.parse_expr()?;
+                // Extract name from symbol
+                let name = match var_symbol {
+                    Expr::Symbol(s) => s,
+                    _ => return Err("Var quote #' requires a symbol".to_string()),
+                };
+                Ok(Expr::Var { name })
+            }
+
+            Token::Meta => {
+                self.advance(); // Consume the ^ token
+                // Parse metadata and the expression it applies to
+                // For now, just skip metadata and parse the next expression
+                self.parse_expr()
             }
 
             Token::RParen | Token::RBracket | Token::RBrace => {
@@ -1002,7 +1026,7 @@ impl Parser {
         }
 
         self.expect(Token::RBracket)?;
-        Ok(Pattern::Vector { elements, rest: rest_param })
+        Ok(Pattern::Vector { elements, rest: rest_param, as_binding: None })
     }
 
     /// Parse map destructuring pattern: {:keys [x y]}
@@ -1039,7 +1063,7 @@ impl Parser {
 
                 self.expect(Token::RBracket)?;
                 self.expect(Token::RBrace)?;
-                return Ok(Pattern::Map { bindings });
+                return Ok(Pattern::Map { bindings, defaults: None });
             }
         }
 
@@ -1069,6 +1093,7 @@ impl Parser {
         Ok(Expr::Def {
             name,
             value: Box::new(value),
+            metadata: None,
         })
     }
 
@@ -1812,8 +1837,24 @@ impl Parser {
                 params.extend(self.collect_shorthand_params_impl(expr, depth + 1)?);
             }
 
+            Expr::Declare { .. } => {
+                // Declare doesn't contain expressions, just function names
+            }
+
+            Expr::Var { .. } => {
+                // Var references don't contain % parameters
+            }
+
+            Expr::Binding { bindings, body } => {
+                // Recurse into binding values and body
+                for (_, value) in bindings {
+                    params.extend(self.collect_shorthand_params_impl(value, depth + 1)?);
+                }
+                params.extend(self.collect_shorthand_params_impl(body, depth + 1)?);
+            }
+
             // Atoms don't contain parameters
-            Expr::Number(_) | Expr::String(_) | Expr::Keyword(_)
+            Expr::Long(_) | Expr::Double(_) | Expr::String(_) | Expr::Keyword(_)
             | Expr::Bool(_) | Expr::Nil | Expr::Ns { .. }
             | Expr::Require { .. } | Expr::Use { .. } => {}
         }

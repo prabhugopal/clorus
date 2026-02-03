@@ -10,7 +10,7 @@
 
 use crate::value::{Value, ValueTag};
 use crate::vector::PersistentVector;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::c_char;
 
 // ============================================================================
@@ -36,9 +36,12 @@ unsafe fn value_to_rust_string(val: *mut Value) -> String {
             // Value* strings store Rust String pointers, not C strings
             (*val).as_string().to_string()
         }
-        ValueTag::Number => {
-            let num = (*val).as_number();
-            // Format nicely (no unnecessary decimals for integers)
+        ValueTag::Long => {
+            format!("{}", (*val).as_long())
+        }
+        ValueTag::Double => {
+            let num = (*val).as_double();
+            // Format nicely (no unnecessary decimals for integer-valued doubles)
             if num.fract() == 0.0 && num.is_finite() {
                 format!("{:.0}", num)
             } else {
@@ -527,6 +530,152 @@ pub extern "C" fn clorus_compare_strings(s1: *mut Value, s2: *mut Value) -> i64 
             std::cmp::Ordering::Less => -1,
             std::cmp::Ordering::Equal => 0,
             std::cmp::Ordering::Greater => 1,
+        }
+    }
+}
+
+/// Create a string value from a C string pointer
+/// Used for map destructuring with :strs
+#[no_mangle]
+pub extern "C" fn clorus_string(s_ptr: *const c_char) -> *mut Value {
+    if s_ptr.is_null() {
+        return Value::nil();
+    }
+
+    unsafe {
+        let c_str = CStr::from_ptr(s_ptr);
+        let s = c_str.to_str().unwrap_or("");
+        rust_string_to_value(s.to_string())
+    }
+}
+
+/// pr-str - Print to string with readable representation
+///
+/// Converts a value to a readable string representation:
+/// - Strings are quoted and escaped
+/// - Keywords include the colon
+/// - Other values use their display format
+///
+/// # Arguments
+/// * `val` - The value to convert to string
+///
+/// # Returns
+/// A new String Value with the readable representation
+#[no_mangle]
+pub extern "C" fn clorus_pr_str(val: *mut Value) -> *mut Value {
+    unsafe {
+        let result = value_to_pr_string(val);
+        rust_string_to_value(result)
+    }
+}
+
+/// Convert a value to a readable (pr-str) representation
+unsafe fn value_to_pr_string(val: *mut Value) -> String {
+    if val.is_null() {
+        return "nil".to_string();
+    }
+
+    match (*val).header().tag() {
+        ValueTag::String => {
+            // Strings should be quoted and escaped
+            let s = (*val).as_string();
+            format!("\"{}\"", s.replace('\\', "\\\\")
+                               .replace('"', "\\\"")
+                               .replace('\n', "\\n")
+                               .replace('\t', "\\t")
+                               .replace('\r', "\\r"))
+        }
+        ValueTag::Long => {
+            format!("{}", (*val).as_long())
+        }
+        ValueTag::Double => {
+            let num = (*val).as_double();
+            if num.fract() == 0.0 && num.is_finite() {
+                format!("{:.0}", num)
+            } else {
+                format!("{}", num)
+            }
+        }
+        ValueTag::Keyword => {
+            format!(":{}", (*val).as_keyword())
+        }
+        ValueTag::Bool => {
+            if (*val).as_bool() {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
+        ValueTag::Nil => "nil".to_string(),
+        ValueTag::Vector => {
+            // Print vector as [elem1 elem2 ...]
+            let vec_ptr = (*val).as_ptr() as *const PersistentVector;
+            if vec_ptr.is_null() {
+                return "[]".to_string();
+            }
+
+            // Call clorus_vector_count to get count
+            let count = crate::vector::clorus_vector_count(val);
+            if count == 0 {
+                return "[]".to_string();
+            }
+
+            let mut result = String::from("[");
+            for i in 0..count {
+                if i > 0 {
+                    result.push(' ');
+                }
+                // Call clorus_vector_nth to get element
+                let elem = crate::vector::clorus_vector_nth(val, i);
+                result.push_str(&value_to_pr_string(elem));
+            }
+            result.push(']');
+            result
+        }
+        ValueTag::List => {
+            // Print list as (elem1 elem2 ...)
+            "(...list...)".to_string() // TODO: Implement list printing
+        }
+        ValueTag::HashMap => {
+            // Print map as {:key1 val1, :key2 val2}
+            "{...map...}".to_string() // TODO: Implement map printing
+        }
+        ValueTag::HashSet => {
+            // Print set as #{elem1 elem2}
+            "#{...set...}".to_string() // TODO: Implement set printing
+        }
+        ValueTag::Function => {
+            "#<function>".to_string()
+        }
+        ValueTag::Atom => {
+            "#<atom>".to_string()
+        }
+        ValueTag::Ref => {
+            "#<ref>".to_string()
+        }
+        ValueTag::Agent => {
+            "#<agent>".to_string()
+        }
+        ValueTag::Channel => {
+            "#<channel>".to_string()
+        }
+        ValueTag::Var => {
+            // Print var name: #'<var: *var-name*>
+            let var_ptr = (*val).as_var();
+            if var_ptr.is_null() {
+                "#<var>".to_string()
+            } else {
+                let name_val = crate::var::clorus_var_name(var_ptr);
+                if name_val.is_null() {
+                    "#<var>".to_string()
+                } else {
+                    let name = (*name_val).as_string();
+                    format!("#<var: {}>", name)
+                }
+            }
+        }
+        ValueTag::Symbol => {
+            "symbol".to_string() // TODO: Implement when Symbol type is added
         }
     }
 }

@@ -66,6 +66,14 @@ impl FfiGenerator {
             return None;
         }
 
+        // Skip extern "C" functions - they're already C-compatible
+        // and don't need wrapping
+        if let Some(abi) = &func.sig.abi {
+            if abi.name.as_ref().map(|n| n.value()) == Some("C".to_string()) {
+                return None;
+            }
+        }
+
         let name = func.sig.ident.to_string();
 
         // Extract parameters

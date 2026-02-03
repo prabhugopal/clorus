@@ -63,8 +63,15 @@ impl RustFfiProcessor {
                 let interface_path = match interface_spec {
                     crate::manifest::InterfaceSpec::Path(path) => path,
                     crate::manifest::InterfaceSpec::Auto => {
-                        // Auto-discover: interfaces/<name>.clorus-ffi
-                        format!("interfaces/{}.clorus-ffi", name)
+                        // Auto-discover: Try .clri first (preferred), fall back to .clorus-ffi (legacy)
+                        let clri_path = format!("interfaces/{}.clri", name);
+                        let legacy_path = format!("interfaces/{}.clorus-ffi", name);
+
+                        if std::path::Path::new(&clri_path).exists() {
+                            clri_path
+                        } else {
+                            legacy_path
+                        }
                     }
                 };
 

@@ -48,23 +48,48 @@ impl ProjectConfig {
     }
 
     /// Get the namespace name for this project
-    /// Derives from entry point: src/main.clrs → my_app.main
+    /// Derives from entry point following Clojure conventions:
+    /// - src/gui/demo/core.clrs → gui.demo.core
+    /// - src/gui_demo/core.clrs → gui-demo.core (underscores become dashes)
+    /// - src/gui-demo/core.clrs → gui-demo.core (dashes stay as dashes)
     pub fn namespace(&self) -> String {
         use std::path::Path;
 
         // Get the entry file path
         let entry_path = Path::new(&self.build.entry);
 
-        // Extract the module name from the file (without extension)
-        let module_name = entry_path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("main");
+        // Start building namespace from path components
+        let mut namespace_parts = Vec::new();
 
-        // Replace hyphens with underscores for valid namespace
-        let sanitized_package = self.package.name.replace("-", "_");
-        let sanitized_module = module_name.replace("-", "_");
+        // Iterate through path components, skipping "src" if present
+        for component in entry_path.components() {
+            if let Some(comp_str) = component.as_os_str().to_str() {
+                // Skip "src" directory
+                if comp_str == "src" {
+                    continue;
+                }
 
-        format!("{}.{}", sanitized_package, sanitized_module)
+                // For the last component (filename), remove extension
+                if component == entry_path.components().last().unwrap() {
+                    if let Some(stem) = Path::new(comp_str).file_stem() {
+                        if let Some(name) = stem.to_str() {
+                            // Convert underscores to dashes (Clojure convention)
+                            namespace_parts.push(name.replace("_", "-"));
+                        }
+                    }
+                } else {
+                    // Directory names - convert underscores to dashes
+                    namespace_parts.push(comp_str.replace("_", "-"));
+                }
+            }
+        }
+
+        // Join with dots to form namespace
+        if namespace_parts.is_empty() {
+            // Fallback to package name if path parsing fails
+            self.package.name.replace("_", "-")
+        } else {
+            namespace_parts.join(".")
+        }
     }
 }

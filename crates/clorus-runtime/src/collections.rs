@@ -26,14 +26,14 @@ pub extern "C" fn clorus_get(coll: *mut Value, key: *mut Value) -> *mut Value {
                 crate::map::clorus_map_get(coll, key)
             }
             ValueTag::Vector => {
-                // For vectors, key must be a number
-                if (*key).header().tag() == ValueTag::Number {
-                    let index = (*key).as_number() as u64;
-                    let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
-                    PersistentVector::nth(vec_ptr, index)
-                } else {
-                    Value::nil()
-                }
+                // For vectors, key must be a number (Long or Double)
+                let index = match (*key).header().tag() {
+                    ValueTag::Long => (*key).as_long() as u64,
+                    ValueTag::Double => (*key).as_double() as u64,
+                    _ => return Value::nil(),
+                };
+                let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
+                PersistentVector::nth(vec_ptr, index)
             }
             _ => Value::nil(),
         }
@@ -461,15 +461,13 @@ pub extern "C" fn clorus_map_update(
         return map_val;
     }
 
-    unsafe {
-        let current_val = clorus_get(map_val, key);
+    let _current_val = clorus_get(map_val, key);
 
-        // Call the function with the current value
-        // This will be implemented when we have function calling in runtime
-        // For now, just return the map unchanged
-        // TODO: Implement clorus_call_function in runtime
-        map_val
-    }
+    // Call the function with the current value
+    // This will be implemented when we have function calling in runtime
+    // For now, just return the map unchanged
+    // TODO: Implement clorus_call_function in runtime
+    map_val
 }
 
 /// Take first n elements from a collection
@@ -806,16 +804,16 @@ mod tests {
     fn test_nth_vector() {
         unsafe {
             let vec = crate::vector::clorus_vector_empty();
-            let val1 = Value::number(1.0);
-            let val2 = Value::number(2.0);
-            let val3 = Value::number(3.0);
+            let val1 = Value::double(1.0);
+            let val2 = Value::double(2.0);
+            let val3 = Value::double(3.0);
 
             let vec1 = crate::vector::clorus_vector_conj(vec, val1);
             let vec2 = crate::vector::clorus_vector_conj(vec1, val2);
             let vec3 = crate::vector::clorus_vector_conj(vec2, val3);
 
             let result = clorus_nth(vec3, 1);
-            assert_eq!((*result).as_number(), 2.0);
+            assert_eq!((*result).as_double(), 2.0);
 
             crate::value::clorus_release(result);
             crate::value::clorus_release(vec);
@@ -829,11 +827,11 @@ mod tests {
     fn test_first_vector() {
         unsafe {
             let vec = crate::vector::clorus_vector_empty();
-            let val1 = Value::number(42.0);
+            let val1 = Value::double(42.0);
             let vec1 = crate::vector::clorus_vector_conj(vec, val1);
 
             let result = clorus_first(vec1);
-            assert_eq!((*result).as_number(), 42.0);
+            assert_eq!((*result).as_double(), 42.0);
 
             crate::value::clorus_release(result);
             crate::value::clorus_release(vec);
@@ -845,16 +843,16 @@ mod tests {
     fn test_last_vector() {
         unsafe {
             let vec = crate::vector::clorus_vector_empty();
-            let val1 = Value::number(1.0);
-            let val2 = Value::number(2.0);
-            let val3 = Value::number(99.0);
+            let val1 = Value::double(1.0);
+            let val2 = Value::double(2.0);
+            let val3 = Value::double(99.0);
 
             let vec1 = crate::vector::clorus_vector_conj(vec, val1);
             let vec2 = crate::vector::clorus_vector_conj(vec1, val2);
             let vec3 = crate::vector::clorus_vector_conj(vec2, val3);
 
             let result = clorus_last(vec3);
-            assert_eq!((*result).as_number(), 99.0);
+            assert_eq!((*result).as_double(), 99.0);
 
             crate::value::clorus_release(result);
             crate::value::clorus_release(vec);
@@ -868,8 +866,8 @@ mod tests {
     fn test_count_vector() {
         unsafe {
             let vec = crate::vector::clorus_vector_empty();
-            let val1 = Value::number(1.0);
-            let val2 = Value::number(2.0);
+            let val1 = Value::double(1.0);
+            let val2 = Value::double(2.0);
 
             assert_eq!(clorus_count(vec), 0);
 

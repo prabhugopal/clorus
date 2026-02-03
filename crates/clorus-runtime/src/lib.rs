@@ -19,6 +19,11 @@ pub mod agent;
 pub mod thread_pool;
 pub mod channel;
 pub mod go_block;
+pub mod function;
+pub mod transducer;
+pub mod io;
+pub mod var;  // Var support for dynamic bindings
+pub mod arithmetic;  // Type-aware arithmetic operations
 
 // Re-export main types
 pub use value::{Value, ValueTag};

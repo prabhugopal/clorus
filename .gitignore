@@ -1,1 +1,26 @@
 /target
+
+# ============================================================================
+# Backup and temporary files
+# ============================================================================
+*.bak
+*.bak2
+*.bak3
+*.bak4
+*~
+*.swp
+*.swo
+*.tmp
+*.temp
+
+# Test artifacts
+test-*.clr.out
+*.clr~
+
+# macOS
+.DS_Store
+
+# Editor files
+.vscode/
+.idea/
+

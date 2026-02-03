@@ -8,6 +8,10 @@
 ;; Function Utilities
 ;; ============================================================================
 
+;; Basic arithmetic helpers
+(defn inc [x] (+ x 1))
+(defn dec [x] (- x 1))
+
 ;; partial - Partial function application
 ;; Takes a function and some arguments, returns a new function that takes
 ;; the remaining arguments and calls the original with all arguments combined
@@ -18,6 +22,31 @@
   (fn [& more-args]
     (apply f (concat args more-args))))
 
+;; identity - Returns its argument unchanged
+(defn identity [x] x)
+
+;; not - Logical negation
+(defn not [x]
+  (if x false true))
+
+;; reverse - Reverse collection
+(defn reverse [coll]
+  (reduce (fn [acc x] (conj [x] acc)) [] coll))
+
+;; take - Take first n elements
+;; Example: (take 3 [1 2 3 4 5]) ; => [1 2 3]
+(defn take [n coll]
+  (if (or (<= n 0) (empty? coll))
+    []
+    (conj (take (dec n) (rest coll)) (first coll))))
+
+;; drop - Drop first n elements
+;; Example: (drop 2 [1 2 3 4 5]) ; => [3 4 5]
+(defn drop [n coll]
+  (if (or (<= n 0) (empty? coll))
+    coll
+    (drop (dec n) (rest coll))))
+
 ;; comp - Function composition
 ;; Takes multiple functions and returns a new function that applies them
 ;; right-to-left (like mathematical composition)
@@ -26,14 +55,11 @@
 ;;          (inc-then-double 5) ; => 12
 (defn comp [& fns]
   (if (empty? fns)
-    identity
+    (fn [x] x)    ; identity function inlined
     (fn [x]
       (reduce (fn [acc f] (f acc))
               x
               (reverse fns)))))
-
-;; identity - Returns its argument unchanged
-(defn identity [x] x)
 
 ;; constantly - Returns a function that always returns the same value
 ;; Example: (def always-42 (constantly 42))
@@ -106,10 +132,14 @@
 ;; zipmap - Create map from keys and values vectors
 ;; Example: (zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
 (defn zipmap [keys vals]
-  (reduce (fn [m [k v]]
-            (assoc m k v))
-          {}
-          (map (fn [k v] [k v]) keys vals)))
+  (loop [m {}
+         ks keys
+         vs vals]
+    (if (or (empty? ks) (empty? vs))
+      m
+      (recur (assoc m (first ks) (first vs))
+             (rest ks)
+             (rest vs)))))
 
 ;; frequencies - Count occurrences of each element
 ;; Example: (frequencies [1 2 1 3 2 1]) ; => {1 3, 2 2, 3 1}
@@ -187,19 +217,23 @@
 
 ;; min - Return minimum of arguments
 (defn min [& args]
-  (reduce (fn [a b] (if (< a b) a b)) args))
+  (if (empty? args)
+    nil
+    (reduce (fn [a b] (if (< a b) a b)) (first args) (rest args))))
 
 ;; max - Return maximum of arguments
 (defn max [& args]
-  (reduce (fn [a b] (if (> a b) a b)) args))
+  (if (empty? args)
+    nil
+    (reduce (fn [a b] (if (> a b) a b)) (first args) (rest args))))
 
 ;; sum - Sum of collection
 (defn sum [coll]
-  (reduce + 0 coll))
+  (reduce (fn [a b] (+ a b)) 0 coll))
 
 ;; product - Product of collection
 (defn product [coll]
-  (reduce * 1 coll))
+  (reduce (fn [a b] (* a b)) 1 coll))
 
 ;; quot - Integer division quotient
 (defn quot [a b]
@@ -272,15 +306,18 @@
 ;; (range 5) => [0 1 2 3 4]
 ;; (range 2 5) => [2 3 4]
 ;; (range 0 10 2) => [0 2 4 6 8]
+(defn range-helper [start end step acc]
+  (if (>= start end)
+    acc
+    (range-helper (+ start step) end step (concat acc [start]))))
+
 (defn range
   ([end]
-   (range 0 end 1))
+   (range-helper 0 end 1 []))
   ([start end]
-   (range start end 1))
+   (range-helper start end 1 []))
   ([start end step]
-   (if (>= start end)
-     []
-     (conj (range (+ start step) end step) start))))
+   (range-helper start end step [])))
 
 ;; repeat - Repeat value n times
 (defn repeat [n x]
@@ -417,3 +454,54 @@
 ;; (partial + 5)
 ;; (comp inc inc)
 ;; (frequencies [1 2 1 3 2 1])
+
+;; ============================================================================
+;; Higher-Order Collection Functions
+;; ============================================================================
+
+;; map - Apply function to each element of collection
+;; Example: (map inc [1 2 3]) ; => [2 3 4]
+(defn map [f coll]
+  (if (empty? coll)
+    []
+    (conj (map f (rest coll)) (f (first coll)))))
+
+;; filter - Keep only elements that satisfy predicate
+;; Example: (filter odd? [1 2 3 4]) ; => [1 3]
+(defn filter [pred coll]
+  (if (empty? coll)
+    []
+    (if (pred (first coll))
+      (conj (filter pred (rest coll)) (first coll))
+      (filter pred (rest coll)))))
+
+;; remove - Remove elements that satisfy predicate
+;; Example: (remove odd? [1 2 3 4]) ; => [2 4]
+(defn remove [pred coll]
+  (filter (comp not pred) coll))
+
+;; ============================================================================
+;; Number Predicates
+;; ============================================================================
+
+;; odd? - Check if number is odd
+;; Example: (odd? 3) ; => true
+(defn odd? [n]
+  (= (mod n 2) 1))
+
+;; even? - Check if number is even
+;; Example: (even? 4) ; => true
+(defn even? [n]
+  (= (mod n 2) 0))
+
+;; zero? - Check if number is zero
+(defn zero? [n]
+  (= n 0))
+
+;; pos? - Check if number is positive
+(defn pos? [n]
+  (> n 0))
+
+;; neg? - Check if number is negative
+(defn neg? [n]
+  (< n 0))

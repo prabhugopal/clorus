@@ -1,0 +1,2 @@
+(def m {:name "test" :fn (fn [] 42)})
+(println m)

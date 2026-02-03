@@ -620,11 +620,11 @@ mod tests {
         let vec = PersistentVector::empty();
 
         unsafe {
-            let val1 = Value::number(1.0);
+            let val1 = Value::double(1.0);
             let vec1 = PersistentVector::conj(vec, val1);
             assert_eq!((*vec1).count(), 1);
 
-            let val2 = Value::number(2.0);
+            let val2 = Value::double(2.0);
             let vec2 = PersistentVector::conj(vec1, val2);
             assert_eq!((*vec2).count(), 2);
 
@@ -644,14 +644,14 @@ mod tests {
         unsafe {
             let mut current = vec;
             for i in 0..10 {
-                let val = Value::number(i as f64);
+                let val = Value::double(i as f64);
                 current = PersistentVector::conj(current, val);
             }
 
             // Check all elements
             for i in 0..10 {
                 let val = PersistentVector::nth(current, i);
-                assert_eq!((*val).as_number(), i as f64);
+                assert_eq!((*val).as_double(), i as f64);
                 crate::value::clorus_release(val);
             }
 
@@ -667,7 +667,7 @@ mod tests {
         unsafe {
             let mut current = vec;
             for i in 0..100 {
-                let val = Value::number(i as f64);
+                let val = Value::double(i as f64);
                 current = PersistentVector::conj(current, val);
             }
 
@@ -676,7 +676,7 @@ mod tests {
             // Verify all elements
             for i in 0..100 {
                 let val = PersistentVector::nth(current, i);
-                assert_eq!((*val).as_number(), i as f64);
+                assert_eq!((*val).as_double(), i as f64);
                 crate::value::clorus_release(val);
             }
 
@@ -691,22 +691,22 @@ mod tests {
         unsafe {
             let mut current = vec;
             for i in 0..10 {
-                let val = Value::number(i as f64);
+                let val = Value::double(i as f64);
                 current = PersistentVector::conj(current, val);
             }
 
             // Update element at index 5
-            let new_val = Value::number(99.0);
+            let new_val = Value::double(99.0);
             let vec2 = PersistentVector::assoc(current, 5, new_val);
 
             // Original unchanged
             let val = PersistentVector::nth(current, 5);
-            assert_eq!((*val).as_number(), 5.0);
+            assert_eq!((*val).as_double(), 5.0);
             crate::value::clorus_release(val);
 
             // New vector has updated value
             let val = PersistentVector::nth(vec2, 5);
-            assert_eq!((*val).as_number(), 99.0);
+            assert_eq!((*val).as_double(), 99.0);
             crate::value::clorus_release(val);
 
             release_vector(current);
@@ -722,13 +722,13 @@ mod tests {
             let mut current = vec1;
             // Fill exactly 64 elements - this fills tree and tail completely
             for i in 0..64 {
-                let val = Value::number(i as f64);
+                let val = Value::double(i as f64);
                 current = PersistentVector::conj(current, val);
             }
             // At this point: tree=[0..31], tail=[32..63] (full)
 
             // Add 65th element - this pushes tail to tree, creating new root
-            let val = Value::number(64.0);
+            let val = Value::double(64.0);
             let vec2 = PersistentVector::conj(current, val);
             // Now vec2: tree=[0..63], tail=[64]
 

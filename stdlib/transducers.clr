@@ -1,0 +1,381 @@
+;; ============================================================================
+;; Clorus Transducers
+;; ============================================================================
+;;
+;; Composable algorithmic transformations independent of their context.
+;; Transducers transform reducing functions to create efficient pipelines
+;; without intermediate collections.
+;;
+;; Version: 1.0.0
+;; Date: January 29, 2026
+;; ============================================================================
+
+;; ============================================================================
+;; Reduced Value Support
+;; ============================================================================
+
+(defn reduced
+  "Wraps a value to signal early termination in reducing operations."
+  [x]
+  {:type :reduced :value x})
+
+(defn reduced?
+  "Checks if a value is a reduced wrapper."
+  [x]
+  (and (map? x) (= (:type x) :reduced)))
+
+(defn ensure-reduced
+  "Ensures a value is reduced. If already reduced, returns as-is."
+  [x]
+  (if (reduced? x)
+    x
+    (reduced x)))
+
+(defn unreduced
+  "Extracts the value from a reduced wrapper."
+  [x]
+  (if (reduced? x)
+    (:value x)
+    x))
+
+;; ============================================================================
+;; Completing Function
+;; ============================================================================
+
+(defn completing
+  "Adds a completion arity to a reducing function.
+  
+  1-arity: Uses identity as completion function
+  2-arity: Uses cf as completion function
+  
+  Returns a reducing function with both step and completion arities."
+  ([f]
+   (completing f identity))
+  ([f cf]
+   (fn
+     ([result] (cf result))
+     ([result input] (f result input)))))
+
+;; ============================================================================
+;; Transduce Function
+;; ============================================================================
+
+(defn transduce
+  "Applies a transducer xform to a reducing function f over collection coll.
+  
+  3-arity: Uses (f) as initial value (reducing function init arity)
+  4-arity: Uses init as initial value
+  
+  Returns the final reduced value."
+  ([xform f coll]
+   (transduce xform f (f) coll))
+  ([xform f init coll]
+   (let [rf (xform f)
+         result (reduce (fn [acc input]
+                         (let [r (rf acc input)]
+                           (if (reduced? r)
+                             r
+                             r)))
+                       init
+                       coll)]
+     (if (reduced? result)
+       (unreduced result)
+       (rf result)))))
+
+;; ============================================================================
+;; Into Function
+;; ============================================================================
+
+(defn into
+  "Builds a collection by reducing over from.
+
+  2-arity: Simple reduce with conj
+  3-arity: Applies transducer xform during reduction
+
+  Returns the target collection with elements added."
+  ([to from]
+   (reduce conj to from))
+  ([to xform from]
+   (transduce xform conj to from)))
+
+;; ============================================================================
+;; Core Transducers
+;; ============================================================================
+
+(defn map
+  "Map transducer. Applies function f to each input.
+
+  1-arity: Returns a transducer
+  2-arity: Eager map over collection (existing behavior)"
+  ([f]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (rf result (f input))))))
+  ([f coll]
+   (loop [result []
+          remaining coll]
+     (if (empty? remaining)
+       result
+       (recur (conj result (f (first remaining)))
+              (rest remaining))))))
+
+(defn filter
+  "Filter transducer. Keeps inputs where (pred input) is truthy.
+
+  1-arity: Returns a transducer
+  2-arity: Eager filter over collection (existing behavior)"
+  ([pred]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (if (pred input)
+          (rf result input)
+          result)))))
+  ([pred coll]
+   (loop [result []
+          remaining coll]
+     (if (empty? remaining)
+       result
+       (if (pred (first remaining))
+         (recur (conj result (first remaining))
+                (rest remaining))
+         (recur result
+                (rest remaining)))))))
+
+(defn remove
+  "Remove transducer. Inverse of filter - removes inputs where pred is truthy.
+
+  1-arity: Returns a transducer
+  2-arity: Eager remove over collection"
+  ([pred]
+   (filter (complement pred)))
+  ([pred coll]
+   (filter (complement pred) coll)))
+
+(defn take
+  "Take transducer. Takes first n inputs, then terminates.
+
+  1-arity: Returns a transducer
+  2-arity: Eager take over collection (existing behavior)"
+  ([n]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (let [c (swap! counter inc)]
+            (if (<= c n)
+              (if (= c n)
+                (ensure-reduced (rf result input))
+                (rf result input))
+              result)))))))
+  ([n coll]
+   (loop [result []
+          remaining coll
+          count 0]
+     (if (or (empty? remaining) (>= count n))
+       result
+       (recur (conj result (first remaining))
+              (rest remaining)
+              (inc count))))))
+
+(defn drop
+  "Drop transducer. Drops first n inputs, then passes all remaining.
+
+  1-arity: Returns a transducer
+  2-arity: Eager drop over collection (existing behavior)"
+  ([n]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (let [c (swap! counter inc)]
+            (if (> c n)
+              (rf result input)
+              result)))))))
+  ([n coll]
+   (loop [result []
+          remaining coll
+          count 0]
+     (if (empty? remaining)
+       result
+       (if (< count n)
+         (recur result (rest remaining) (inc count))
+         (recur (conj result (first remaining))
+                (rest remaining)
+                count))))))
+
+(defn take-while
+  "Take-while transducer. Takes inputs while pred is truthy, then terminates.
+
+  1-arity: Returns a transducer
+  2-arity: Eager take-while over collection"
+  ([pred]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (if (pred input)
+          (rf result input)
+          (reduced result))))))
+  ([pred coll]
+   (loop [result []
+          remaining coll]
+     (if (empty? remaining)
+       result
+       (if (pred (first remaining))
+         (recur (conj result (first remaining))
+                (rest remaining))
+         result)))))
+
+(defn drop-while
+  "Drop-while transducer. Drops inputs while pred is truthy, then passes all remaining.
+
+  1-arity: Returns a transducer
+  2-arity: Eager drop-while over collection"
+  ([pred]
+   (fn [rf]
+     (let [dropping (atom true)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (if @dropping
+            (if (pred input)
+              result
+              (do
+                (reset! dropping false)
+                (rf result input)))
+            (rf result input)))))))
+  ([pred coll]
+   (loop [result []
+          remaining coll
+          dropping true]
+     (if (empty? remaining)
+       result
+       (if dropping
+         (if (pred (first remaining))
+           (recur result (rest remaining) true)
+           (recur (conj result (first remaining))
+                  (rest remaining)
+                  false))
+         (recur (conj result (first remaining))
+                (rest remaining)
+                false))))))
+
+(defn cat
+  "Concatenation transducer. Unpacks nested collections.
+  Used as building block for mapcat."
+  [rf]
+  (fn
+    ([result] (rf result))
+    ([result input]
+     (reduce rf result input))))
+
+(defn mapcat
+  "Mapcat transducer. Maps f over inputs and concatenates results.
+
+  1-arity: Returns a transducer (comp (map f) cat)
+  2-arity: Eager mapcat over collection"
+  ([f]
+   (comp (map f) cat))
+  ([f coll]
+   (loop [result []
+          remaining coll]
+     (if (empty? remaining)
+       result
+       (let [mapped (f (first remaining))]
+         (recur (reduce conj result mapped)
+                (rest remaining)))))))
+
+(defn dedupe
+  "Dedupe transducer. Removes consecutive duplicate inputs.
+
+  0-arity: Returns a transducer
+  1-arity: Eager dedupe over collection"
+  ([]
+   (fn [rf]
+     (let [prev (atom ::none)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (let [p @prev]
+            (reset! prev input)
+            (if (= p input)
+              result
+              (rf result input))))))))
+  ([coll]
+   (loop [result []
+          remaining coll
+          prev ::none]
+     (if (empty? remaining)
+       result
+       (let [current (first remaining)]
+         (if (= prev current)
+           (recur result (rest remaining) prev)
+           (recur (conj result current)
+                  (rest remaining)
+                  current)))))))
+
+(defn partition-by
+  "Partition-by transducer. Partitions inputs into sub-collections when (f input) changes.
+
+  1-arity: Returns a transducer
+  2-arity: Eager partition-by over collection"
+  ([f]
+   (fn [rf]
+     (let [prev (atom ::none)
+           chunk (atom [])]
+       (fn
+         ([result]
+          (let [c @chunk]
+            (reset! chunk [])
+            (if (empty? c)
+              (rf result)
+              (let [result (unreduced (rf result c))]
+                (rf result)))))
+         ([result input]
+          (let [pval (f input)
+                p @prev]
+            (if (= p ::none)
+              (do
+                (reset! prev pval)
+                (swap! chunk conj input)
+                result)
+              (if (= p pval)
+                (do
+                  (swap! chunk conj input)
+                  result)
+                (let [c @chunk]
+                  (reset! chunk [input])
+                  (reset! prev pval)
+                  (rf result c))))))))))
+  ([f coll]
+   (loop [result []
+          remaining coll
+          prev ::none
+          chunk []]
+     (if (empty? remaining)
+       (if (empty? chunk)
+         result
+         (conj result chunk))
+       (let [current (first remaining)
+             pval (f current)]
+         (if (= prev ::none)
+           (recur result
+                  (rest remaining)
+                  pval
+                  [current])
+           (if (= prev pval)
+             (recur result
+                    (rest remaining)
+                    pval
+                    (conj chunk current))
+             (recur (conj result chunk)
+                    (rest remaining)
+                    pval
+                    [current]))))))))
+

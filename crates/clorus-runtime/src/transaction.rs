@@ -297,7 +297,8 @@ pub fn tx_has_write(ref_id: RefId) -> bool {
 /// 4. Apply write set
 /// 5. Release locks
 fn commit_transaction(tx: &mut Transaction) -> bool {
-    use crate::ref_type::ClorusRef;
+    use crate::ref_type::RefValue;
+    use std::sync::Mutex;
 
     // Collect all refs involved (reads + writes)
     let mut ref_ids: Vec<RefId> = tx
@@ -316,9 +317,11 @@ fn commit_transaction(tx: &mut Transaction) -> bool {
 
     // Validate all reads - check versions haven't changed
     for (ref_id, expected_version) in tx.read_set() {
-        let ref_ptr = *ref_id as *mut ClorusRef;
+        // RefId is the address of the Arc's inner Mutex<RefValue>
+        let mutex_ptr = *ref_id as *const Mutex<RefValue>;
         unsafe {
-            let current_version = (*ref_ptr).version();
+            let guard = (*mutex_ptr).lock().unwrap();
+            let current_version = guard.version;
             if current_version != *expected_version {
                 // Conflict detected - abort
                 return false;
@@ -328,10 +331,19 @@ fn commit_transaction(tx: &mut Transaction) -> bool {
 
     // Apply all writes
     for (ref_id, new_value) in tx.write_set() {
-        let ref_ptr = *ref_id as *mut ClorusRef;
+        // RefId is the address of the Arc's inner Mutex<RefValue>
+        let mutex_ptr = *ref_id as *const Mutex<RefValue>;
         unsafe {
-            // Set new value and increment version
-            let old_value = (*ref_ptr).set_versioned(*new_value);
+            let mut guard = (*mutex_ptr).lock().unwrap();
+
+            // Retain new value
+            (&**new_value).header().retain();
+
+            // Replace value and increment version
+            let old_value = guard.value;
+            guard.value = *new_value;
+            guard.version += 1;
+
             // Release old value
             crate::value::clorus_release(old_value);
         }

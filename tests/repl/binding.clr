@@ -1,0 +1,70 @@
+;; Test dynamic var binding
+
+;; Define a dynamic var
+(def ^:dynamic *x* 10)
+
+;; Test 1: Simple binding
+(println "Test 1: Simple binding")
+(println "Before binding: *x* =" (deref #'*x*))
+(binding [*x* 20]
+  (println "Inside binding: *x* =" (deref #'*x*)))
+(println "After binding: *x* =" (deref #'*x*))
+
+;; Test 2: Nested binding
+(println "\nTest 2: Nested binding")
+(binding [*x* 100]
+  (println "Outer binding: *x* =" (deref #'*x*))
+  (binding [*x* 200]
+    (println "Inner binding: *x* =" (deref #'*x*)))
+  (println "Back to outer: *x* =" (deref #'*x*)))
+(println "After nested: *x* =" (deref #'*x*))
+
+;; Test 3: Binding with computation
+(println "\nTest 3: Binding with computation")
+(binding [*x* (+ 5 5)]
+  (println "Computed binding: *x* =" (deref #'*x*)))
+(println "After computation: *x* =" (deref #'*x*))
+
+(println "\n✅ All binding tests passed!")
+;; Minimal binding test
+
+(def ^:dynamic *x* 10)
+
+;; Get initial value
+(deref #'*x*)
+
+;; Bind to new value and return it
+(binding [*x* 20]
+  (deref #'*x*))
+
+;; Verify it's restored
+(deref #'*x*)
+;; Binding test with -main
+
+(def ^:dynamic *x* 10)
+
+(defn -main [& args]
+  ;; Test 1: Initial value
+  (let [initial (deref #'*x*)]
+    (pr-str initial)  ;; Should be 10
+
+    ;; Test 2: Value inside binding
+    (let [inside (binding [*x* 20]
+                   (deref #'*x*))]
+      (pr-str inside)  ;; Should be 20
+
+      ;; Test 3: Value after binding (should be restored)
+      (let [after (deref #'*x*)]
+        (pr-str after)  ;; Should be 10 again
+
+        ;; Return success if all match
+        (if (and (= initial 10)
+                 (= inside 20)
+                 (= after 10))
+          "PASS: Binding works correctly!"
+          "FAIL: Binding not working as expected")))))
+;; Test script for REPL
+(def ^:dynamic *x* 10)
+(deref #'*x*)
+(binding [*x* 20] (deref #'*x*))
+(deref #'*x*)

@@ -1,4 +1,5 @@
-/// Interface file (.clorus-ffi) parser
+/// Interface file (.clri or .clorus-ffi) parser
+/// Preferred extension: .clri, Legacy: .clorus-ffi
 use clorus_syntax::{Expr, parse};
 use std::fs;
 use std::path::Path;
@@ -26,7 +27,7 @@ pub struct InterfaceParam {
     pub type_name: String,
 }
 
-/// Parse a .clorus-ffi interface file
+/// Parse a .clri or .clorus-ffi interface file
 pub fn parse_interface_file(path: &Path) -> Result<InterfaceFile, String> {
 
     let source = fs::read_to_string(path)

@@ -12,20 +12,23 @@ use std::os::raw::c_char;
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueTag {
-    Number = 0,
-    List = 1,
-    Vector = 2,
-    HashMap = 3,
-    String = 4,
-    Keyword = 5,
-    Symbol = 6,
-    Bool = 7,
-    Nil = 8,
-    HashSet = 9,
-    Atom = 10,
-    Ref = 11,
-    Agent = 12,
-    Channel = 13,
+    Long = 0,      // i64 integer (NEW: primary integer type)
+    Double = 1,    // f64 floating point (RENAMED from Number)
+    List = 2,      // Shifted by 1
+    Vector = 3,
+    HashMap = 4,
+    String = 5,
+    Keyword = 6,
+    Symbol = 7,
+    Bool = 8,
+    Nil = 9,
+    HashSet = 10,
+    Atom = 11,
+    Ref = 12,
+    Agent = 13,
+    Channel = 14,
+    Function = 15,
+    Var = 16,  // Var for dynamic bindings (shifted by 1)
 }
 
 /// Header for all heap-allocated values
@@ -76,8 +79,10 @@ impl Header {
 /// Large values (lists, vectors, maps) are stored as pointers to heap.
 #[repr(C)]
 pub union ValueData {
-    /// Inline number value
-    number: f64,
+    /// Inline Long (i64) value
+    long: i64,
+    /// Inline Double (f64) value
+    double: f64,
     /// Inline boolean (0.0 = false, 1.0 = true)
     boolean: f64,
     /// Pointer to heap-allocated data
@@ -97,11 +102,20 @@ pub struct Value {
 }
 
 impl Value {
-    /// Create a number value
-    pub fn number(n: f64) -> *mut Self {
+    /// Create a Long (i64) value
+    pub fn long(n: i64) -> *mut Self {
         let val = Box::new(Value {
-            header: Header::new(ValueTag::Number),
-            data: ValueData { number: n },
+            header: Header::new(ValueTag::Long),
+            data: ValueData { long: n },
+        });
+        Box::into_raw(val)
+    }
+
+    /// Create a Double (f64) value
+    pub fn double(n: f64) -> *mut Self {
+        let val = Box::new(Value {
+            header: Header::new(ValueTag::Double),
+            data: ValueData { double: n },
         });
         Box::into_raw(val)
     }
@@ -121,7 +135,7 @@ impl Value {
     pub fn nil() -> *mut Self {
         let val = Box::new(Value {
             header: Header::new(ValueTag::Nil),
-            data: ValueData { number: 0.0 },
+            data: ValueData { long: 0 },
         });
         Box::into_raw(val)
     }
@@ -160,9 +174,14 @@ impl Value {
         Box::into_raw(val)
     }
 
-    /// Get the number value (unsafe - caller must ensure tag is Number)
-    pub unsafe fn as_number(&self) -> f64 {
-        self.data.number
+    /// Get the Long value (unsafe - caller must ensure tag is Long)
+    pub unsafe fn as_long(&self) -> i64 {
+        self.data.long
+    }
+
+    /// Get the Double value (unsafe - caller must ensure tag is Double)
+    pub unsafe fn as_double(&self) -> f64 {
+        self.data.double
     }
 
     /// Get the boolean value (unsafe - caller must ensure tag is Bool)
@@ -187,6 +206,32 @@ impl Value {
         self.data.ptr
     }
 
+    /// Create a function value from FunctionData pointer
+    pub fn from_function(func_data: *mut crate::function::FunctionData) -> *mut Self {
+        Self::from_ptr(ValueTag::Function, func_data as *mut u8)
+    }
+
+    /// Get the function data (unsafe - caller must ensure tag is Function)
+    pub unsafe fn as_function(&self) -> *mut crate::function::FunctionData {
+        self.data.ptr as *mut crate::function::FunctionData
+    }
+
+    /// Create a var value from Var pointer
+    pub fn from_var(var_ptr: *mut crate::var::Var) -> *mut Self {
+        Self::from_ptr(ValueTag::Var, var_ptr as *mut u8)
+    }
+
+    /// Get the var pointer (unsafe - caller must ensure tag is Var)
+    pub unsafe fn as_var(&self) -> *mut crate::var::Var {
+        self.data.ptr as *mut crate::var::Var
+    }
+
+    /// Get tag
+    #[inline]
+    pub fn tag(&self) -> ValueTag {
+        self.header.tag()
+    }
+
     /// Get the header
     #[inline]
     pub fn header(&self) -> &Header {
@@ -198,7 +243,8 @@ impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         unsafe {
             match self.header.tag() {
-                ValueTag::Number => write!(f, "Number({})", self.as_number()),
+                ValueTag::Long => write!(f, "Long({})", self.as_long()),
+                ValueTag::Double => write!(f, "Double({})", self.as_double()),
                 ValueTag::Bool => write!(f, "Bool({})", self.as_bool()),
                 ValueTag::Nil => write!(f, "Nil"),
                 ValueTag::String => write!(f, "String(\"{}\")", self.as_string()),
@@ -251,10 +297,50 @@ pub extern "C" fn clorus_refcount(val: *const Value) -> u64 {
     unsafe { (*val).header.refcount() }
 }
 
-/// Create a Value from f64 (for LLVM codegen)
+/// Create a Value from i64 Long (for LLVM codegen)
 #[no_mangle]
-pub extern "C" fn clorus_value_number(n: f64) -> *mut Value {
-    Value::number(n)
+pub extern "C" fn clorus_value_long(n: i64) -> *mut Value {
+    Value::long(n)
+}
+
+/// Create a Value from f64 Double (for LLVM codegen)
+#[no_mangle]
+pub extern "C" fn clorus_value_double(n: f64) -> *mut Value {
+    Value::double(n)
+}
+
+/// Create a boolean Value (for LLVM codegen)
+#[no_mangle]
+pub extern "C" fn clorus_value_boolean(b: bool) -> *mut Value {
+    Value::boolean(b)
+}
+
+/// Check if a Value is truthy (for if/when/etc.)
+/// Returns 1 for truthy, 0 for falsy
+/// Falsy values: nil, false, 0 (as Long or Double)
+/// Everything else is truthy
+#[no_mangle]
+pub extern "C" fn clorus_is_truthy(val: *mut Value) -> i32 {
+    if val.is_null() {
+        return 0; // nil is falsy
+    }
+    unsafe {
+        match (*val).header().tag() {
+            ValueTag::Nil => 0, // nil is falsy
+            ValueTag::Bool => {
+                if (*val).as_bool() { 1 } else { 0 }
+            }
+            ValueTag::Long => {
+                let n = (*val).as_long();
+                if n == 0 { 0 } else { 1 }
+            }
+            ValueTag::Double => {
+                let n = (*val).as_double();
+                if n == 0.0 { 0 } else { 1 }
+            }
+            _ => 1, // Everything else is truthy (strings, vectors, functions, etc.)
+        }
+    }
 }
 
 /// Create a nil value (for LLVM codegen)
@@ -269,18 +355,50 @@ pub extern "C" fn clorus_value_bool(b: f64) -> *mut Value {
     Value::boolean(b != 0.0)
 }
 
-/// Extract f64 from Value (for LLVM codegen)
-/// Returns 0.0 if the value is not a number
+/// Extract i64 from Value (for LLVM codegen)
+/// Returns 0 if the value is not a Long
 #[no_mangle]
-pub extern "C" fn clorus_value_as_number(val: *mut Value) -> f64 {
+pub extern "C" fn clorus_value_as_long(val: *mut Value) -> i64 {
+    if val.is_null() {
+        return 0;
+    }
+    unsafe {
+        if (*val).header.tag() == ValueTag::Long {
+            (*val).as_long()
+        } else {
+            0
+        }
+    }
+}
+
+/// Extract f64 from Value (for LLVM codegen)
+/// Returns 0.0 if the value is not a Double
+#[no_mangle]
+pub extern "C" fn clorus_value_as_double(val: *mut Value) -> f64 {
     if val.is_null() {
         return 0.0;
     }
     unsafe {
-        if (*val).header.tag() == ValueTag::Number {
-            (*val).as_number()
+        if (*val).header.tag() == ValueTag::Double {
+            (*val).as_double()
         } else {
             0.0
+        }
+    }
+}
+
+/// Extract bool from Value (for REPL display)
+/// Returns false if the value is not a boolean
+#[no_mangle]
+pub extern "C" fn clorus_value_as_bool(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        if (*val).header.tag() == ValueTag::Bool {
+            (*val).as_bool()
+        } else {
+            false
         }
     }
 }
@@ -351,7 +469,7 @@ pub extern "C" fn clorus_value_is_nil(val: *mut Value) -> i32 {
 /// Deallocate a value and its contents
 unsafe fn deallocate_value(val: *mut Value) {
     match (*val).header.tag() {
-        ValueTag::Number | ValueTag::Bool | ValueTag::Nil => {
+        ValueTag::Long | ValueTag::Double | ValueTag::Bool | ValueTag::Nil => {
             // Just free the Value itself
             drop(Box::from_raw(val));
         }
@@ -439,7 +557,233 @@ unsafe fn deallocate_value(val: *mut Value) {
             // For now, just free the Value
             drop(Box::from_raw(val));
         }
+        ValueTag::Function => {
+            // Release function data
+            let func_data = (*val).as_function();
+            if !func_data.is_null() {
+                // Release captured environment values
+                let env_size = (*func_data).env_size();
+                if env_size > 0 {
+                    let env_ptr = func_data.offset(1) as *const *mut Value;
+                    for i in 0..env_size {
+                        let env_val = *env_ptr.offset(i as isize);
+                        if !env_val.is_null() {
+                            clorus_release(env_val);
+                        }
+                    }
+                }
+                // Free the function data
+                let func_data_size = std::mem::size_of::<crate::function::FunctionData>();
+                let env_data_size = (env_size as usize) * std::mem::size_of::<*mut Value>();
+                let total_size = func_data_size + env_data_size;
+                let layout = std::alloc::Layout::from_size_align_unchecked(total_size, 8);
+                std::alloc::dealloc(func_data as *mut u8, layout);
+            }
+            drop(Box::from_raw(val));
+        }
+        ValueTag::Var => {
+            // Release var and free Value
+            let var_ptr = (*val).as_var();
+            if !var_ptr.is_null() {
+                crate::var::clorus_var_free(var_ptr);
+            }
+            drop(Box::from_raw(val));
+        }
     }
+}
+
+// ============================================================================
+// Type Predicates
+// ============================================================================
+
+/// Check if value is a Long (i64)
+#[no_mangle]
+pub extern "C" fn clorus_is_long(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Long
+    }
+}
+
+/// Check if value is a Double (f64)
+#[no_mangle]
+pub extern "C" fn clorus_is_double(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Double
+    }
+}
+
+/// Check if value is a number (Long or Double)
+#[no_mangle]
+pub extern "C" fn clorus_is_number(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        let tag = (*val).header().tag();
+        tag == ValueTag::Long || tag == ValueTag::Double
+    }
+}
+
+/// Check if value is a vector
+#[no_mangle]
+pub extern "C" fn clorus_is_vector(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Vector
+    }
+}
+
+/// Check if value is a list
+#[no_mangle]
+pub extern "C" fn clorus_is_list(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::List
+    }
+}
+
+/// Check if value is a map
+#[no_mangle]
+pub extern "C" fn clorus_is_map(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::HashMap
+    }
+}
+
+/// Check if value is a set
+#[no_mangle]
+pub extern "C" fn clorus_is_set(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::HashSet
+    }
+}
+
+/// Check if value is a symbol
+#[no_mangle]
+pub extern "C" fn clorus_is_symbol(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Symbol
+    }
+}
+
+/// Check if value is nil
+#[no_mangle]
+pub extern "C" fn clorus_is_nil(val: *mut Value) -> bool {
+    if val.is_null() {
+        return true;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Nil
+    }
+}
+
+/// Check if value is a boolean
+#[no_mangle]
+pub extern "C" fn clorus_is_bool(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Bool
+    }
+}
+
+/// Check if value is a sequence (list or vector)
+#[no_mangle]
+pub extern "C" fn clorus_is_seq(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        let tag = (*val).header().tag();
+        tag == ValueTag::List || tag == ValueTag::Vector
+    }
+}
+
+/// Check if value is a collection (vector, list, map, or set)
+#[no_mangle]
+pub extern "C" fn clorus_is_coll(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        let tag = (*val).header().tag();
+        tag == ValueTag::Vector || tag == ValueTag::List ||
+        tag == ValueTag::HashMap || tag == ValueTag::HashSet
+    }
+}
+
+/// Check if value is an atom
+#[no_mangle]
+pub extern "C" fn clorus_is_atom(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Atom
+    }
+}
+
+/// Check if value is a ref
+#[no_mangle]
+pub extern "C" fn clorus_is_ref(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Ref
+    }
+}
+
+/// Check if value is an agent
+#[no_mangle]
+pub extern "C" fn clorus_is_agent(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Agent
+    }
+}
+
+/// Check if value is a channel
+#[no_mangle]
+pub extern "C" fn clorus_is_channel(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Channel
+    }
+}
+
+/// Create a symbol value from a C string pointer
+/// Used for map destructuring with :syms
+/// Note: Currently symbols are not fully implemented, so this creates a keyword instead
+#[no_mangle]
+pub extern "C" fn clorus_symbol(name_ptr: *const std::os::raw::c_char) -> *mut Value {
+    // For now, symbols behave like keywords
+    // TODO: Implement proper Symbol type when needed
+    crate::keyword::clorus_keyword(name_ptr)
 }
 
 #[cfg(test)]
@@ -447,11 +791,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_number_value() {
-        let val = Value::number(42.0);
+    fn test_long_value() {
+        let val = Value::long(42);
         unsafe {
-            assert_eq!((*val).header.tag(), ValueTag::Number);
-            assert_eq!((*val).as_number(), 42.0);
+            assert_eq!((*val).header.tag(), ValueTag::Long);
+            assert_eq!((*val).as_long(), 42);
+            assert_eq!((*val).header.refcount(), 1);
+        }
+        // Clean up
+        unsafe { drop(Box::from_raw(val)); }
+    }
+
+    #[test]
+    fn test_double_value() {
+        let val = Value::double(3.14);
+        unsafe {
+            assert_eq!((*val).header.tag(), ValueTag::Double);
+            assert_eq!((*val).as_double(), 3.14);
+            assert_eq!((*val).header.refcount(), 1);
+        }
+        // Clean up
+        unsafe { drop(Box::from_raw(val)); }
+    }
+
+    #[test]
+    fn test_number_value() {
+        // Backward compatibility test - still works with Double
+        let val = Value::double(42.0);
+        unsafe {
+            assert_eq!((*val).header.tag(), ValueTag::Double);
+            assert_eq!((*val).as_double(), 42.0);
             assert_eq!((*val).header.refcount(), 1);
         }
         // Clean up
@@ -460,7 +829,7 @@ mod tests {
 
     #[test]
     fn test_refcounting() {
-        let val = Value::number(3.14);
+        let val = Value::double(3.14);
 
         // Initial refcount
         assert_eq!(unsafe { (*val).header.refcount() }, 1);

@@ -1,0 +1,64 @@
+;; Simple test: create an anonymous function and call it
+
+(def my-fn (fn [x] (+ x 10)))
+(my-fn 5)
+;; Test simple function value creation
+
+(defn add-one [x] (+ x 1))
+
+add-one
+;; Simple test: pass defn'd function as parameter
+
+(defn add-ten [x] (+ x 10))
+
+(defn apply-fn [f x]
+  (f x))
+
+(apply-fn add-ten 5)
+;; Test if higher-order functions work with defn'd functions
+
+;; Define take-while inline
+(defn take-while-test [pred coll]
+  (if (= (count coll) 0)
+    []
+    (let [x (first coll)]
+      (if (pred x)
+        (conj (take-while-test pred (rest coll)) x)
+        []))))
+
+;; Define a predicate with defn
+(defn less-than-5 [x] (< x 5))
+
+;; Pass the defn'd function as a parameter
+(def result (take-while-test less-than-5 [1 2 3 6 7 1]))
+;; Expected: [1 2 3]
+
+result
+;; Test if we can call a function stored in a def
+(defn add [x y]
+  (+ x y))
+
+;; Store function in a variable
+(def my-add add)
+
+;; Try to call it
+(my-add 2 3)
+;; Comprehensive function value tests
+
+;; 1. Direct closure call works
+(def add-5 (fn [x] (+ x 5)))
+(def test1 (add-5 10))  ; Should be 15
+
+;; 2. Can we pass a closure to another function?
+(defn apply-twice [f x]
+  (f (f x)))
+
+(def test2 (apply-twice add-5 10))  ; Should be 20
+
+;; 3. Can we use a defn'd function as a value?
+(defn increment [x]
+  (+ x 1))
+
+(def test3 (apply-twice increment 10))  ; Should be 12
+
+test3

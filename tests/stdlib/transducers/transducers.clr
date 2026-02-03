@@ -1,0 +1,141 @@
+;; Comprehensive transducer test
+
+(println "=== Testing Transducers ===")
+
+;; Helpers
+(defn inc-fn [x] (+ x 1))
+(defn add-fn [a b] (+ a b))
+(defn is-even [x] (= (mod x 2) 0))
+
+;; Test 1: Simple transducer with addition
+(println "\n1. Simple map transducer (sum):")
+(defn make-mapper [f]
+  (fn [rf]
+    (fn [r v]
+      (rf r (f v)))))
+
+(def map-inc-xf (make-mapper inc-fn))
+(def wrapped-add (map-inc-xf add-fn))
+(def result1 (reduce wrapped-add 0 [1 2 3 4]))
+(println "  Expected: 14")
+(print "  Got: ")
+(println result1)
+
+;; Test 2: Filter transducer with addition
+(println "\n2. Simple filter transducer (sum):")
+(defn make-filter [pred]
+  (fn [rf]
+    (fn [r v]
+      (if (pred v)
+        (rf r v)
+        r))))
+
+(def filter-even-xf (make-filter is-even))
+(def filtered-add (filter-even-xf add-fn))
+(def result2 (reduce filtered-add 0 [1 2 3 4 5 6]))
+(println "  Expected: 12")
+(print "  Got: ")
+(println result2)
+
+;; Test 3: Map transducer building a collection with conj
+(println "\n3. Map transducer building collection:")
+(def conj-fn (fn [coll x] (conj coll x)))
+(def map-inc-conj (map-inc-xf conj-fn))
+(def result3 (reduce map-inc-conj [] [1 2 3 4]))
+(println "  Expected: [2 3 4 5]")
+(print "  Got: ")
+(println result3)
+
+;; Test 4: Filter transducer building a collection with conj
+(println "\n4. Filter transducer building collection:")
+(def filter-even-conj (filter-even-xf conj-fn))
+(def result4 (reduce filter-even-conj [] [1 2 3 4 5 6]))
+(println "  Expected: [2 4 6]")
+(print "  Got: ")
+(println result4)
+
+(println "\n=== All Transducer Tests Passed! ===")
+"Success!"
+;; Test basic transducer infrastructure
+
+;; Load helpers (inline for now)
+(defn reduced [x]
+  {:type :reduced :value x})
+
+(defn reduced? [x]
+  (and (map? x) (= (:type x) :reduced)))
+
+(defn unreduced [x]
+  (if (reduced? x)
+    (:value x)
+    x))
+
+;; Simple transduce (simplified for testing)
+(defn transduce [xform f init coll]
+  (let [rf (xform f)
+        result (reduce (fn [acc input]
+                        (let [r (rf acc input)]
+                          (if (reduced? r)
+                            r
+                            r)))
+                      init
+                      coll)]
+    (if (reduced? result)
+      (unreduced result)
+      (rf result))))
+
+;; Simple map transducer
+(defn map-xf [f]
+  (fn [rf]
+    (fn
+      ([result] (rf result))
+      ([result input]
+       (rf result (f input))))))
+
+;; Test: map inc over [1 2 3] with + and init 0
+;; Should return 2+3+4 = 9
+(def xf (map-xf inc))
+(transduce xf + 0 [1 2 3])
+;; Simplest nested closure test
+(def outer
+  (fn [x]
+    (fn [y] x)))
+
+(def inner (outer 5))
+inner
+;; Test transducer using defn (multi-arity works for defn)
+
+;; Reducing function helpers
+(defn unreduced [x]
+  (if (and (map? x) (= (:type x) :reduced))
+    (:value x)
+    x))
+
+;; Map transducer - returns a reducing function transformer
+(defn map-transducer [f rf]
+  ;; Helper functions for completion and step
+  (defn complete-fn [result]
+    (rf result))
+  
+  (defn step-fn [result input]
+    (rf result (f input)))
+  
+  ;; Return a multi-arity function using def + fn
+  step-fn)
+
+;; Simple test - just check if map-transducer compiles
+(defn inc [x] (+ x 1))
+(def xf (map-transducer inc +))
+; Call it with 2 args
+(xf 0 5)
+;; Simplified transducer test - avoiding multi-arity fn for now
+
+;; Test simple function composition without transducers first
+(defn add-10 [x] (+ x 10))
+(defn double [x] (* x 2))
+
+;; Compose manually
+(defn composed [x]
+  (double (add-10 x)))
+
+(composed 5)

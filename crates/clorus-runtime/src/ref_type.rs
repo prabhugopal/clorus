@@ -32,11 +32,11 @@ pub struct ClorusRef {
 }
 
 /// Internal ref value with versioning
-struct RefValue {
+pub struct RefValue {
     /// Current value pointer
-    value: *mut Value,
+    pub value: *mut Value,
     /// Version number (incremented on each write)
-    version: u64,
+    pub version: u64,
 }
 
 impl ClorusRef {
@@ -211,6 +211,64 @@ pub extern "C" fn clorus_alter(
     clorus_ref_set(ref_val, new_value)
 }
 
+/// Commute ref by applying a commutative function within a transaction
+///
+/// (commute ref func & args) => new-value
+/// Must be called within a dosync block
+///
+/// Like alter, but marks the operation as commutative, allowing it to be
+/// applied at commit time for better concurrency.
+///
+/// Note: For now, commute is implemented the same as alter.
+/// True commutative semantics (deferred application) will be added later.
+#[no_mangle]
+pub extern "C" fn clorus_commute(
+    ref_val: *mut Value,
+    new_value: *mut Value,
+) -> *mut Value {
+    // For now, commute works the same as alter
+    // TODO: Implement true commutative semantics (apply at commit time)
+    clorus_ref_set(ref_val, new_value)
+}
+
+/// Ensure ref is protected in transaction
+///
+/// (ensure ref) => ref-value
+/// Must be called within a dosync block
+///
+/// Ensures that a ref is part of the transaction's read set, even if
+/// it's not being modified. This prevents write skew anomalies.
+#[no_mangle]
+pub extern "C" fn clorus_ensure(ref_val: *mut Value) -> *mut Value {
+    if ref_val.is_null() {
+        return Value::nil();
+    }
+
+    unsafe {
+        if (*ref_val).header().tag() != ValueTag::Ref {
+            return Value::nil();
+        }
+
+        // Check if we're in a transaction
+        if !crate::transaction::clorus_tx_active() {
+            // ensure must be in dosync
+            return Value::nil();
+        }
+
+        let ref_ptr = (*ref_val).as_ptr() as *mut ClorusRef;
+        let ref_id = (*ref_ptr).id();
+
+        // If not already in write set, record a read
+        if !crate::transaction::tx_has_write(ref_id) {
+            let version = (*ref_ptr).version();
+            crate::transaction::tx_record_read(ref_id, version);
+        }
+
+        // Return the current value
+        clorus_ref_deref(ref_val)
+    }
+}
+
 // ============================================================================
 // Cleanup
 // ============================================================================
@@ -240,14 +298,14 @@ mod tests {
     #[test]
     fn test_ref_create_and_deref() {
         unsafe {
-            let val = Value::number(42.0);
+            let val = Value::double(42.0);
             let ref_val = clorus_ref(val);
 
             assert!(!ref_val.is_null());
             assert_eq!((*ref_val).header().tag(), ValueTag::Ref);
 
             let deref_val = clorus_ref_deref(ref_val);
-            assert_eq!((*deref_val).as_number(), 42.0);
+            assert_eq!((*deref_val).as_double(), 42.0);
 
             crate::value::clorus_release(deref_val);
             crate::value::clorus_release(ref_val);
@@ -257,14 +315,14 @@ mod tests {
     #[test]
     fn test_ref_version() {
         unsafe {
-            let val = Value::number(10.0);
+            let val = Value::double(10.0);
             let ref_val = clorus_ref(val);
             let ref_ptr = (*ref_val).as_ptr() as *mut ClorusRef;
 
             assert_eq!((*ref_ptr).version(), 0);
 
             // Update value (simulating transaction commit)
-            let new_val = Value::number(20.0);
+            let new_val = Value::double(20.0);
             let old_val = (*ref_ptr).set_versioned(new_val);
 
             assert_eq!((*ref_ptr).version(), 1);
@@ -277,7 +335,7 @@ mod tests {
     #[test]
     fn test_ref_deref_non_ref() {
         unsafe {
-            let num = Value::number(99.0);
+            let num = Value::double(99.0);
             let result = clorus_ref_deref(num);
 
             assert_eq!((*result).header().tag(), ValueTag::Nil);

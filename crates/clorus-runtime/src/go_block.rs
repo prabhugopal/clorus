@@ -107,7 +107,7 @@ mod tests {
     fn test_go_execution() {
         // Create a test function that returns a value
         extern "C" fn test_func(_captures: *mut Value) -> *mut Value {
-            Value::number(42.0)
+            Value::double(42.0)
         }
 
         // Execute in go block
@@ -122,7 +122,7 @@ mod tests {
         let result = crate::channel::clorus_chan_take(result_chan);
 
         unsafe {
-            let num = crate::value::clorus_value_as_number(result);
+            let num = crate::value::clorus_value_as_double(result);
             assert_eq!(num, 42.0);
         }
 
@@ -137,7 +137,7 @@ mod tests {
     fn test_go_multiple() {
         // Execute multiple go blocks
         extern "C" fn test_func(_captures: *mut Value) -> *mut Value {
-            Value::number(1.0)
+            Value::double(1.0)
         }
 
         let mut channels = Vec::new();

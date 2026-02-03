@@ -25,21 +25,19 @@ impl ClorusHashSet {
 
     /// Add a value to the set
     /// For now, this mutates - will be persistent in future
-    pub fn conj(&mut self, val: *mut Value) {
+    pub unsafe fn conj(&mut self, val: *mut Value) {
         let hash = hash_value(val);
 
         // Only add if not already present
         if self.entries.insert(hash) {
             // Retain the value
-            unsafe {
-                crate::value::clorus_retain(val);
-            }
+            crate::value::clorus_retain(val);
             self.values.push(val);
         }
     }
 
     /// Remove a value from the set
-    pub fn disj(&mut self, val: *mut Value) {
+    pub unsafe fn disj(&mut self, val: *mut Value) {
         let hash = hash_value(val);
 
         if self.entries.remove(&hash) {
@@ -48,9 +46,7 @@ impl ClorusHashSet {
                 hash_value(v) == hash
             }) {
                 let old_val = self.values.remove(index);
-                unsafe {
-                    crate::value::clorus_release(old_val);
-                }
+                crate::value::clorus_release(old_val);
             }
         }
     }
@@ -80,9 +76,14 @@ fn hash_value(val: *mut Value) -> u64 {
 
     unsafe {
         match (*val).header().tag() {
-            crate::value::ValueTag::Number => {
+            crate::value::ValueTag::Long => {
                 let mut hasher = DefaultHasher::new();
-                (*val).as_number().to_bits().hash(&mut hasher);
+                (*val).as_long().hash(&mut hasher);
+                hasher.finish()
+            }
+            crate::value::ValueTag::Double => {
+                let mut hasher = DefaultHasher::new();
+                (*val).as_double().to_bits().hash(&mut hasher);
                 hasher.finish()
             }
             crate::value::ValueTag::String => {
@@ -236,8 +237,8 @@ mod tests {
     #[test]
     fn test_set_conj() {
         let set = clorus_set_empty();
-        let val1 = Value::number(42.0);
-        let val2 = Value::number(43.0);
+        let val1 = Value::double(42.0);
+        let val2 = Value::double(43.0);
 
         let set2 = clorus_set_conj(set, val1);
         let set3 = clorus_set_conj(set2, val2);
@@ -259,7 +260,7 @@ mod tests {
     #[test]
     fn test_set_contains() {
         let set = clorus_set_empty();
-        let val = Value::number(42.0);
+        let val = Value::double(42.0);
 
         // Before adding
         let contains_before = clorus_set_contains(set, val);

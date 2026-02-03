@@ -585,9 +585,9 @@ mod tests {
     // Test function that increments a number
     extern "C" fn test_inc(val: *mut Value) -> *mut Value {
         unsafe {
-            if (*val).header().tag() == ValueTag::Number {
-                let n = (*val).as_number();
-                Value::number(n + 1.0)
+            if (*val).header().tag() == ValueTag::Double {
+                let n = (*val).as_double();
+                Value::double(n + 1.0)
             } else {
                 val
             }
@@ -597,14 +597,14 @@ mod tests {
     #[test]
     fn test_agent_create_and_deref() {
         unsafe {
-            let val = Value::number(42.0);
+            let val = Value::double(42.0);
             let agent = clorus_agent(val);
 
             assert!(!agent.is_null());
             assert_eq!((*agent).header().tag(), ValueTag::Agent);
 
             let deref_val = clorus_agent_deref(agent);
-            assert_eq!((*deref_val).as_number(), 42.0);
+            assert_eq!((*deref_val).as_double(), 42.0);
 
             crate::value::clorus_release(deref_val);
             crate::value::clorus_release(agent);
@@ -614,7 +614,7 @@ mod tests {
     #[test]
     fn test_agent_send() {
         unsafe {
-            let val = Value::number(10.0);
+            let val = Value::double(10.0);
             let agent = clorus_agent(val);
 
             // Use real function pointer
@@ -629,7 +629,7 @@ mod tests {
 
             // Check that value was incremented
             let deref_val = clorus_agent_deref(agent);
-            assert_eq!((*deref_val).as_number(), 11.0);
+            assert_eq!((*deref_val).as_double(), 11.0);
 
             crate::value::clorus_release(deref_val);
             crate::value::clorus_release(result);
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn test_agent_error_none() {
         unsafe {
-            let val = Value::number(5.0);
+            let val = Value::double(5.0);
             let agent = clorus_agent(val);
 
             let error = clorus_agent_error(agent);
@@ -654,7 +654,7 @@ mod tests {
     #[test]
     fn test_agent_await() {
         unsafe {
-            let val = Value::number(1.0);
+            let val = Value::double(1.0);
             let agent = clorus_agent(val);
 
             // Send multiple actions
@@ -670,7 +670,7 @@ mod tests {
 
             // Check that value was incremented 3 times: 1 + 1 + 1 + 1 = 4
             let deref_val = clorus_agent_deref(agent);
-            assert_eq!((*deref_val).as_number(), 4.0);
+            assert_eq!((*deref_val).as_double(), 4.0);
 
             crate::value::clorus_release(deref_val);
             crate::value::clorus_release(agent);
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn test_agent_await_for_timeout() {
         unsafe {
-            let val = Value::number(10.0);
+            let val = Value::double(10.0);
             let agent = clorus_agent(val);
 
             // Send action

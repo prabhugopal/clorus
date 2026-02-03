@@ -13,6 +13,8 @@ pub enum Token {
     // Reader macros
     ShorthandFnStart,  // #(
     HashSetStart,      // #{
+    VarQuote,          // #' (var quote)
+    Meta,              // ^ (metadata prefix)
     Quote,             // '
     SyntaxQuote,       // ` (backtick)
     Unquote,           // ~
@@ -20,7 +22,8 @@ pub enum Token {
     Deref,             // @ (dereference atom/ref)
 
     // Literals
-    Number(f64),
+    Long(i64),
+    Double(f64),
     String(String),
     Symbol(String),
     Keyword(String),
@@ -120,8 +123,9 @@ impl Lexer {
         Err("Unterminated string".to_string())
     }
 
-    fn read_number(&mut self) -> f64 {
+    fn read_number(&mut self) -> Token {
         let mut num_str = String::new();
+        let mut has_decimal = false;
 
         // Handle negative numbers
         if self.current_char() == Some('-') {
@@ -131,7 +135,11 @@ impl Lexer {
 
         // Read digits and decimal point
         while let Some(ch) = self.current_char() {
-            if ch.is_ascii_digit() || ch == '.' {
+            if ch.is_ascii_digit() {
+                num_str.push(ch);
+                self.advance();
+            } else if ch == '.' {
+                has_decimal = true;
                 num_str.push(ch);
                 self.advance();
             } else {
@@ -139,7 +147,37 @@ impl Lexer {
             }
         }
 
-        num_str.parse().unwrap_or(0.0)
+        // Check for scientific notation (e.g., 1e6, 3.14e-2)
+        if let Some('e') | Some('E') = self.current_char() {
+            has_decimal = true;  // Scientific notation is always a double
+            num_str.push('e');
+            self.advance();
+
+            // Handle optional +/- after 'e'
+            if let Some('+') | Some('-') = self.current_char() {
+                num_str.push(self.current_char().unwrap());
+                self.advance();
+            }
+
+            // Read exponent digits
+            while let Some(ch) = self.current_char() {
+                if ch.is_ascii_digit() {
+                    num_str.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Parse as Long or Double based on presence of decimal point/exponent
+        if has_decimal {
+            let value = num_str.parse().unwrap_or(0.0);
+            Token::Double(value)
+        } else {
+            let value = num_str.parse().unwrap_or(0);
+            Token::Long(value)
+        }
     }
 
     fn read_symbol(&mut self) -> String {
@@ -160,6 +198,7 @@ impl Lexer {
                 || ch == '.'
                 || ch == '%'
                 || ch == '&'
+                || ch == '#'  // Allow # for gensyms (auto-gensym like result#, x#)
             {
                 result.push(ch);
                 self.advance();
@@ -220,6 +259,11 @@ impl Lexer {
                     self.advance(); // skip #
                     self.advance(); // skip {
                     Ok(Token::HashSetStart)
+                } else if self.peek_char(1) == Some('\'') {
+                    // Var quote: #'symbol
+                    self.advance(); // skip #
+                    self.advance(); // skip '
+                    Ok(Token::VarQuote)
                 } else {
                     // Other # forms not yet supported
                     return Err(format!("Unsupported reader macro: #{:?}", self.peek_char(1)));
@@ -256,6 +300,12 @@ impl Lexer {
                 Ok(Token::Deref)
             }
 
+            Some('^') => {
+                // Metadata: ^:dynamic or ^{:doc "..."}
+                self.advance();
+                Ok(Token::Meta)
+            }
+
             Some('"') => {
                 let s = self.read_string()?;
                 Ok(Token::String(s))
@@ -268,8 +318,7 @@ impl Lexer {
             }
 
             Some(ch) if ch.is_ascii_digit() || (ch == '-' && self.peek_char(1).map_or(false, |c| c.is_ascii_digit())) => {
-                let num = self.read_number();
-                Ok(Token::Number(num))
+                Ok(self.read_number())
             }
 
             Some(_) => {
@@ -320,9 +369,9 @@ mod tests {
     fn test_numbers() {
         let mut lexer = Lexer::new("42 3.14 -10");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0], Token::Number(42.0));
-        assert_eq!(tokens[1], Token::Number(3.14));
-        assert_eq!(tokens[2], Token::Number(-10.0));
+        assert_eq!(tokens[0], Token::Long(42));
+        assert_eq!(tokens[1], Token::Double(3.14));
+        assert_eq!(tokens[2], Token::Long(-10));
     }
 
     #[test]

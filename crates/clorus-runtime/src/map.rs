@@ -22,23 +22,19 @@ impl ClorusHashMap {
 
     /// Create a new map by adding/updating a key-value pair
     /// For now, this mutates - will be persistent in Phase C
-    pub fn assoc(&mut self, key: *mut Value, val: *mut Value) {
+    pub unsafe fn assoc(&mut self, key: *mut Value, val: *mut Value) {
         // Compute hash of key
         let hash = hash_value(key);
 
         // Retain the value
-        unsafe {
-            crate::value::clorus_retain(key);
-            crate::value::clorus_retain(val);
-        }
+        crate::value::clorus_retain(key);
+        crate::value::clorus_retain(val);
 
         // Insert into map
         if let Some((old_key, old_val)) = self.entries.insert(hash, (key, val)) {
             // Release old values
-            unsafe {
-                crate::value::clorus_release(old_key);
-                crate::value::clorus_release(old_val);
-            }
+            crate::value::clorus_release(old_key);
+            crate::value::clorus_release(old_val);
         }
     }
 
@@ -70,9 +66,14 @@ fn hash_value(val: *mut Value) -> u64 {
 
     unsafe {
         match (*val).header().tag() {
-            crate::value::ValueTag::Number => {
+            crate::value::ValueTag::Long => {
                 let mut hasher = DefaultHasher::new();
-                (*val).as_number().to_bits().hash(&mut hasher);
+                (*val).as_long().hash(&mut hasher);
+                hasher.finish()
+            }
+            crate::value::ValueTag::Double => {
+                let mut hasher = DefaultHasher::new();
+                (*val).as_double().to_bits().hash(&mut hasher);
                 hasher.finish()
             }
             crate::value::ValueTag::String => {
@@ -184,7 +185,7 @@ mod tests {
     #[test]
     fn test_map_assoc_get() {
         let map = clorus_map_empty();
-        let key = Value::number(42.0);
+        let key = Value::double(42.0);
         let val = Value::string("hello");
 
         let map2 = clorus_map_assoc(map, key, val);

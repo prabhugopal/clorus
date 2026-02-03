@@ -3,8 +3,11 @@
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    /// Numbers: 42, 3.14
-    Number(f64),
+    /// Long integers: 42, -100, 1000000
+    Long(i64),
+
+    /// Double floating-point: 3.14, 1e6, -2.5
+    Double(f64),
 
     /// Strings: "hello world"
     String(String),
@@ -41,10 +44,14 @@ pub enum Expr {
         body: Box<Expr>,
     },
 
-    /// Global definition: (def x 10)
+    /// Global definition: (def x 10) or (def ^:dynamic *x* 10)
+    /// Supports metadata: ^:dynamic, ^:private, ^{:doc "..."}, etc.
     Def {
         name: String,
         value: Box<Expr>,
+        /// Metadata map - e.g., {:dynamic true, :doc "Output stream"}
+        /// Parsed from ^:dynamic or ^{:key val}
+        metadata: Option<Vec<(Expr, Expr)>>,
     },
 
     /// Function definition: (defn add [x y] (+ x y))
@@ -62,6 +69,13 @@ pub enum Expr {
     DefnMulti {
         name: String,
         arities: Vec<FunctionArity>,
+    },
+
+    /// Forward declaration: (declare foo bar baz)
+    /// Declares function names that will be defined later, enabling forward references
+    /// Example: (declare helper) (defn main [] (helper 42)) (defn helper [x] (+ x 1))
+    Declare {
+        names: Vec<String>,
     },
 
     /// Anonymous function: (fn [x y] (+ x y))
@@ -132,6 +146,22 @@ pub enum Expr {
     /// Example: @counter => current value of counter atom
     Deref {
         expr: Box<Expr>,
+    },
+
+    /// Var reference: (var x) or #'x
+    /// Returns the Var object itself (not its value)
+    /// Example: #'*out* => #<Var *out*>, not the value
+    /// Used for alter-var-root, var metadata access
+    Var {
+        name: String,
+    },
+
+    /// Binding expression: (binding [*var1* val1 *var2* val2] body)
+    /// Temporarily rebinds dynamic vars for the duration of body
+    /// Thread-local, automatically restored on exit
+    Binding {
+        bindings: Vec<(String, Box<Expr>)>,  // var name -> new value
+        body: Box<Expr>,
     },
 
     /// Use/import statement: (use rust.fs) or (use rust.fs [read write])
@@ -296,15 +326,17 @@ pub enum Pattern {
     /// Simple binding: x
     Symbol(String),
 
-    /// Vector destructuring: [a b c] or [a b & rest]
+    /// Vector destructuring: [a b c] or [a b & rest] or [a b :as all]
     Vector {
         elements: Vec<Pattern>,
         rest: Option<String>, // & rest parameter
+        as_binding: Option<String>, // :as binding for whole collection
     },
 
-    /// Map destructuring: {:keys [x y]} or {x :x, y :y}
+    /// Map destructuring: {:keys [x y]} or {x :x, y :y} or {:keys [x y] :or {x 0}}
     Map {
         bindings: Vec<(MapPatternKey, Pattern)>,
+        defaults: Option<Vec<(String, Box<Expr>)>>, // :or defaults map
     },
 
     /// Ignore binding: _
@@ -314,17 +346,22 @@ pub enum Pattern {
 /// Key in a map destructuring pattern
 #[derive(Debug, Clone, PartialEq)]
 pub enum MapPatternKey {
-    /// Keyword key: :name
+    /// Keyword key: :name (from :keys)
     Keyword(String),
     /// Symbol used as both key and binding: x => {:x x}
     Symbol(String),
+    /// String key: "name" (from :strs)
+    Str(String),
+    /// Symbol key: 'x (from :syms)
+    Sym(String),
 }
 
 impl Expr {
     pub fn is_atom(&self) -> bool {
         matches!(
             self,
-            Expr::Number(_)
+            Expr::Long(_)
+                | Expr::Double(_)
                 | Expr::String(_)
                 | Expr::Symbol(_)
                 | Expr::Keyword(_)

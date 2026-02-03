@@ -275,12 +275,12 @@ mod tests {
     fn test_cons() {
         let list = PersistentList::empty();
 
-        let val1 = Value::number(1.0);
+        let val1 = Value::double(1.0);
         let list1 = list.cons(val1);
         assert!(!list1.is_empty());
         assert_eq!(list1.count(), 1);
 
-        let val2 = Value::number(2.0);
+        let val2 = Value::double(2.0);
         let list2 = list1.cons(val2);
         assert_eq!(list2.count(), 2);
 
@@ -292,21 +292,21 @@ mod tests {
     fn test_first_rest() {
         let list = PersistentList::empty();
 
-        let val1 = Value::number(1.0);
-        let val2 = Value::number(2.0);
-        let val3 = Value::number(3.0);
+        let val1 = Value::double(1.0);
+        let val2 = Value::double(2.0);
+        let val3 = Value::double(3.0);
 
         let list = list.cons(val3).cons(val2).cons(val1);
         // List is now [1, 2, 3]
 
         unsafe {
-            assert_eq!((*list.first()).as_number(), 1.0);
+            assert_eq!((*list.first()).as_double(), 1.0);
 
             let rest = list.rest();
-            assert_eq!((*rest.first()).as_number(), 2.0);
+            assert_eq!((*rest.first()).as_double(), 2.0);
 
             let rest2 = rest.rest();
-            assert_eq!((*rest2.first()).as_number(), 3.0);
+            assert_eq!((*rest2.first()).as_double(), 3.0);
 
             let rest3 = rest2.rest();
             assert!(rest3.is_empty());
@@ -317,9 +317,9 @@ mod tests {
     fn test_structural_sharing() {
         let list1 = PersistentList::empty();
 
-        let val1 = Value::number(1.0);
-        let val2 = Value::number(2.0);
-        let val3 = Value::number(3.0);
+        let val1 = Value::double(1.0);
+        let val2 = Value::double(2.0);
+        let val3 = Value::double(3.0);
 
         let list1 = list1.cons(val1).cons(val2);
         // list1 = [2, 1]
@@ -343,13 +343,13 @@ mod tests {
         let empty = clorus_list_empty();
         assert_eq!(clorus_list_count(empty), 0);
 
-        let val1 = Value::number(42.0);
+        let val1 = Value::double(42.0);
         let list1 = clorus_list_cons(empty, val1);
         assert_eq!(clorus_list_count(list1), 1);
 
         let first = clorus_list_first(list1);
         unsafe {
-            assert_eq!((*first).as_number(), 42.0);
+            assert_eq!((*first).as_double(), 42.0);
         }
 
         // Clean up

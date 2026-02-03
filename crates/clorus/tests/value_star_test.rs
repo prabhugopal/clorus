@@ -1,6 +1,6 @@
 /// Integration test for Value* system
 use clorus::*;
-use clorus_runtime::value::{clorus_value_as_number, clorus_value_number, clorus_release, Value};
+use clorus_runtime::value::{clorus_value_as_long, clorus_value_long, clorus_release, Value};
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
 
@@ -8,7 +8,7 @@ use inkwell::OptimizationLevel;
 fn ensure_runtime_symbols() {
     // Touch runtime functions to ensure they're linked
     unsafe {
-        let _test_val = clorus_value_number(42.0);
+        let _test_val = clorus_value_long(42);
         clorus_release(_test_val);
     }
 }
@@ -43,11 +43,11 @@ fn test_value_star_arithmetic() {
         let result_ptr = jit_fn.call();
         println!("Got result pointer: {:p}", result_ptr);
         let result_val = result_ptr as *mut Value;
-        println!("Converting to number...");
-        let result = clorus_value_as_number(result_val);
+        println!("Converting to long...");
+        let result = clorus_value_as_long(result_val);
 
         println!("Result: {}", result);
-        assert!((result - 3.0).abs() < 0.0001, "Expected 3.0, got {}", result);
+        assert_eq!(result, 3, "Expected 3, got {}", result);
     }
 }
 
@@ -96,9 +96,9 @@ fn test_value_star_let_binding() {
         let jit_fn = engine.get_function::<TestFunc>("test_let").unwrap();
         let result_ptr = jit_fn.call();
         let result_val = result_ptr as *mut Value;
-        let result = clorus_value_as_number(result_val);
+        let result = clorus_value_as_long(result_val);
 
-        assert!((result - 10.0).abs() < 0.0001, "Expected 10.0, got {}", result);
+        assert_eq!(result, 10, "Expected 10, got {}", result);
     }
 }
 
@@ -122,8 +122,8 @@ fn test_value_star_if_expression() {
         let jit_fn = engine.get_function::<TestFunc>("test_if").unwrap();
         let result_ptr = jit_fn.call();
         let result_val = result_ptr as *mut Value;
-        let result = clorus_value_as_number(result_val);
+        let result = clorus_value_as_long(result_val);
 
-        assert!((result - 100.0).abs() < 0.0001, "Expected 100.0, got {}", result);
+        assert_eq!(result, 100, "Expected 100, got {}", result);
     }
 }

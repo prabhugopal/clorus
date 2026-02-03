@@ -1,0 +1,10 @@
+[package]
+name = "test-summary"
+version = "0.1.0"
+
+[build]
+entry = "test-summary.clr"
+
+[link]
+libraries = []
+frameworks = []

@@ -453,13 +453,13 @@ mod tests {
             let chan = clorus_chan(10);
 
             // Put a value
-            let val = Value::number(42.0);
+            let val = Value::double(42.0);
             let put_result = clorus_chan_put(chan, val);
             assert_eq!((*put_result).as_bool(), true);
 
             // Take the value
             let taken = clorus_chan_take(chan);
-            assert_eq!((*taken).as_number(), 42.0);
+            assert_eq!((*taken).as_double(), 42.0);
 
             crate::value::clorus_release(put_result);
             crate::value::clorus_release(taken);
@@ -476,7 +476,7 @@ mod tests {
             clorus_chan_close(chan);
 
             // Put should fail
-            let val = Value::number(42.0);
+            let val = Value::double(42.0);
             let put_result = clorus_chan_put(chan, val);
             assert_eq!((*put_result).as_bool(), false);
 
@@ -502,7 +502,7 @@ mod tests {
             let producer = thread::spawn(move || {
                 let chan_clone = chan_addr as *mut Value;
                 for i in 0..10 {
-                    let val = Value::number(i as f64);
+                    let val = Value::double(i as f64);
                     clorus_chan_put(chan_clone, val);
                 }
             });
@@ -511,7 +511,7 @@ mod tests {
             let mut sum = 0.0;
             for _ in 0..10 {
                 let val = clorus_chan_take(chan);
-                sum += (*val).as_number();
+                sum += (*val).as_double();
                 crate::value::clorus_release(val);
             }
 

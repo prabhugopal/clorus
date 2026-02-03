@@ -1,0 +1,36 @@
+;; Test type predicates
+(println "Testing type predicates:")
+
+;; Test vector?
+(println "vector? [1 2 3]:" (vector? [1 2 3]))
+(println "vector? {:a 1}:" (vector? {:a 1}))
+
+;; Test map?
+(println "map? {:a 1}:" (map? {:a 1}))
+(println "map? [1 2 3]:" (map? [1 2 3]))
+
+;; Test list?
+(println "list? (list 1 2 3):" (list? (list 1 2 3)))
+(println "list? [1 2 3]:" (list? [1 2 3]))
+
+;; Test number?
+(println "number? 42:" (number? 42))
+(println "number? \"hi\":" (number? "hi"))
+
+;; Test string?
+(println "string? \"hello\":" (string? "hello"))
+(println "string? 42:" (string? 42))
+
+;; Test nil?
+(println "nil? nil:" (nil? nil))
+(println "nil? 42:" (nil? 42))
+
+;; Test seq?
+(println "seq? [1 2 3]:" (seq? [1 2 3]))
+(println "seq? (list 1 2 3):" (seq? (list 1 2 3)))
+(println "seq? {:a 1}:" (seq? {:a 1}))
+
+;; Test coll?
+(println "coll? [1 2 3]:" (coll? [1 2 3]))
+(println "coll? {:a 1}:" (coll? {:a 1}))
+(println "coll? 42:" (coll? 42))

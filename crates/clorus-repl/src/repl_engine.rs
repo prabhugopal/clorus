@@ -2,8 +2,9 @@
 ///
 /// Strategy: Keep all source code and recompile everything for each expression.
 /// This ensures variables and functions persist across REPL lines.
-use clorus::{parse, expand_macros, CodeGen, ModuleLoader, NamespaceContext};
+use clorus::{parse, expand_macros, CodeGen, ModuleLoader};
 use clorus::codegen::RustLibrary;
+use clorus_codegen::namespace_context::NamespaceContext;
 use clorus_syntax::{Expr, RequireSpec};
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
@@ -48,7 +49,7 @@ pub struct ReplEngine<'ctx> {
 
 impl<'ctx> ReplEngine<'ctx> {
     pub fn new(context: &'ctx Context) -> Self {
-        ReplEngine {
+        let mut engine = ReplEngine {
             context,
             history: Vec::new(),
             init_forms: Vec::new(),
@@ -57,7 +58,56 @@ impl<'ctx> ReplEngine<'ctx> {
             namespace: NamespaceContext::new("user"),
             module_loader: ModuleLoader::new(),
             rust_libraries: Vec::new(),
+        };
+
+        // Auto-load stdlib (provides inc, dec, map, filter, etc.)
+        let _ = engine.load_stdlib();
+
+        engine
+    }
+
+    /// Load the standard library into init_forms
+    fn load_stdlib(&mut self) -> Result<(), String> {
+        use std::path::{Path, PathBuf};
+        use std::fs;
+
+        // Find stdlib relative to the binary location
+        let mut stdlib_paths: Vec<PathBuf> = Vec::new();
+
+        // Try to find stdlib relative to executable
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                // From target/release/ go up to project root
+                if let Some(target_dir) = exe_dir.parent() {
+                    if let Some(project_root) = target_dir.parent() {
+                        stdlib_paths.push(project_root.join("stdlib/core.clr"));
+                        stdlib_paths.push(project_root.join("stdlib/minimal.clr"));
+                    }
+                }
+            }
         }
+
+        // Also try current directory (for local development)
+        stdlib_paths.push(PathBuf::from("stdlib/core.clr"));
+        stdlib_paths.push(PathBuf::from("stdlib/minimal.clr"));
+        stdlib_paths.push(PathBuf::from("../stdlib/core.clr"));
+        stdlib_paths.push(PathBuf::from("../stdlib/minimal.clr"));
+        stdlib_paths.push(PathBuf::from("../../stdlib/core.clr"));
+        stdlib_paths.push(PathBuf::from("../../stdlib/minimal.clr"));
+
+        for path in stdlib_paths {
+            if path.exists() {
+                let source = fs::read_to_string(&path)
+                    .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+
+                // Add stdlib source to init_forms (will be compiled with every REPL expression)
+                self.init_forms.push(source);
+
+                return Ok(());
+            }
+        }
+
+        Err("stdlib not found in any standard location".to_string())
     }
 
     /// Get the current namespace name
@@ -78,7 +128,17 @@ impl<'ctx> ReplEngine<'ctx> {
 
     /// Process a require spec and update namespace context
     fn process_require(&mut self, spec: &RequireSpec) {
-        self.namespace.process_require(spec);
+        // Add namespace alias if specified
+        if let Some(alias) = &spec.alias {
+            self.namespace.aliases.insert(alias.clone(), spec.module.clone());
+        }
+
+        // Add referred symbols to imports
+        if !spec.refer.is_empty() {
+            for symbol in &spec.refer {
+                self.namespace.imports.insert(symbol.clone(), spec.module.clone());
+            }
+        }
     }
 
     /// Evaluate a project initialization form (stores separately, executes once)
@@ -204,22 +264,76 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Compile init forms (project files)
         // Note: def/defn MUST execute every time to initialize globals in the new JIT
-        for (i, init_input) in self.init_forms.iter().enumerate() {
+        for (form_idx, init_input) in self.init_forms.iter().enumerate() {
             let init_exprs = parse(init_input)?;
             if init_exprs.is_empty() {
                 continue;
             }
 
-            let expr = &init_exprs[0];
-            let expanded_expr = expand_macros(expr);
-            let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
+            // Process ALL expressions in this init form (not just first one!)
+            for (expr_idx, expr) in init_exprs.iter().enumerate() {
+                let expanded_expr = expand_macros(expr);
 
-            let fn_name = format!("init_{}", i);
-            codegen.wrap_in_function(&expanded_expr, &fn_name)?;
+                // Handle namespace declarations
+                if let clorus_syntax::Expr::Ns { name, requires, rust_imports } = &expanded_expr {
+                    // Create new namespace context
+                    let mut new_namespace = NamespaceContext::new(name);
 
-            // Execute def/defn to initialize globals (required for JIT architecture)
-            if is_def_or_defn {
-                def_fn_names.push(fn_name);
+                    // Process requires - manually update aliases and imports
+                    for req_spec in requires {
+                        // Add namespace alias if specified
+                        if let Some(alias) = &req_spec.alias {
+                            new_namespace.aliases.insert(alias.clone(), req_spec.module.clone());
+                        }
+
+                        // Add referred symbols to imports
+                        if !req_spec.refer.is_empty() {
+                            for symbol in &req_spec.refer {
+                                new_namespace.imports.insert(symbol.clone(), req_spec.module.clone());
+                            }
+                        }
+                    }
+
+                    // Update codegen namespace
+                    codegen.set_namespace(new_namespace);
+
+                    // Skip compilation for ns form (it's metadata, not executable)
+                    continue;
+                }
+
+                // Handle forward declarations (compile-time directive)
+                if let clorus_syntax::Expr::Declare { names } = &expanded_expr {
+                    // Process declare manually - it's a compile-time directive
+                    // The actual forward declaration tracking is now handled by codegen
+                    for name in names {
+                        // Generate mangled name based on current namespace
+                        let ns = codegen.get_namespace();
+                        let _mangled_name = if ns.current == "user" {
+                            name.clone()
+                        } else if ns.current.starts_with("clorus.") {
+                            format!("{}_{}",
+                                ns.current.replace('.', "_"),
+                                name.replace('-', "_"))
+                        } else {
+                            format!("clorus_{}_{}",
+                                ns.current.replace('.', "_"),
+                                name.replace('-', "_"))
+                        };
+                        // Forward declaration tracking is now handled by the compiler
+                    }
+                    // Skip wrapping - declare is compile-time only
+                    continue;
+                }
+
+                let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
+
+                let fn_name = format!("init_{}_{}", form_idx, expr_idx);
+                codegen.wrap_in_function(&expanded_expr, &fn_name)?;
+
+                // Execute def/defn to initialize globals (required for JIT architecture)
+                if is_def_or_defn {
+                    def_fn_names.push(fn_name);
+                }
             }
         }
 
@@ -255,7 +369,7 @@ impl<'ctx> ReplEngine<'ctx> {
         let fn_name = format!("eval_{}", self.expr_count);
         self.expr_count += 1;
         codegen.wrap_in_function(&expanded_current, &fn_name)?;
-        latest_fn_name = fn_name;
+        latest_fn_name = fn_name.clone();
 
         // Create JIT engine
         let engine = codegen.get_module()

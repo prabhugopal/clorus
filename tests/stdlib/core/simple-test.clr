@@ -1,0 +1,23 @@
+;; Simple functions only - no closures yet
+(defn inc [x] (+ x 1))
+(defn dec [x] (- x 1))
+
+;; Logic
+(defn not [x] (if x false true))
+
+;; Predicates
+(defn nil? [x] (= x nil))
+(defn some? [x] (not (nil? x)))
+(defn zero? [x] (= x 0))
+(defn pos? [x] (> x 0))
+(defn neg? [x] (< x 0))
+(defn even? [x] (= (mod x 2) 0))
+(defn odd? [x] (not (even? x)))
+(defn empty? [coll] (= (count coll) 0))
+
+;; Math
+(defn abs [x]
+  (if (neg? x) (- x) x))
+
+;; identity
+(defn identity [x] x)

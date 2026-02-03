@@ -1,0 +1,252 @@
+;; Core functionality tests
+;; Demonstrates the test framework and validates core language features
+
+;; Global test registry - stores tests as vector of {:name "..." :fn fn}
+(def *tests* (atom []))
+(def *test-results* (atom {:passed 0 :failed 0 :errors []}))
+
+;; Register a test
+(defn deftest [testname testfn]
+  (swap! *tests* conj {:name testname :fn testfn})
+  testname)
+
+;; Assertion: Check equality
+(defn assert-eq [expected actual]
+  (if (= expected actual)
+    {:pass true}
+    {:pass false
+     :message (str "Expected: " expected ", Got: " actual)}))
+
+;; Assertion: Check truth
+(defn assert-true [value]
+  (if value
+    {:pass true}
+    {:pass false
+     :message (str "Expected truthy value, got: " value)}))
+
+;; Assertion: Check falsity
+(defn assert-false [value]
+  (if (not value)
+    {:pass true}
+    {:pass false
+     :message (str "Expected falsy value, got: " value)}))
+
+;; Assertion: Check nil
+(defn assert-nil [value]
+  (if (nil? value)
+    {:pass true}
+    {:pass false
+     :message (str "Expected nil, got: " value)}))
+
+;; Assertion: Check not nil
+(defn assert-not-nil [value]
+  (if (not (nil? value))
+    {:pass true}
+    {:pass false
+     :message (str "Expected non-nil value, got nil")}))
+
+;; Helper: Run a single test
+(defn run-single-test [testname testfn]
+  (println (str "  Testing: " testname))
+  (let [result (testfn)]
+    (if (:pass result)
+      (do
+        (println "    ✓ PASS")
+        {:name testname :passed true})
+      (do
+        (println (str "    ✗ FAIL: " (:message result)))
+        {:name testname :passed false :message (:message result)}))))
+
+;; Run all registered tests
+(defn run-tests []
+  (println "\n=== Running Tests ===\n")
+  (reset! *test-results* {:passed 0 :failed 0 :errors []})
+
+  (let [tests @*tests*
+        test-count (count tests)]
+
+    (if (= test-count 0)
+      (println "No tests registered.")
+      (do
+        (println (str "Running " test-count " tests...\n"))
+
+        (loop [remaining-tests tests
+               passed 0
+               failed 0
+               errors []]
+          (if (empty? remaining-tests)
+            (do
+              (println (str "\n=== Test Summary ==="))
+              (println (str "Total: " test-count))
+              (println (str "Passed: " passed))
+              (println (str "Failed: " failed))
+              (println (str "Success Rate: " (/ (* passed 100) test-count) "%"))
+              (if (> failed 0)
+                (do
+                  (println "\nFailed tests:")
+                  (loop [err-list errors]
+                    (if (empty? err-list)
+                      nil
+                      (let [err (first err-list)]
+                        (println (str "  - " (:name err) ": " (:message err)))
+                        (recur (rest err-list))))))
+                nil)
+              (let [results {:passed passed :failed failed :errors errors}]
+                (reset! *test-results* results)
+                results))
+
+            (let [test-entry (first remaining-tests)
+                  testname (:name test-entry)
+                  testfn (:fn test-entry)
+                  result (run-single-test testname testfn)]
+              (if (:passed result)
+                (recur (rest remaining-tests) (+ passed 1) failed errors)
+                (recur (rest remaining-tests) passed (+ failed 1) (conj errors result))))))))))
+
+;; ========================================
+;; Test Definitions
+;; ========================================
+
+;; Arithmetic tests
+(deftest "Addition"
+  (fn [] (assert-eq 4 (+ 2 2))))
+
+(deftest "Subtraction"
+  (fn [] (assert-eq 0 (- 5 5))))
+
+(deftest "Multiplication"
+  (fn [] (assert-eq 20 (* 4 5))))
+
+(deftest "Division"
+  (fn [] (assert-eq 3 (/ 9 3))))
+
+;; Collection tests
+(deftest "Vector creation"
+  (fn [] (assert-eq [1 2 3] [1 2 3])))
+
+(deftest "Vector conj"
+  (fn [] (assert-eq [1 2 3 4] (conj [1 2 3] 4))))
+
+(deftest "Vector first"
+  (fn [] (assert-eq 1 (first [1 2 3]))))
+
+(deftest "Vector rest"
+  (fn [] (assert-eq [2 3] (rest [1 2 3]))))
+
+(deftest "Vector count"
+  (fn [] (assert-eq 3 (count [1 2 3]))))
+
+(deftest "Empty vector"
+  (fn [] (assert-true (empty? []))))
+
+(deftest "Non-empty vector"
+  (fn [] (assert-false (empty? [1 2 3]))))
+
+;; Map/filter/reduce tests
+(deftest "Map with first-class function"
+  (fn []
+    (let [inc-fn (fn [x] (+ x 1))
+          result (map inc-fn [1 2 3])]
+      (assert-eq [2 3 4] result))))
+
+(deftest "Filter with first-class function"
+  (fn []
+    (let [even? (fn [x] (= (mod x 2) 0))
+          result (filter even? [1 2 3 4 5 6])]
+      (assert-eq [2 4 6] result))))
+
+(deftest "Reduce with first-class function"
+  (fn []
+    (let [add (fn [a b] (+ a b))
+          result (reduce add 0 [1 2 3 4])]
+      (assert-eq 10 result))))
+
+;; Closure tests
+(deftest "Simple closure"
+  (fn []
+    (let [make-adder (fn [x]
+                       (fn [y] (+ x y)))
+          add-5 (make-adder 5)
+          result (add-5 3)]
+      (assert-eq 8 result))))
+
+(deftest "Nested closure"
+  (fn []
+    (let [make-multiplier (fn [m]
+                            (fn [x]
+                              (fn [y]
+                                (* m (* x y)))))
+          times-2 (make-multiplier 2)
+          times-2-3 (times-2 3)
+          result (times-2-3 4)]
+      (assert-eq 24 result))))
+
+;; Transducer tests
+(deftest "Map transducer"
+  (fn []
+    (let [inc-fn (fn [x] (+ x 1))
+          make-mapper (fn [f]
+                        (fn [rf]
+                          (fn [r v]
+                            (rf r (f v)))))
+          map-inc-xf (make-mapper inc-fn)
+          add-fn (fn [a b] (+ a b))
+          wrapped-add (map-inc-xf add-fn)
+          result (reduce wrapped-add 0 [1 2 3 4])]
+      (assert-eq 14 result))))
+
+(deftest "Filter transducer"
+  (fn []
+    (let [is-even (fn [x] (= (mod x 2) 0))
+          make-filter (fn [pred]
+                        (fn [rf]
+                          (fn [r v]
+                            (if (pred v)
+                              (rf r v)
+                              r))))
+          filter-even-xf (make-filter is-even)
+          add-fn (fn [a b] (+ a b))
+          filtered-add (filter-even-xf add-fn)
+          result (reduce filtered-add 0 [1 2 3 4 5 6])]
+      (assert-eq 12 result))))
+
+;; Atom tests
+(deftest "Atom creation"
+  (fn []
+    (let [a (atom 42)
+          value @a]
+      (assert-eq 42 value))))
+
+(deftest "Atom reset"
+  (fn []
+    (let [a (atom 0)
+          _ (reset! a 42)
+          value @a]
+      (assert-eq 42 value))))
+
+(deftest "Atom swap"
+  (fn []
+    (let [a (atom 10)
+          _ (swap! a (fn [x] (+ x 5)))
+          value @a]
+      (assert-eq 15 value))))
+
+;; Nil and boolean tests
+(deftest "Nil check"
+  (fn [] (assert-nil nil)))
+
+(deftest "Not nil check"
+  (fn [] (assert-not-nil 42)))
+
+(deftest "True value"
+  (fn [] (assert-true true)))
+
+(deftest "False value"
+  (fn [] (assert-false false)))
+
+;; Run all tests
+(println "\n╔═══════════════════════════════════╗")
+(println "║   Clorus Core Functionality Tests  ║")
+(println "╚═══════════════════════════════════╝")
+
+(run-tests)

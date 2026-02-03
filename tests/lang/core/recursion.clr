@@ -1,0 +1,21 @@
+;; Test 1: Simple recursion without collections
+(defn countdown [n]
+  (if (= n 0)
+    0
+    (+ 1 (countdown (- n 1)))))
+
+(countdown 5)
+;; Test recursion with conj - get count instead of printing vector
+(defn build-list [n]
+  (if (= n 0)
+    []
+    (conj (build-list (- n 1)) n)))
+
+(count (build-list 5))
+;; Test 2: Recursion with conj
+(defn build-list [n]
+  (if (= n 0)
+    []
+    (conj (build-list (- n 1)) n)))
+
+(build-list 3)

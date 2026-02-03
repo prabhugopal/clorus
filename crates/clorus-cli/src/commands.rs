@@ -101,14 +101,50 @@ pub fn build() -> Result<(), String> {
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
+    // Load and parse stdlib/core.clr first (provides inc, dec, range, for, doseq, etc.)
+    let stdlib_path = Path::new("stdlib/core.clr");
+    let mut all_exprs = Vec::new();
+
+    if stdlib_path.exists() {
+        let stdlib_source = fs::read_to_string(stdlib_path)
+            .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+
+        let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
+            .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+
+        all_exprs.extend(stdlib_exprs);
+    } else {
+        // Try relative to compiler location
+        let compiler_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
+
+        if let Some(compiler_dir) = compiler_dir {
+            let alt_stdlib = compiler_dir.join("stdlib/core.clr");
+            if alt_stdlib.exists() {
+                let stdlib_source = fs::read_to_string(&alt_stdlib)
+                    .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+
+                let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
+                    .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+
+                all_exprs.extend(stdlib_exprs);
+            }
+        }
+    }
+
+    // Load and parse the user's entry file
     let source = fs::read_to_string(entry_path)
         .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
 
-    // Parse and expand macros
+    // Parse and expand macros in user code
     let exprs = clorus::parse_and_expand(&source)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    if exprs.is_empty() {
+    // Combine stdlib and user expressions
+    all_exprs.extend(exprs);
+
+    if all_exprs.is_empty() {
         return Err("No expressions to compile".to_string());
     }
 
@@ -144,7 +180,7 @@ pub fn build() -> Result<(), String> {
 
     // Compile each expression into a function
     let mut function_names = Vec::new();
-    for (i, expr) in exprs.iter().enumerate() {
+    for (i, expr) in all_exprs.iter().enumerate() {
         let fn_name = format!("expr_{}", i);
         codegen.wrap_in_function(expr, &fn_name)
             .map_err(|e| format!("Compile error: {}", e))?;
@@ -167,7 +203,7 @@ pub fn build() -> Result<(), String> {
     // Create format strings for printing
     let float_format = builder.build_global_string_ptr("=> %g\n", "float_fmt").unwrap();
 
-    // Call each compiled expression and print the last one
+    // Call each compiled expression (defines functions, globals, etc.)
     let mut last_result: Option<inkwell::values::PointerValue> = None;
     for (i, fn_name) in function_names.iter().enumerate() {
         // Get the function from the module
@@ -175,33 +211,67 @@ pub fn build() -> Result<(), String> {
             let result = builder.build_call(func, &[], "call").unwrap();
             let result_ptr = result.try_as_basic_value().left().unwrap().into_pointer_value();
 
-            // If this is the last expression, print it
+            // Store last result in case -main doesn't exist
             if i == function_names.len() - 1 {
                 last_result = Some(result_ptr);
             }
         }
     }
 
-    // Print the final result if we have one
+    // Look for -main function and call it if present (like clorus run does)
+    // Construct the expected mangled name based on namespace
+    let mut main_fn_name = "-main".to_string();
+
+    // Check if there's a namespace declaration to construct qualified name
+    for expr in &all_exprs {
+        if let clorus_syntax::Expr::Ns { name, .. } = expr {
+            if name != "user" {
+                // Construct mangled name matching codegen.rs:1817-1819
+                main_fn_name = format!("clorus_{}_{}",
+                    name.replace('.', "_"),
+                    "-main".replace('-', "_"));
+            }
+            break;
+        }
+    }
+
+    // Try to call -main if it exists
+    let i8_ptr_type = context.i8_type().ptr_type(inkwell::AddressSpace::default());
+    let main_fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+
+    if let Some(user_main_fn) = codegen.get_module().get_function(&main_fn_name) {
+        // Call -main with empty args vector (like clorus run does)
+        // We need to call clorus_vector_empty() at runtime to get an empty vector
+        let vector_empty_fn = codegen.get_module()
+            .get_function("clorus_vector_empty")
+            .expect("clorus_vector_empty should be declared by runtime");
+
+        let empty_vec_result = builder.build_call(vector_empty_fn, &[], "empty_vec").unwrap();
+        let empty_vec_ptr = empty_vec_result.try_as_basic_value()
+            .left()
+            .expect("clorus_vector_empty should return a value")
+            .into_pointer_value();
+
+        // Call -main with the empty vector
+        let main_result = builder.build_call(user_main_fn, &[empty_vec_ptr.into()], "call_main").unwrap();
+
+        // Use the result from -main instead of last expression
+        if let Some(result_val) = main_result.try_as_basic_value().left() {
+            last_result = Some(result_val.into_pointer_value());
+        }
+    }
+
+    // Print the final result if we have one (from -main or last expression)
     if let Some(result_ptr) = last_result {
-        // clorus_value_as_number is already declared by the runtime
-        // Just get it from the module
-        let value_as_number_fn = codegen.get_module()
-            .get_function("clorus_value_as_number")
-            .expect("clorus_value_as_number should be declared by runtime");
+        // Get the print_value function which handles all types
+        let print_value_fn = codegen.get_module()
+            .get_function("clorus_print_value")
+            .expect("clorus_print_value should be declared by runtime");
 
-        let num_result = builder.build_call(
-            value_as_number_fn,
-            &[result_ptr.into()],
-            "extract_num"
-        ).unwrap();
-        let num_val = num_result.try_as_basic_value().left().unwrap().into_float_value();
-
-        // Print the number
         builder.build_call(
-            printf_fn,
-            &[float_format.as_pointer_value().into(), num_val.into()],
-            "printf_call"
+            print_value_fn,
+            &[result_ptr.into()],
+            "print_result"
         ).unwrap();
     }
 
@@ -249,13 +319,19 @@ pub fn build() -> Result<(), String> {
     // Find runtime library - search in current dir and workspace root
     let mut runtime_lib: Option<String> = None;
 
-    // Try current directory first
+    // Try current directory first (including deps directories where Cargo places libraries)
     for path in &[
+        "target/release/deps/libclorus_runtime.a",
         "target/release/libclorus_runtime.a",
+        "target/debug/deps/libclorus_runtime.a",
         "target/debug/libclorus_runtime.a",
+        "../target/release/deps/libclorus_runtime.a",
         "../target/release/libclorus_runtime.a",
+        "../target/debug/deps/libclorus_runtime.a",
         "../target/debug/libclorus_runtime.a",
+        "../../target/release/deps/libclorus_runtime.a",
         "../../target/release/libclorus_runtime.a",
+        "../../target/debug/deps/libclorus_runtime.a",
         "../../target/debug/libclorus_runtime.a",
     ] {
         if Path::new(path).exists() {
@@ -264,16 +340,50 @@ pub fn build() -> Result<(), String> {
         }
     }
 
-    // Try to find in the clorus installation directory
+    // Try to find relative to clorus executable (for installed version or running from workspace)
     if runtime_lib.is_none() {
-        // Get the directory where clorus binary is located
         if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(parent) = exe_path.parent() {
-                // Try ../lib relative to bin directory
-                let lib_path = parent.parent().and_then(|p| Some(p.join("lib/libclorus_runtime.a")));
-                if let Some(path) = lib_path {
-                    if path.exists() {
-                        runtime_lib = Some(path.to_string_lossy().to_string());
+            if let Some(exe_dir) = exe_path.parent() {
+                // Try relative to executable: deps/libclorus_runtime.a (same directory as exe)
+                let same_dir_deps = exe_dir.join("deps/libclorus_runtime.a");
+                if same_dir_deps.exists() {
+                    runtime_lib = Some(same_dir_deps.to_string_lossy().to_string());
+                }
+
+                // Try relative to workspace root: ../target/{release,debug}/deps/
+                // This handles when clorus is run from target/release/clorus
+                // exe_dir = /path/to/workspace/target/release
+                // workspace_root = /path/to/workspace
+                if runtime_lib.is_none() {
+                    if let Some(target_dir) = exe_dir.parent() {
+                        // target_dir = /path/to/workspace/target
+                        if target_dir.file_name().and_then(|n| n.to_str()) == Some("target") {
+                            if let Some(workspace_root) = target_dir.parent() {
+                                // workspace_root = /path/to/workspace
+                                for subpath in &[
+                                    "target/release/deps/libclorus_runtime.a",
+                                    "target/release/libclorus_runtime.a",
+                                    "target/debug/deps/libclorus_runtime.a",
+                                    "target/debug/libclorus_runtime.a",
+                                ] {
+                                    let path = workspace_root.join(subpath);
+                                    if path.exists() {
+                                        runtime_lib = Some(path.to_string_lossy().to_string());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Try ../lib relative to bin directory (installation layout)
+                if runtime_lib.is_none() {
+                    let lib_path = exe_dir.parent().map(|p| p.join("lib/libclorus_runtime.a"));
+                    if let Some(path) = lib_path {
+                        if path.exists() {
+                            runtime_lib = Some(path.to_string_lossy().to_string());
+                        }
                     }
                 }
             }
@@ -408,7 +518,9 @@ fn load_and_compile_modules<'ctx>(
         }
 
         // Convert module name to file path: math -> src/math.clrs
-        let module_path = module_name.replace('.', "/");
+        // Clojure convention: hyphens in namespace become underscores in filesystem
+        // e.g., my-module.core -> src/my_module/core.clrs
+        let module_path = module_name.replace('.', "/").replace('-', "_");
         let module_file = project_root.join("src").join(format!("{}.clrs", module_path));
 
         if !module_file.exists() {
@@ -432,6 +544,33 @@ fn load_and_compile_modules<'ctx>(
         for expr in &exprs {
             // Set namespace context if this is an ns declaration
             if let Expr::Ns { name, requires, rust_imports } = expr {
+                // Validate that namespace matches file path (like Clojure)
+                // Note: Clojure convention is underscore in filesystem, hyphen in namespace
+                // e.g., src/my_module/core.clrs -> (ns my-module.core)
+                let expected_ns_with_underscores = module_name;
+                let expected_ns_with_hyphens = module_name.replace('_', "-");
+
+                if name != expected_ns_with_underscores && name != &expected_ns_with_hyphens {
+                    return Err(format!(
+                        "Namespace mismatch in {}:\n\n  \
+                         Expected: (ns {}) or (ns {})\n  \
+                         Found:    (ns {})\n\n  \
+                         In Clorus, the namespace must match the file path.\n  \
+                         Note: Use hyphens (-) in namespaces for Clojure-style, underscores (_) match filesystem.\n\n  \
+                         Fix by either:\n  \
+                         1. Change namespace to: (ns {}) [Clojure-style]\n  \
+                         2. Change namespace to: (ns {}) [Direct match]\n  \
+                         3. Move file to: src/{}.clrs",
+                        module_file.display(),
+                        expected_ns_with_hyphens,
+                        expected_ns_with_underscores,
+                        name,
+                        expected_ns_with_hyphens,
+                        expected_ns_with_underscores,
+                        name.replace('.', "/").replace('-', "_")
+                    ));
+                }
+
                 let mut ns_ctx = NamespaceContext::default_namespace();
                 ns_ctx.current = name.clone();
 
@@ -586,11 +725,11 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     use inkwell::context::Context;
     use inkwell::OptimizationLevel;
     use clorus::CodeGen;
-    use clorus_runtime::value::{clorus_value_number, clorus_release};
+    use clorus_runtime::value::{clorus_value_long, clorus_release};
 
     // Ensure runtime symbols are linked by touching them
     unsafe {
-        let _dummy = clorus_value_number(0.0);
+        let _dummy = clorus_value_long(0);
         clorus_release(_dummy);
     }
 
@@ -643,6 +782,41 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     use clorus_codegen::namespace_context::NamespaceContext;
     for expr in &exprs {
         if let Expr::Ns { name, requires, rust_imports } = expr {
+            // Validate that namespace matches entry file path (like Clojure)
+            // Calculate expected namespace from file path
+            let expected_ns_with_underscores = entry_path
+                .strip_prefix("src/")
+                .or_else(|_| entry_path.strip_prefix("src\\"))
+                .unwrap_or(entry_path)
+                .with_extension("")
+                .to_string_lossy()
+                .replace('/', ".")
+                .replace('\\', ".");
+
+            // Clojure convention: underscores in filesystem, hyphens in namespace
+            let expected_ns_with_hyphens = expected_ns_with_underscores.replace('_', "-");
+
+            if name != &expected_ns_with_underscores && name != &expected_ns_with_hyphens {
+                return Err(format!(
+                    "Namespace mismatch in {}:\n\n  \
+                     Expected: (ns {}) or (ns {})\n  \
+                     Found:    (ns {})\n\n  \
+                     In Clorus, the namespace must match the file path.\n  \
+                     Note: Use hyphens (-) in namespaces for Clojure-style, underscores (_) match filesystem.\n\n  \
+                     Fix by either:\n  \
+                     1. Change namespace to: (ns {}) [Clojure-style]\n  \
+                     2. Change namespace to: (ns {}) [Direct match]\n  \
+                     3. Move entry file to: src/{}.clrs",
+                    entry_path.display(),
+                    expected_ns_with_hyphens,
+                    expected_ns_with_underscores,
+                    name,
+                    expected_ns_with_hyphens,
+                    expected_ns_with_underscores,
+                    name.replace('.', "/").replace('-', "_")
+                ));
+            }
+
             let mut ns_ctx = NamespaceContext::default_namespace();
             ns_ctx.current = name.clone();
 
@@ -702,11 +876,32 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     }
 
     // Look for -main function and call it with args if present
-    let main_fn_name = "-main";
+    // Need to check both simple name and namespace-qualified name
+    let mut main_fn_name = "-main".to_string();
+
+    // If there's a namespace in the first expression, construct qualified name
+    for expr in &exprs {
+        if let Expr::Ns { name, .. } = expr {
+            if name != "user" {
+                // Construct mangled name matching codegen.rs:1817-1819
+                // Note: namespace.current.replace('.', "_") does NOT replace hyphens!
+                // examples.async-ffi -> clorus_examples_async-ffi__main
+                main_fn_name = format!("clorus_{}_{}",
+                    name.replace('.', "_"),  // Keep hyphens in namespace part!
+                    "-main".replace('-', "_"));
+            }
+            break;
+        }
+    }
+
+    if debug {
+        println!("   [DEBUG] Looking for main function: {}", main_fn_name);
+    }
+
     let main_fn_result = unsafe {
         // Try to find the -main function
         type MainFunc = unsafe extern "C" fn(*mut u8) -> *mut u8;
-        engine.get_function::<MainFunc>(main_fn_name).ok()
+        engine.get_function::<MainFunc>(&main_fn_name).ok()
     };
 
     if let Some(main_fn) = main_fn_result {
@@ -748,12 +943,16 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     // Display the result
     if !last_result_ptr.is_null() {
         unsafe {
-            use clorus_runtime::value::{Value, ValueTag, clorus_value_as_number, clorus_value_as_cstring, clorus_free_cstring};
+            use clorus_runtime::value::{Value, ValueTag, clorus_value_as_long, clorus_value_as_double, clorus_value_as_bool, clorus_value_as_cstring, clorus_free_cstring};
             let value = last_result_ptr as *mut Value;
 
             match (*value).header().tag() {
-                ValueTag::Number => {
-                    let num = clorus_value_as_number(value);
+                ValueTag::Long => {
+                    let num = clorus_value_as_long(value);
+                    println!("=> {}", num);
+                }
+                ValueTag::Double => {
+                    let num = clorus_value_as_double(value);
                     println!("=> {}", num);
                 }
                 ValueTag::String => {
@@ -767,8 +966,8 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
                     }
                 }
                 ValueTag::Bool => {
-                    let num = clorus_value_as_number(value);
-                    println!("=> {}", if num != 0.0 { "true" } else { "false" });
+                    let b = clorus_value_as_bool(value);
+                    println!("=> {}", if b { "true" } else { "false" });
                 }
                 ValueTag::Nil => {
                     println!("=> nil");

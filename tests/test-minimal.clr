@@ -1,0 +1,126 @@
+;; Enhanced Test Suite with Metrics and Progress
+;; Tests core functionality
+
+;; Print fancy header
+(println "")
+(println "╔════════════════════════════════════════════════════════════╗")
+(println "║          Clorus Language Test Suite - v0.1.0              ║")
+(println "║                Core Features & Functionality               ║")
+(println "╚════════════════════════════════════════════════════════════╝")
+(println "")
+(println "═══════════════════════════════════════════════════════════")
+(println "Running 5 Tests...")
+(println "═══════════════════════════════════════════════════════════")
+(println "")
+
+;; Track counters
+(def total (atom 0))
+(def passed (atom 0))
+
+;; Test 1: Addition
+(print "[1/5] Arithmetic: Addition ... ")
+(let [result (= 4 (+ 2 2))]
+  (if result
+    (do
+      (println "✓ PASS")
+      (reset! total (+ @total 1))
+      (reset! passed (+ @passed 1)))
+    (do
+      (println "✗ FAIL")
+      (reset! total (+ @total 1)))))
+
+;; Test 2: Map with first-class function
+(print "[2/5] HOF: Map with first-class function ... ")
+(let [inc-fn (fn [x] (+ x 1))
+      result (map inc-fn [1 2 3])
+      expected [2 3 4]
+      test-passed (= expected result)]
+  (if test-passed
+    (do
+      (println "✓ PASS")
+      (reset! total (+ @total 1))
+      (reset! passed (+ @passed 1)))
+    (do
+      (println "✗ FAIL")
+      (println (str "    Expected: " expected))
+      (println (str "    Got: " result))
+      (reset! total (+ @total 1)))))
+
+;; Test 3: Filter with first-class function
+(print "[3/5] HOF: Filter with first-class function ... ")
+(let [even? (fn [x] (= (mod x 2) 0))
+      result (filter even? [1 2 3 4 5 6])
+      expected [2 4 6]
+      test-passed (= expected result)]
+  (if test-passed
+    (do
+      (println "✓ PASS")
+      (reset! total (+ @total 1))
+      (reset! passed (+ @passed 1)))
+    (do
+      (println "✗ FAIL")
+      (println (str "    Expected: " expected))
+      (println (str "    Got: " result))
+      (reset! total (+ @total 1)))))
+
+;; Test 4: Closure
+(print "[4/5] Closures: Simple closure capture ... ")
+(let [make-adder (fn [x] (fn [y] (+ x y)))
+      add-5 (make-adder 5)
+      result (add-5 3)
+      test-passed (= 8 result)]
+  (if test-passed
+    (do
+      (println "✓ PASS")
+      (reset! total (+ @total 1))
+      (reset! passed (+ @passed 1)))
+    (do
+      (println "✗ FAIL")
+      (println (str "    Expected: 8"))
+      (println (str "    Got: " result))
+      (reset! total (+ @total 1)))))
+
+;; Test 5: Transducer
+(print "[5/5] Transducers: Map transducer ... ")
+(let [inc-fn (fn [x] (+ x 1))
+      make-mapper (fn [f]
+                    (fn [rf]
+                      (fn [r v]
+                        (rf r (f v)))))
+      map-inc-xf (make-mapper inc-fn)
+      add-fn (fn [a b] (+ a b))
+      wrapped-add (map-inc-xf add-fn)
+      result (reduce wrapped-add 0 [1 2 3 4])
+      test-passed (= 14 result)]
+  (if test-passed
+    (do
+      (println "✓ PASS")
+      (reset! total (+ @total 1))
+      (reset! passed (+ @passed 1)))
+    (do
+      (println "✗ FAIL")
+      (println (str "    Expected: 14"))
+      (println (str "    Got: " result))
+      (reset! total (+ @total 1)))))
+
+;; Print Summary
+(let [total-count @total
+      passed-count @passed
+      failed-count (- total-count passed-count)
+      success-rate (if (= total-count 0) 0 (/ (* passed-count 100) total-count))]
+  (println "")
+  (println "╔════════════════════════════════════════════════════════════╗")
+  (println "║                      TEST SUMMARY                          ║")
+  (println "╠════════════════════════════════════════════════════════════╣")
+  (println (str "║  Total Tests:        " total-count "                                       ║"))
+  (println (str "║  Passed:             " passed-count "                                       ║"))
+  (println (str "║  Failed:             " failed-count "                                       ║"))
+  (println (str "║  Success Rate:       " success-rate "%                                  ║"))
+  (println "╚════════════════════════════════════════════════════════════╝")
+  (println "")
+  (if (> failed-count 0)
+    (println "❌ TESTS FAILED")
+    (println "✅ ALL TESTS PASSED!"))
+  (println ""))
+
+"Test suite complete"

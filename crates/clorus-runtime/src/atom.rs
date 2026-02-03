@@ -13,12 +13,10 @@ pub struct ClorusAtom {
 
 impl ClorusAtom {
     /// Create a new atom with the given initial value
-    pub fn new(initial: *mut Value) -> *mut Self {
+    pub unsafe fn new(initial: *mut Value) -> *mut Self {
         // Retain the initial value
-        unsafe {
-            if !initial.is_null() {
-                crate::value::clorus_retain(initial);
-            }
+        if !initial.is_null() {
+            crate::value::clorus_retain(initial);
         }
 
         Box::into_raw(Box::new(ClorusAtom {
@@ -27,87 +25,79 @@ impl ClorusAtom {
     }
 
     /// Read the current value (deref)
-    pub fn deref(&self) -> *mut Value {
+    pub unsafe fn deref(&self) -> *mut Value {
         let val = self.current.load(Ordering::Acquire);
         // Retain before returning to ensure it stays alive
-        unsafe {
-            if !val.is_null() {
-                crate::value::clorus_retain(val);
-            }
+        if !val.is_null() {
+            crate::value::clorus_retain(val);
         }
         val
     }
 
     /// Set the atom to a new value (reset!)
-    pub fn reset(&self, new_val: *mut Value) -> *mut Value {
-        unsafe {
-            // Retain the new value
-            if !new_val.is_null() {
-                crate::value::clorus_retain(new_val);
-            }
-
-            // Swap in the new value
-            let old_val = self.current.swap(new_val, Ordering::AcqRel);
-
-            // Release the old value
-            if !old_val.is_null() {
-                crate::value::clorus_release(old_val);
-            }
-
-            // Return the new value (already retained)
-            new_val
+    pub unsafe fn reset(&self, new_val: *mut Value) -> *mut Value {
+        // Retain the new value
+        if !new_val.is_null() {
+            crate::value::clorus_retain(new_val);
         }
+
+        // Swap in the new value
+        let old_val = self.current.swap(new_val, Ordering::AcqRel);
+
+        // Release the old value
+        if !old_val.is_null() {
+            crate::value::clorus_release(old_val);
+        }
+
+        // Return the new value (already retained)
+        new_val
     }
 
     /// Update the atom by applying a function (swap!)
     /// This is a simplified version - full version would need retry loop
-    pub fn swap(&self, func_ptr: *mut u8, arg: *mut Value) -> *mut Value {
-        unsafe {
-            // Load current value
-            let current_val = self.current.load(Ordering::Acquire);
+    pub unsafe fn swap(&self, func_ptr: *mut u8, arg: *mut Value) -> *mut Value {
+        // Load current value
+        let current_val = self.current.load(Ordering::Acquire);
 
-            // Call the function: func(current_val, arg) -> new_val
-            // For now, we'll use a simple approach
-            // In production, this needs a compare-and-swap retry loop
+        // Call the function: func(current_val, arg) -> new_val
+        // For now, we'll use a simple approach
+        // In production, this needs a compare-and-swap retry loop
 
-            type SwapFn = extern "C" fn(*mut Value, *mut Value) -> *mut Value;
-            let func: SwapFn = std::mem::transmute(func_ptr);
-            let new_val = func(current_val, arg);
+        type SwapFn = extern "C" fn(*mut Value, *mut Value) -> *mut Value;
+        let func: SwapFn = std::mem::transmute(func_ptr);
+        let new_val = func(current_val, arg);
 
-            // Update atomically
-            self.reset(new_val)
-        }
+        // Update atomically
+        self.reset(new_val)
     }
 
     /// Compare and set (CAS operation)
-    pub fn compare_and_set(&self, old: *mut Value, new: *mut Value) -> bool {
-        unsafe {
-            if !new.is_null() {
-                crate::value::clorus_retain(new);
+    pub unsafe fn compare_and_set(&self, old: *mut Value, new: *mut Value) -> bool {
+        if !new.is_null() {
+            crate::value::clorus_retain(new);
+        }
+
+        let result = self.current.compare_exchange(
+            old,
+            new,
+            Ordering::AcqRel,
+            Ordering::Acquire
+        );
+
+        match result {
+            Ok(actual_old) => {
+                // Success - release the old value
+                if !actual_old.is_null() {
+                    crate::value::clorus_release(actual_old);
+                }
+                true
             }
-
-            let result = self.current.compare_exchange(
-                old,
-                new,
-                Ordering::AcqRel,
-                Ordering::Acquire
-            );
-
-            match result {
-                Ok(actual_old) => {
-                    // Success - release the old value
-                    if !actual_old.is_null() {
-                        crate::value::clorus_release(actual_old);
-                    }
-                    true
+            Err(_) => {
+                // Failed - release the new value we didn't use
+                if !new.is_null() {
+                    crate::value::clorus_release(new);
                 }
-                Err(_) => {
-                    // Failed - release the new value we didn't use
-                    if !new.is_null() {
-                        crate::value::clorus_release(new);
-                    }
-                    false
-                }
+                false
             }
         }
     }
@@ -136,8 +126,10 @@ pub unsafe fn release_atom(atom: *mut ClorusAtom) {
 /// Create a new atom
 #[no_mangle]
 pub extern "C" fn clorus_atom(initial: *mut Value) -> *mut Value {
-    let atom_ptr = ClorusAtom::new(initial);
-    Value::from_ptr(ValueTag::Atom, atom_ptr as *mut u8)
+    unsafe {
+        let atom_ptr = ClorusAtom::new(initial);
+        Value::from_ptr(ValueTag::Atom, atom_ptr as *mut u8)
+    }
 }
 
 /// Dereference an atom - read its current value
@@ -148,12 +140,26 @@ pub extern "C" fn clorus_deref(atom_val: *mut Value) -> *mut Value {
     }
 
     unsafe {
-        if (*atom_val).header().tag() != ValueTag::Atom {
-            return Value::nil();
+        let tag = (*atom_val).header().tag();
+
+        // Handle atoms
+        if tag == ValueTag::Atom {
+            let atom_ptr = (*atom_val).as_ptr() as *mut ClorusAtom;
+            return (*atom_ptr).deref();
         }
 
-        let atom_ptr = (*atom_val).as_ptr() as *mut ClorusAtom;
-        (*atom_ptr).deref()
+        // Handle refs
+        if tag == ValueTag::Ref {
+            return crate::ref_type::clorus_ref_deref(atom_val);
+        }
+
+        // Handle agents
+        if tag == ValueTag::Agent {
+            return crate::agent::clorus_agent_deref(atom_val);
+        }
+
+        // Not a deref-able type
+        Value::nil()
     }
 }
 
@@ -224,14 +230,14 @@ mod tests {
 
     #[test]
     fn test_atom_create_and_deref() {
-        let val = Value::number(42.0);
+        let val = Value::double(42.0);
         let atom = clorus_atom(val);
 
         unsafe {
             assert_eq!((*atom).header().tag(), ValueTag::Atom);
 
             let derefed = clorus_deref(atom);
-            assert_eq!((*derefed).as_number(), 42.0);
+            assert_eq!((*derefed).as_double(), 42.0);
 
             crate::value::clorus_release(atom);
             crate::value::clorus_release(val);
@@ -241,16 +247,16 @@ mod tests {
 
     #[test]
     fn test_atom_reset() {
-        let val1 = Value::number(10.0);
-        let val2 = Value::number(20.0);
+        let val1 = Value::double(10.0);
+        let val2 = Value::double(20.0);
         let atom = clorus_atom(val1);
 
         let result = clorus_reset(atom, val2);
         unsafe {
-            assert_eq!((*result).as_number(), 20.0);
+            assert_eq!((*result).as_double(), 20.0);
 
             let derefed = clorus_deref(atom);
-            assert_eq!((*derefed).as_number(), 20.0);
+            assert_eq!((*derefed).as_double(), 20.0);
 
             crate::value::clorus_release(atom);
             crate::value::clorus_release(val1);

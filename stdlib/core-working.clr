@@ -1,0 +1,29 @@
+;; Working stdlib without destructuring in macros
+
+;; Basic Arithmetic Helpers
+(defn inc [x] (+ x 1))
+(defn dec [x] (- x 1))
+
+;; Simple iteration - doseq without destructuring
+;; Usage: (doseq-simple [x [1 2 3]] (println x))
+(defmacro doseq-simple [binding-vec & body]
+  (let [binding (first binding-vec)
+        coll (second binding-vec)]
+    `(loop [remaining# ~coll]
+       (when (not (empty? remaining#))
+         (let [~binding (first remaining#)]
+           ~@body
+           (recur (rest remaining#)))))))
+
+;; Simple list comprehension - for without destructuring
+;; Usage: (for-simple [x [1 2 3]] (* x 2))
+(defmacro for-simple [binding-vec expr]
+  (let [binding (first binding-vec)
+        coll (second binding-vec)]
+    `(loop [result# []
+            remaining# ~coll]
+       (if (empty? remaining#)
+         result#
+         (let [~binding (first remaining#)]
+           (recur (conj result# ~expr)
+                  (rest remaining#)))))))
