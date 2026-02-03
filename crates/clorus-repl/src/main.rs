@@ -11,8 +11,10 @@ use rustyline::completion::Pair;
 use rustyline::hint::HistoryHinter;
 use std::path::Path;
 
-// Import Value FFI function from runtime
-use clorus_runtime::value::{clorus_value_as_number, Value};
+// Import Value FFI functions from runtime
+use clorus_runtime::value::{clorus_value_as_long, clorus_value_as_double, clorus_value_as_bool, clorus_value_as_cstring, clorus_free_cstring, Value, ValueTag};
+use clorus_runtime::string::clorus_pr_str;
+use clorus_runtime::value::clorus_release;
 
 // Force inclusion of core FFI symbols
 // This prevents the linker from stripping them, making them visible to LLVM JIT
@@ -47,7 +49,7 @@ static FORCE_LINK_ALTS: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_
 static FORCE_LINK_GO: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::go_block::clorus_go;
 
 /// Display a Value* for the REPL
-/// For now, just displays numbers. Full type support coming soon.
+/// Properly handles all value types: numbers, strings, booleans, nil, etc.
 fn display_value(value_ptr: *mut u8) -> String {
     if value_ptr.is_null() {
         return "nil".to_string();
@@ -56,11 +58,57 @@ fn display_value(value_ptr: *mut u8) -> String {
     unsafe {
         // Cast u8* to Value*
         let value = value_ptr as *mut Value;
-        let num = clorus_value_as_number(value);
 
-        // For now, just display as number
-        // TODO: Check Value tag to determine actual type
-        format!("{}", num)
+        // Check the value tag to determine the actual type
+        match (*value).header().tag() {
+            ValueTag::Long => {
+                let num = clorus_value_as_long(value);
+                format!("{}", num)
+            }
+            ValueTag::Double => {
+                let num = clorus_value_as_double(value);
+                format!("{}", num)
+            }
+            ValueTag::String => {
+                let c_str = clorus_value_as_cstring(value);
+                if !c_str.is_null() {
+                    let rust_str = std::ffi::CStr::from_ptr(c_str);
+                    let result = format!("\"{}\"", rust_str.to_string_lossy());
+                    clorus_free_cstring(c_str);
+                    result
+                } else {
+                    "<null string>".to_string()
+                }
+            }
+            ValueTag::Bool => {
+                let bool_val = clorus_value_as_bool(value);
+                if bool_val { "true" } else { "false" }.to_string()
+            }
+            ValueTag::Nil => {
+                "nil".to_string()
+            }
+            ValueTag::Vector | ValueTag::List | ValueTag::HashMap | ValueTag::HashSet => {
+                // Use clorus_pr_str for proper formatting of collections
+                let pr_str_result = clorus_pr_str(value);
+                if !pr_str_result.is_null() {
+                    let result_str = display_value(pr_str_result as *mut u8);
+                    // Release the string value created by pr_str
+                    clorus_release(pr_str_result);
+                    // Remove surrounding quotes since pr_str returns a string
+                    if result_str.starts_with('"') && result_str.ends_with('"') {
+                        result_str[1..result_str.len()-1].to_string()
+                    } else {
+                        result_str
+                    }
+                } else {
+                    format!("{:?}", *value)
+                }
+            }
+            _ => {
+                // For other types, show debug representation
+                format!("{:?}", *value)
+            }
+        }
     }
 }
 
@@ -289,6 +337,96 @@ fn main() {
 
     let context = Context::create();
     let mut repl_engine = ReplEngine::new(&context);
+
+    // Auto-load core stdlib (clorus.core)
+    // Try to find core.clr in CLORUS_HOME/stdlib or ~/.clorus/stdlib
+    let mut core_loaded = false;
+    let mut core_stdlib_path = None;
+
+    if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
+        let path = std::path::Path::new(&clorus_home).join("stdlib").join("core.clr");
+        if path.exists() {
+            core_stdlib_path = Some(path);
+        }
+    }
+
+    if core_stdlib_path.is_none() {
+        if let Ok(home) = std::env::var("HOME") {
+            let path = std::path::Path::new(&home).join(".clorus").join("stdlib").join("core.clr");
+            if path.exists() {
+                core_stdlib_path = Some(path);
+            }
+        }
+    }
+
+    if let Some(core_path) = core_stdlib_path {
+        match std::fs::read_to_string(&core_path) {
+            Ok(source) => {
+                // Split source into individual top-level forms and evaluate each
+                let lines: Vec<&str> = source.lines().collect();
+                let mut current_form = String::new();
+                let mut paren_depth = 0;
+                let mut in_string = false;
+                let mut escape_next = false;
+                let mut forms_loaded = 0;
+
+                for line in lines {
+                    let trimmed = line.trim();
+
+                    // Skip empty lines and comments when not building a form
+                    if current_form.is_empty() && (trimmed.is_empty() || trimmed.starts_with(';')) {
+                        continue;
+                    }
+
+                    current_form.push_str(line);
+                    current_form.push('\n');
+
+                    // Track parentheses depth and strings
+                    for ch in line.chars() {
+                        if escape_next {
+                            escape_next = false;
+                            continue;
+                        }
+                        if ch == '\\' {
+                            escape_next = true;
+                            continue;
+                        }
+                        if ch == '"' {
+                            in_string = !in_string;
+                        }
+                        if !in_string {
+                            if ch == '(' || ch == '[' || ch == '{' {
+                                paren_depth += 1;
+                            } else if ch == ')' || ch == ']' || ch == '}' {
+                                paren_depth -= 1;
+                            }
+                        }
+                    }
+
+                    // When we have a complete form (paren_depth returns to 0)
+                    if paren_depth == 0 && !current_form.trim().is_empty() {
+                        if let Ok(_) = repl_engine.eval_init(&current_form) {
+                            forms_loaded += 1;
+                        }
+                        current_form.clear();
+                    }
+                }
+
+                if forms_loaded > 0 {
+                    println!("✓ Loaded clorus.core ({} functions)", forms_loaded);
+                    core_loaded = true;
+                }
+            }
+            Err(_) => {
+                // Silently fail if core.clr can't be read
+            }
+        }
+    }
+
+    if !core_loaded {
+        println!("⚠ clorus.core not loaded (stdlib not found)");
+    }
+    println!();
 
     // Register Rust FFI libraries with REPL engine
     if let Some(rust_ffi) = rust_ffi_result {
@@ -640,15 +778,35 @@ fn load_std_library() -> Result<libloading::Library, String> {
     // Try to find the library
     let mut lib_path = None;
 
-    // Try release build first
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
-    } else {
-        // Try debug build
-        let debug_path = Path::new("target/debug").join(lib_name);
-        if debug_path.exists() {
-            lib_path = Some(debug_path);
+    // Try CLORUS_HOME/lib first (for installed version)
+    if let Ok(clorus_home) = env::var("CLORUS_HOME") {
+        let installed_path = Path::new(&clorus_home).join("lib").join(lib_name);
+        if installed_path.exists() {
+            lib_path = Some(installed_path);
+        }
+    }
+
+    // Try ~/.clorus/lib if CLORUS_HOME not set
+    if lib_path.is_none() {
+        if let Ok(home) = env::var("HOME") {
+            let default_install = Path::new(&home).join(".clorus").join("lib").join(lib_name);
+            if default_install.exists() {
+                lib_path = Some(default_install);
+            }
+        }
+    }
+
+    // Try release build in current project
+    if lib_path.is_none() {
+        let release_path = Path::new("target/release").join(lib_name);
+        if release_path.exists() {
+            lib_path = Some(release_path);
+        } else {
+            // Try debug build
+            let debug_path = Path::new("target/debug").join(lib_name);
+            if debug_path.exists() {
+                lib_path = Some(debug_path);
+            }
         }
     }
 
@@ -722,15 +880,35 @@ fn load_core_library() -> Result<libloading::Library, String> {
     // Try to find the library
     let mut lib_path = None;
 
-    // Try release build first
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
-    } else {
-        // Try debug build
-        let debug_path = Path::new("target/debug").join(lib_name);
-        if debug_path.exists() {
-            lib_path = Some(debug_path);
+    // Try CLORUS_HOME/lib first (for installed version)
+    if let Ok(clorus_home) = env::var("CLORUS_HOME") {
+        let installed_path = Path::new(&clorus_home).join("lib").join(lib_name);
+        if installed_path.exists() {
+            lib_path = Some(installed_path);
+        }
+    }
+
+    // Try ~/.clorus/lib if CLORUS_HOME not set
+    if lib_path.is_none() {
+        if let Ok(home) = env::var("HOME") {
+            let default_install = Path::new(&home).join(".clorus").join("lib").join(lib_name);
+            if default_install.exists() {
+                lib_path = Some(default_install);
+            }
+        }
+    }
+
+    // Try release build in current project
+    if lib_path.is_none() {
+        let release_path = Path::new("target/release").join(lib_name);
+        if release_path.exists() {
+            lib_path = Some(release_path);
+        } else {
+            // Try debug build
+            let debug_path = Path::new("target/debug").join(lib_name);
+            if debug_path.exists() {
+                lib_path = Some(debug_path);
+            }
         }
     }
 
@@ -804,13 +982,29 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
     // Try to find the library in multiple locations
     let mut lib_path = None;
 
-    // 1. Try current project's target/release
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
+    // 1. Try current project's target/release/deps (where Cargo places cdylib)
+    let release_deps_path = Path::new("target/release/deps").join(lib_name);
+    if release_deps_path.exists() {
+        lib_path = Some(release_deps_path);
     }
 
-    // 2. Try current project's target/debug
+    // 2. Try current project's target/release
+    if lib_path.is_none() {
+        let release_path = Path::new("target/release").join(lib_name);
+        if release_path.exists() {
+            lib_path = Some(release_path);
+        }
+    }
+
+    // 3. Try current project's target/debug/deps
+    if lib_path.is_none() {
+        let debug_deps_path = Path::new("target/debug/deps").join(lib_name);
+        if debug_deps_path.exists() {
+            lib_path = Some(debug_deps_path);
+        }
+    }
+
+    // 4. Try current project's target/debug
     if lib_path.is_none() {
         let debug_path = Path::new("target/debug").join(lib_name);
         if debug_path.exists() {
@@ -842,14 +1036,25 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
         }
     }
 
-    // 4. Try workspace target directory (for development)
+    // 5. Try workspace target directory (for development)
     if lib_path.is_none() {
         // Walk up to find workspace root
         let mut current = env::current_dir().ok();
         while let Some(dir) = current {
+            // Try deps directories first
+            let workspace_release_deps = dir.join("target/release/deps").join(lib_name);
+            if workspace_release_deps.exists() {
+                lib_path = Some(workspace_release_deps);
+                break;
+            }
             let workspace_release = dir.join("target/release").join(lib_name);
             if workspace_release.exists() {
                 lib_path = Some(workspace_release);
+                break;
+            }
+            let workspace_debug_deps = dir.join("target/debug/deps").join(lib_name);
+            if workspace_debug_deps.exists() {
+                lib_path = Some(workspace_debug_deps);
                 break;
             }
             let workspace_debug = dir.join("target/debug").join(lib_name);
