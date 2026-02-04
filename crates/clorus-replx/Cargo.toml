@@ -1,0 +1,25 @@
+[package]
+name = "clorus-replx"
+version = "0.1.0"
+edition = "2024"
+description = "Extended REPL with smart execution and adaptive features"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "clorus_replx"
+path = "src/lib.rs"
+
+[[bin]]
+name = "replx"
+path = "src/main.rs"
+required-features = []
+
+[dependencies]
+clorus-repl = { path = "../clorus-repl" }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+[features]
+default = ["adaptive"]
+adaptive = []
+learning = []

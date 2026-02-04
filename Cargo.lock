@@ -275,6 +275,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clorus-replx"
+version = "0.1.0"
+dependencies = [
+ "clorus-repl",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "clorus-runtime"
 version = "0.1.0"
 

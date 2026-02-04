@@ -10,6 +10,7 @@ members = [
     "crates/clorus",
     "crates/clorus-cli",
     "crates/clorus-repl",
+    "crates/clorus-replx",
     "crates/clorus-ffi-gen",
     "crates/example-rust-lib",
     "crates/async-demo",
