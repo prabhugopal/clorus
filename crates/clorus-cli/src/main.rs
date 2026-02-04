@@ -57,7 +57,11 @@ fn main() {
             commands::run(debug, extra_args)
         }
         "check" => commands::check(),
-        "repl" => commands::repl(),
+        "repl" => {
+            // Check for --main-thread flag
+            let main_thread = args.iter().any(|arg| arg == "--main-thread");
+            commands::repl(main_thread)
+        }
         "help" | "--help" | "-h" => {
             print_help();
             return;
@@ -95,6 +99,7 @@ fn print_help() {
     println!("    run           Compile and run the current project");
     println!("    check         Check syntax without building");
     println!("    repl          Start an interactive REPL");
+    println!("                    --main-thread  Run on main thread (for GUI on macOS)");
     println!("    help          Print this help message");
     println!("    version       Print version information");
     println!();

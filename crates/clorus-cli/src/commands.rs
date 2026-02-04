@@ -982,9 +982,15 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     Ok(())
 }
 
-pub fn repl() -> Result<(), String> {
+pub fn repl(main_thread: bool) -> Result<(), String> {
+    // Create config with main_thread setting
+    let config = clorus_repl::ReplConfig {
+        main_thread,
+        ..Default::default()
+    };
+
     // Direct library call - no process spawning
-    clorus_repl::run()
+    clorus_repl::run_with_config(config)
 }
 
 /// Load clorus-runtime dynamic library to make Value* operations available to JIT

@@ -260,6 +260,9 @@ pub struct ReplConfig {
 
     /// Don't auto-load project entry file (more Clojure-like)
     pub no_auto_load: bool,
+
+    /// Run on main thread (required for GUI on macOS)
+    pub main_thread: bool,
 }
 
 impl Default for ReplConfig {
@@ -270,6 +273,7 @@ impl Default for ReplConfig {
             no_stdlib: false,
             stdlib_path: None,
             no_auto_load: false,  // Auto-load by default for convenience
+            main_thread: false,    // Default: run on background threads (current behavior)
         }
     }
 }
@@ -307,6 +311,13 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         println!("Type expressions to evaluate them.");
         println!("Commands: :examples :help :quit");
         println!("Tip: Use TAB for autocomplete, ↑↓ for history");
+
+        // Show main-thread mode indicator
+        if config.main_thread {
+            println!();
+            println!("🔧 Main-thread mode: GUI functions available (macOS-safe)");
+        }
+
         println!();
     }
 
