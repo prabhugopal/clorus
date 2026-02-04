@@ -335,6 +335,95 @@ pub fn run_with_config(config: AdaptiveConfig) -> Result<(), String> {
         }
     }
 
+    // Load project entry file if in a project directory
+    if project.is_some() {
+        if let Some(ref proj_config) = project {
+            if std::path::Path::new(&proj_config.build.entry).exists() {
+                if config.level != AdaptationLevel::Silent {
+                    println!("Loading {}...", proj_config.build.entry);
+                }
+                match std::fs::read_to_string(&proj_config.build.entry) {
+                    Ok(source) => {
+                        // Split source into individual top-level forms and evaluate each
+                        let lines: Vec<&str> = source.lines().collect();
+                        let mut current_form = String::new();
+                        let mut paren_depth = 0;
+                        let mut in_string = false;
+                        let mut escape_next = false;
+                        let mut forms_loaded = 0;
+                        let mut had_error = false;
+
+                        for line in lines {
+                            let trimmed = line.trim();
+
+                            // Skip empty lines and comments when not building a form
+                            if current_form.is_empty() && (trimmed.is_empty() || trimmed.starts_with(';')) {
+                                continue;
+                            }
+
+                            current_form.push_str(line);
+                            current_form.push('\n');
+
+                            // Track parentheses depth and strings
+                            for ch in line.chars() {
+                                if escape_next {
+                                    escape_next = false;
+                                    continue;
+                                }
+                                if ch == '\\' {
+                                    escape_next = true;
+                                    continue;
+                                }
+                                if ch == '"' {
+                                    in_string = !in_string;
+                                }
+                                if !in_string {
+                                    if ch == '(' || ch == '[' || ch == '{' {
+                                        paren_depth += 1;
+                                    } else if ch == ')' || ch == ']' || ch == '}' {
+                                        paren_depth -= 1;
+                                    }
+                                }
+                            }
+
+                            // When we have a complete form (paren_depth returns to 0)
+                            if paren_depth == 0 && !current_form.trim().is_empty() {
+                                match repl_engine.eval_init(&current_form) {
+                                    Ok(_) => {
+                                        forms_loaded += 1;
+                                    }
+                                    Err(e) => {
+                                        if config.level != AdaptationLevel::Silent {
+                                            eprintln!("⚠ Error loading form: {}", e);
+                                        }
+                                        had_error = true;
+                                    }
+                                }
+                                current_form.clear();
+                            }
+                        }
+
+                        if config.level != AdaptationLevel::Silent {
+                            if !had_error {
+                                println!("✓ Project loaded ({} forms)", forms_loaded);
+                            } else {
+                                println!("⚠ Project loaded with errors ({} forms)", forms_loaded);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if config.level != AdaptationLevel::Silent {
+                            eprintln!("⚠ Could not read {}: {}", proj_config.build.entry, e);
+                        }
+                    }
+                }
+                if config.level != AdaptationLevel::Silent {
+                    println!();
+                }
+            }
+        }
+    }
+
     // Detect if stdin is a TTY (interactive) or piped/redirected
     let is_interactive = io::stdin().is_terminal();
 
