@@ -14,6 +14,7 @@ members = [
     "crates/clorus-ffi-gen",
     "crates/example-rust-lib",
     "crates/async-demo",
+    "crates/clorus-types",
 ]
 resolver = "2"
 

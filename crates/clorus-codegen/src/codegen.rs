@@ -1,5 +1,6 @@
 /// LLVM Code Generation for Clorus
 use clorus_syntax::{Expr, Pattern, MapPatternKey};
+use clorus_types::{FfiFunction, FfiType};
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::builder::Builder;
@@ -253,6 +254,156 @@ impl<'ctx> CodeGen<'ctx> {
             }
             other => Err(format!("Unsupported return type: {}", other)),
         }
+    }
+
+    /// Compile a Rust FFI function call using canonical FfiFunction type
+    /// This is the modern, type-safe version that handles pointers correctly
+    fn compile_ffi_function_call(&mut self, func: &FfiFunction, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
+        // Check argument count
+        if args.len() != func.params.len() {
+            return Err(format!(
+                "{} requires {} arguments, got {}",
+                func.name, func.params.len(), args.len()
+            ));
+        }
+
+        // Compile and convert arguments based on canonical FFI types
+        let mut ffi_args = Vec::new();
+        for (arg_expr, param) in args.iter().zip(&func.params) {
+            let arg_val = self.compile_expr(arg_expr)?;
+
+            let ffi_arg = match &param.ty {
+                FfiType::F64 => {
+                    // Unbox number from Value*
+                    self.unbox_number(arg_val).into()
+                }
+                FfiType::I64 => {
+                    // Unbox number and convert to i64
+                    let f64_val = self.unbox_number(arg_val);
+                    self.builder.build_float_to_signed_int(
+                        f64_val,
+                        self.context.i64_type(),
+                        "f64_to_i64"
+                    ).unwrap().into()
+                }
+                FfiType::Bool => {
+                    // Unbox number and convert to bool (non-zero = true)
+                    let f64_val = self.unbox_number(arg_val);
+                    let zero = self.context.f64_type().const_float(0.0);
+                    self.builder.build_float_compare(
+                        FloatPredicate::ONE,  // Ordered and Not Equal
+                        f64_val,
+                        zero,
+                        "f64_to_bool"
+                    ).unwrap().into()
+                }
+                FfiType::String => {
+                    // Extract C string from Value*
+                    self.extract_cstring_from_value(arg_val).into()
+                }
+                FfiType::OpaquePointer { .. } => {
+                    // Extract raw pointer from Value*
+                    // Pointers are stored as i8* in the Value's data field
+                    self.extract_pointer_from_value(arg_val).into()
+                }
+                FfiType::Void => {
+                    return Err("Void cannot be a parameter type".to_string());
+                }
+                _ => {
+                    return Err(format!("Unsupported parameter type: {}", param.ty.display_name()));
+                }
+            };
+
+            ffi_args.push(ffi_arg);
+        }
+
+        // Call the FFI function
+        let ffi_func_name = format!("clorus_{}", func.name);
+        let ffi_func = self.module.get_function(&ffi_func_name)
+            .ok_or_else(|| format!("FFI function {} not found", ffi_func_name))?;
+
+        let call_result = self.builder.build_call(
+            ffi_func,
+            &ffi_args,
+            &format!("call_{}", func.name)
+        ).unwrap();
+
+        // Convert return value based on canonical FFI type
+        match &func.return_type {
+            FfiType::Void => {
+                // Void return - return nil (0.0)
+                Ok(self.box_number(self.context.f64_type().const_float(0.0)))
+            }
+            FfiType::F64 => {
+                let f64_val = call_result.try_as_basic_value().left().unwrap().into_float_value();
+                Ok(self.box_number(f64_val))
+            }
+            FfiType::I64 => {
+                let i64_val = call_result.try_as_basic_value().left().unwrap().into_int_value();
+                let f64_val = self.builder.build_signed_int_to_float(
+                    i64_val,
+                    self.context.f64_type(),
+                    "i64_to_f64"
+                ).unwrap();
+                Ok(self.box_number(f64_val))
+            }
+            FfiType::Bool => {
+                let bool_val = call_result.try_as_basic_value().left().unwrap().into_int_value();
+                let f64_val = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "bool_to_f64"
+                ).unwrap();
+                Ok(self.box_number(f64_val))
+            }
+            FfiType::String => {
+                let str_ptr = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
+                Ok(self.box_string(str_ptr))
+            }
+            FfiType::OpaquePointer { .. } => {
+                // Box raw pointer into Value*
+                let ptr = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
+                Ok(self.box_pointer(ptr))
+            }
+            _ => {
+                Err(format!("Unsupported return type: {}", func.return_type.display_name()))
+            }
+        }
+    }
+
+    /// Extract a raw pointer from a Value* (for opaque pointers)
+    fn extract_pointer_from_value(&self, value_ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
+        // Value* contains a pointer in its data field
+        // For pointers, we stored them as i8* directly
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+        // Cast Value* to i8**
+        let ptr_ptr = self.builder.build_pointer_cast(
+            value_ptr,
+            i8_ptr_type.ptr_type(AddressSpace::default()),
+            "value_to_ptr_ptr"
+        ).unwrap();
+
+        // Load the i8*
+        self.builder.build_load(
+            i8_ptr_type,
+            ptr_ptr,
+            "load_ptr"
+        ).unwrap().into_pointer_value()
+    }
+
+    /// Box a raw pointer into a Value* (for opaque pointers)
+    fn box_pointer(&self, ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
+        // Allocate a Value* to hold the pointer
+        let value_ptr = self.builder.build_malloc(
+            self.context.i8_type().ptr_type(AddressSpace::default()),
+            "alloc_value_ptr"
+        ).unwrap();
+
+        // Store the pointer
+        self.builder.build_store(value_ptr, ptr).unwrap();
+
+        value_ptr
     }
 
     /// Declare runtime library FFI functions

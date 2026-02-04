@@ -5,8 +5,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::io::Write;
 use syn::{Item, ItemFn, FnArg, ReturnType, Type, parse_file};
+
+// Modern type-safe FFI analyzer
+pub mod analyzer;
 
 pub struct FfiGenerator {
     /// Functions found in the Rust source

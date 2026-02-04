@@ -7,7 +7,9 @@
 
 pub mod codegen;
 pub mod namespace_context;
+pub mod ffi_codegen;
 
 // Re-export main types
 pub use codegen::CodeGen;
 pub use namespace_context::NamespaceContext;
+pub use ffi_codegen::{FfiDeclarations, FfiTypeMapper};

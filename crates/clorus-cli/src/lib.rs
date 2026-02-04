@@ -3,5 +3,6 @@
 
 pub mod manifest;
 pub mod rust_ffi;
+pub mod modern_ffi;
 pub mod commands;
 pub mod interface;
