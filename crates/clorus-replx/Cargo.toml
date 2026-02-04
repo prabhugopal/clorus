@@ -9,13 +9,18 @@ license = "MIT OR Apache-2.0"
 name = "clorus_replx"
 path = "src/lib.rs"
 
+# Optional standalone binary
 [[bin]]
 name = "replx"
 path = "src/main.rs"
-required-features = []
+required-features = ["standalone"]
 
 [dependencies]
 clorus-repl = { path = "../clorus-repl" }
+clorus = { path = "../clorus" }
+inkwell = { workspace = true }
+rustyline = "14.0"
+libloading = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 
@@ -23,3 +28,4 @@ toml = "0.8"
 default = ["adaptive"]
 adaptive = []
 learning = []
+standalone = []  # Enable standalone binary

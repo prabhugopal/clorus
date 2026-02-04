@@ -1,8 +1,9 @@
 mod repl_engine;
 mod project;
 
-use repl_engine::ReplEngine;
-use project::ProjectConfig;
+// Re-export for clorus-replx and other consumers
+pub use repl_engine::{ReplEngine, EvalResult};
+pub use project::ProjectConfig;
 use inkwell::context::Context;
 use rustyline::error::ReadlineError;
 use rustyline::history::DefaultHistory;
@@ -124,7 +125,7 @@ fn display_value(value_ptr: *mut u8) -> String {
 
 /// Format the result of a REPL evaluation
 /// Clojure-style output: #'namespace/name for def/defn, => value for expressions
-fn format_result(result: &repl_engine::EvalResult, namespace: &str) -> String {
+pub fn format_result(result: &repl_engine::EvalResult, namespace: &str) -> String {
     use repl_engine::EvalKind;
 
     match &result.kind {
@@ -1057,7 +1058,7 @@ fn load_core_library() -> Result<libloading::Library, String> {
 }
 
 /// Load clorus-runtime dynamic library to make Value* operations available to JIT
-fn load_runtime_library() -> Result<libloading::Library, String> {
+pub fn load_runtime_library() -> Result<libloading::Library, String> {
     use std::env;
     use std::path::Path;
 
@@ -1187,7 +1188,7 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
 }
 
 /// Load a dynamic library with RTLD_GLOBAL flag on Unix
-fn load_dynamic_library(lib_path: &std::path::Path) -> Result<libloading::Library, String> {
+pub fn load_dynamic_library(lib_path: &std::path::Path) -> Result<libloading::Library, String> {
     unsafe {
         #[cfg(unix)]
         {
@@ -1210,7 +1211,7 @@ fn load_dynamic_library(lib_path: &std::path::Path) -> Result<libloading::Librar
 
 /// Parse a .clorus-ffi interface file and create a RustLibrary
 /// Format: (interface lib-name (fn func-name [param :type ...] :return-type "doc"))
-fn parse_interface_file(content: &str, lib_name: &str) -> Result<clorus::codegen::RustLibrary, String> {
+pub fn parse_interface_file(content: &str, lib_name: &str) -> Result<clorus::codegen::RustLibrary, String> {
     use clorus::codegen::{RustLibrary, RustFunction, RustParam};
 
     let mut functions = Vec::new();

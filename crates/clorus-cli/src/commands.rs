@@ -993,6 +993,30 @@ pub fn repl(main_thread: bool) -> Result<(), String> {
     clorus_repl::run_with_config(config)
 }
 
+pub fn replx(args: &[String]) -> Result<(), String> {
+    // Parse replx-specific arguments
+    let mut config = clorus_replx::AdaptiveConfig::default();
+
+    for arg in args {
+        match arg.as_str() {
+            "--no-adapt" => config.enabled = false,
+            "--warn" => config.level = clorus_replx::AdaptationLevel::Warn,
+            "--silent" => config.level = clorus_replx::AdaptationLevel::Silent,
+            "--main-thread" => config.main_thread = true,
+            "--no-gui-detach" => config.auto_detach_gui = false,
+            other => {
+                eprintln!("Unknown replx option: {}", other);
+                eprintln!("Run 'clorus help' for usage");
+                return Err(format!("Unknown option: {}", other));
+            }
+        }
+    }
+
+    // Run extended REPL
+    clorus_replx::run_with_config(config)
+}
+
+
 /// Load clorus-runtime dynamic library to make Value* operations available to JIT
 /// The library must stay loaded for the duration of execution
 fn load_runtime_library() -> Result<libloading::Library, String> {

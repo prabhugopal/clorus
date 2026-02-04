@@ -62,6 +62,10 @@ fn main() {
             let main_thread = args.iter().any(|arg| arg == "--main-thread");
             commands::repl(main_thread)
         }
+        "replx" => {
+            // Extended REPL with smart adaptive execution
+            commands::replx(&args[2..])
+        }
         "help" | "--help" | "-h" => {
             print_help();
             return;
@@ -100,6 +104,11 @@ fn print_help() {
     println!("    check         Check syntax without building");
     println!("    repl          Start an interactive REPL");
     println!("                    --main-thread  Run on main thread (for GUI on macOS)");
+    println!("    replx         Start extended REPL (smart, adaptive)");
+    println!("                    --main-thread  Run on main thread");
+    println!("                    --warn         Warn only, don't auto-fix");
+    println!("                    --silent       Auto-fix silently");
+    println!("                    --no-adapt     Disable adaptive features");
     println!("    help          Print this help message");
     println!("    version       Print version information");
     println!();
