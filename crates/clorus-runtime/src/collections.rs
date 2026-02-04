@@ -796,6 +796,33 @@ unsafe fn flatten_into(result: &mut *mut PersistentVector, coll: *mut Value) {
     }
 }
 
+/// Generic conj - add element to collection
+/// Works with vectors, lists, and sets
+/// For vectors: adds to end
+/// For lists: adds to front
+/// For sets: adds element (if not present)
+#[no_mangle]
+pub extern "C" fn clorus_conj(coll: *mut Value, elem: *mut Value) -> *mut Value {
+    if coll.is_null() {
+        return Value::nil();
+    }
+
+    unsafe {
+        match (*coll).header().tag() {
+            ValueTag::Vector => {
+                crate::vector::clorus_vector_conj(coll, elem)
+            }
+            ValueTag::List => {
+                crate::list::clorus_list_cons(coll, elem)
+            }
+            ValueTag::HashSet => {
+                crate::set::clorus_set_conj(coll, elem)
+            }
+            _ => Value::nil(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

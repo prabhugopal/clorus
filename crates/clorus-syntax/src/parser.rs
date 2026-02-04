@@ -171,11 +171,12 @@ impl Parser {
     fn parse_list_or_special(&mut self) -> Result<Expr, String> {
         self.expect(Token::LParen)?;
 
-        // Check for special forms: ns, require, let, def, defn, defmacro, fn, if, do, quote, use, loop, recur, try, throw
+        // Check for special forms: ns, require, let, def, defn, defmacro, fn, if, do, quote, use, loop, recur, try, throw, declare
         if let Token::Symbol(sym) = self.current_token() {
             match sym.as_str() {
                 "ns" => return self.parse_ns(),
                 "require" => return self.parse_require(),
+                "declare" => return self.parse_declare(),
                 "let" => return self.parse_let(),
                 "def" => return self.parse_def(),
                 "defn" => return self.parse_defn(),
@@ -1505,6 +1506,38 @@ impl Parser {
         Ok(Expr::Require { specs })
     }
 
+    fn parse_declare(&mut self) -> Result<Expr, String> {
+        // (declare func1 func2 func3 ...)
+        // Forward declare function names for mutual recursion
+
+        self.advance(); // Skip 'declare'
+
+        let mut names = Vec::new();
+
+        while !matches!(self.current_token(), Token::RParen) {
+            if matches!(self.current_token(), Token::Eof) {
+                return Err("Unclosed declare statement".to_string());
+            }
+
+            // Each name should be a symbol
+            match self.current_token() {
+                Token::Symbol(name) => {
+                    names.push(name.clone());
+                    self.advance();
+                }
+                _ => return Err("declare only accepts function names (symbols)".to_string()),
+            }
+        }
+
+        self.expect(Token::RParen)?;
+
+        if names.is_empty() {
+            return Err("declare requires at least one function name".to_string());
+        }
+
+        Ok(Expr::Declare { names })
+    }
+
     fn parse_require_spec(&mut self) -> Result<crate::ast::RequireSpec, String> {
         // [my.lib :as lib :refer [func1 func2]]
         // or [my.lib :refer :all]
@@ -2588,7 +2621,7 @@ mod tests {
             assert_eq!(bindings.len(), 1);
 
             // Check pattern is a Vector with 3 Symbol elements
-            if let Pattern::Vector { elements, rest } = &bindings[0].0 {
+            if let Pattern::Vector { elements, rest, .. } = &bindings[0].0 {
                 assert_eq!(elements.len(), 3);
                 assert_eq!(elements[0], Pattern::Symbol("a".to_string()));
                 assert_eq!(elements[1], Pattern::Symbol("b".to_string()));
@@ -2617,7 +2650,7 @@ mod tests {
             assert_eq!(bindings.len(), 1);
 
             // Check pattern has rest parameter
-            if let Pattern::Vector { elements, rest } = &bindings[0].0 {
+            if let Pattern::Vector { elements, rest, .. } = &bindings[0].0 {
                 assert_eq!(elements.len(), 1);
                 assert_eq!(elements[0], Pattern::Symbol("first".to_string()));
                 assert_eq!(rest, &Some("rest".to_string()));
@@ -2673,7 +2706,7 @@ mod tests {
             assert_eq!(bindings.len(), 1);
 
             // Check pattern is a Map with :keys bindings
-            if let Pattern::Map { bindings: map_bindings } = &bindings[0].0 {
+            if let Pattern::Map { bindings: map_bindings, .. } = &bindings[0].0 {
                 assert_eq!(map_bindings.len(), 2);
 
                 // Check first binding

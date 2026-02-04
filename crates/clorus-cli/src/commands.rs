@@ -983,50 +983,8 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
 }
 
 pub fn repl() -> Result<(), String> {
-    use std::process::Command;
-    use std::env;
-
-    // Check if we're in a project directory
-    if let Ok(manifest) = Manifest::find_in_current_dir() {
-        println!("Starting REPL for project: {} v{}", manifest.package.name, manifest.package.version);
-        println!();
-    }
-
-    // Find the REPL binary - it should be next to the clorus binary
-    let clorus_exe = env::current_exe()
-        .map_err(|e| format!("Could not determine clorus executable path: {}", e))?;
-
-    let clorus_dir = clorus_exe.parent()
-        .ok_or("Could not determine clorus directory")?;
-
-    let repl_exe = clorus_dir.join("repl");
-
-    // Try to launch the REPL binary directly
-    let status = if repl_exe.exists() {
-        Command::new(&repl_exe)
-            .status()
-    } else {
-        // Fallback: try PATH
-        Command::new("repl")
-            .status()
-    };
-
-    match status {
-        Ok(exit_status) => {
-            if exit_status.success() {
-                Ok(())
-            } else {
-                Err("REPL exited with error".to_string())
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to launch REPL: {}", e);
-            eprintln!();
-            eprintln!("Note: Make sure 'repl' binary is built and in the same directory as 'clorus'");
-            eprintln!("Build with: cargo build --release --bin repl");
-            Err(format!("Could not launch REPL: {}", e))
-        }
-    }
+    // Direct library call - no process spawning
+    clorus_repl::run()
 }
 
 /// Load clorus-runtime dynamic library to make Value* operations available to JIT

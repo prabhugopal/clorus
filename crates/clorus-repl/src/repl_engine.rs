@@ -30,6 +30,9 @@ pub enum EvalKind {
     Import,
 }
 
+/// Namespaces that are auto-imported into every namespace (like clojure.core in Clojure)
+const AUTO_IMPORT_NAMESPACES: &[&str] = &["clorus.core"];
+
 pub struct ReplEngine<'ctx> {
     context: &'ctx Context,
     /// Interactive expressions entered by user
@@ -45,6 +48,11 @@ pub struct ReplEngine<'ctx> {
     module_loader: ModuleLoader,
     /// Rust FFI libraries registered with the REPL
     rust_libraries: Vec<RustLibrary>,
+    /// Symbol registry: namespace -> set of defined symbols
+    /// Tracks what symbols (functions, vars) exist in each namespace
+    symbol_registry: HashMap<String, HashSet<String>>,
+    /// Stdlib loaded flag - stdlib is loaded once and never recompiled
+    stdlib_loaded: bool,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -58,14 +66,137 @@ impl<'ctx> ReplEngine<'ctx> {
             namespace: NamespaceContext::new("user"),
             module_loader: ModuleLoader::new(),
             rust_libraries: Vec::new(),
+            symbol_registry: HashMap::new(),
+            stdlib_loaded: false,
         };
 
-        // Auto-load stdlib (provides inc, dec, map, filter, etc.)
-        let _ = engine.load_stdlib();
+        // Note: Stdlib is now loaded separately in lib.rs to avoid O(n²) recompilation
 
         engine
     }
 
+    /// Load and compile stdlib ONCE (does not add to init_forms)
+    /// This is called from lib.rs during REPL startup
+    pub fn load_stdlib_batch(&mut self, stdlib_source: String) -> Result<usize, String> {
+        if self.stdlib_loaded {
+            return Ok(0); // Already loaded
+        }
+
+        // Parse all forms in the stdlib file
+        let exprs = parse(&stdlib_source)?;
+        if exprs.is_empty() {
+            return Ok(0);
+        }
+
+        // Track namespace for symbol registration
+        let mut current_ns = "user".to_string();
+        let mut symbols_registered = 0;
+
+        // Create a fresh CodeGen for stdlib compilation
+        let mut codegen = CodeGen::new(self.context, "stdlib_session");
+
+        // Register all Rust FFI libraries
+        for lib in &self.rust_libraries {
+            codegen.register_rust_library(lib.clone());
+        }
+
+        // Process all expressions
+        let mut def_fn_names = Vec::new();
+        let mut expr_idx = 0;
+
+        for expr in &exprs {
+            let expanded_expr = expand_macros(expr);
+
+            // Handle namespace declarations
+            if let Expr::Ns { name, requires, rust_imports: _ } = &expanded_expr {
+                current_ns = name.clone();
+                self.set_namespace(name);
+
+                // Process requires
+                for req_spec in requires {
+                    self.process_require(req_spec);
+                }
+
+                // Update codegen namespace
+                let codegen_ns = clorus_codegen::NamespaceContext {
+                    current: self.namespace.current.clone(),
+                    aliases: self.namespace.aliases.clone(),
+                    imports: HashMap::new(),
+                };
+                codegen.set_namespace(codegen_ns);
+
+                continue;
+            }
+
+            // Handle declare - it's a compile-time directive, no runtime value needed
+            // Just process it and skip to next form
+            if let Expr::Declare { names } = &expanded_expr {
+                // Process declare directly in codegen (adds forward declarations)
+                for name in names {
+                    codegen.add_forward_declaration(name);
+                }
+                continue;
+            }
+
+            // Check if this is def or defn
+            let is_def_or_defn = matches!(expanded_expr, Expr::Def { .. } | Expr::Defn { .. });
+
+            // Extract symbol name for registration
+            let symbol_name = match &expanded_expr {
+                Expr::Def { name, .. } => Some(name.clone()),
+                Expr::Defn { name, .. } => Some(name.clone()),
+                _ => None,
+            };
+
+            // Compile the expression
+            let fn_name = format!("stdlib_{}", expr_idx);
+            codegen.wrap_in_function(&expanded_expr, &fn_name)?;
+            expr_idx += 1;
+
+            // Track def/defn for execution
+            if is_def_or_defn {
+                def_fn_names.push(fn_name);
+
+                // Register symbol
+                if let Some(name) = symbol_name {
+                    self.register_symbol(&current_ns, &name);
+                    symbols_registered += 1;
+                }
+            }
+        }
+
+        // Create JIT engine
+        let engine = codegen.get_module()
+            .create_jit_execution_engine(OptimizationLevel::None)
+            .map_err(|e| format!("JIT error: {}", e))?;
+
+        // Execute all def/defn to initialize globals
+        for fn_name in &def_fn_names {
+            unsafe {
+                type EvalFunc = unsafe extern "C" fn() -> *mut u8;
+                if let Ok(jit_fn) = engine.get_function::<EvalFunc>(fn_name) {
+                    jit_fn.call(); // Initialize the global/function
+                }
+            }
+        }
+
+        self.stdlib_loaded = true;
+
+        // After stdlib is loaded, refresh user namespace to get core symbols
+        self.set_namespace("user");
+
+        Ok(symbols_registered)
+    }
+
+    /// Load the standard library (deprecated - use load_stdlib_batch)
+    fn load_stdlib(&mut self) -> Result<(), String> {
+        // This method is now unused - stdlib is loaded via load_stdlib_batch in lib.rs
+        // Keeping it for backward compatibility but it does nothing
+        Ok(())
+    }
+
+    /*
+    /// Old load_stdlib method - kept for reference
     /// Load the standard library into init_forms
     fn load_stdlib(&mut self) -> Result<(), String> {
         use std::path::{Path, PathBuf};
@@ -100,7 +231,8 @@ impl<'ctx> ReplEngine<'ctx> {
                 let source = fs::read_to_string(&path)
                     .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
 
-                // Add stdlib source to init_forms (will be compiled with every REPL expression)
+                // Add stdlib source to init_forms AS A SINGLE BATCH
+                // This avoids O(n²) recompilation and preserves namespace context
                 self.init_forms.push(source);
 
                 return Ok(());
@@ -109,6 +241,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
         Err("stdlib not found in any standard location".to_string())
     }
+    */
 
     /// Get the current namespace name
     pub fn current_namespace(&self) -> &str {
@@ -124,6 +257,31 @@ impl<'ctx> ReplEngine<'ctx> {
     /// Switch to a new namespace
     pub fn set_namespace(&mut self, namespace: &str) {
         self.namespace = NamespaceContext::new(namespace);
+
+        // Auto-import configured namespaces (like clojure.core in Clojure)
+        // This makes stdlib functions available everywhere without explicit require
+        for auto_ns in AUTO_IMPORT_NAMESPACES {
+            if namespace != *auto_ns {
+                if let Some(symbols) = self.get_namespace_symbols(auto_ns) {
+                    for symbol in symbols.clone() {
+                        self.namespace.imports.insert(symbol, auto_ns.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Register a symbol in the symbol registry for the given namespace
+    fn register_symbol(&mut self, namespace: &str, symbol: &str) {
+        self.symbol_registry
+            .entry(namespace.to_string())
+            .or_insert_with(HashSet::new)
+            .insert(symbol.to_string());
+    }
+
+    /// Get all symbols defined in a namespace
+    fn get_namespace_symbols(&self, namespace: &str) -> Option<&HashSet<String>> {
+        self.symbol_registry.get(namespace)
     }
 
     /// Process a require spec and update namespace context
@@ -133,8 +291,16 @@ impl<'ctx> ReplEngine<'ctx> {
             self.namespace.aliases.insert(alias.clone(), spec.module.clone());
         }
 
-        // Add referred symbols to imports
-        if !spec.refer.is_empty() {
+        // Handle :refer :all - import all symbols from the module
+        if spec.refer.len() == 1 && spec.refer[0] == ":all" {
+            // Look up all symbols in the target namespace
+            if let Some(symbols) = self.get_namespace_symbols(&spec.module).cloned() {
+                for symbol in symbols {
+                    self.namespace.imports.insert(symbol, spec.module.clone());
+                }
+            }
+        } else {
+            // Add specific referred symbols to imports
             for symbol in &spec.refer {
                 self.namespace.imports.insert(symbol.clone(), spec.module.clone());
             }
@@ -234,6 +400,8 @@ impl<'ctx> ReplEngine<'ctx> {
         // Register all Rust FFI libraries
         for lib in &self.rust_libraries {
             codegen.register_rust_library(lib.clone());
+            // Declare FFI functions in LLVM module
+            codegen.declare_rust_library_functions(lib)?;
         }
 
         // Set the current namespace context
@@ -264,7 +432,15 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Compile init forms (project files)
         // Note: def/defn MUST execute every time to initialize globals in the new JIT
-        for (form_idx, init_input) in self.init_forms.iter().enumerate() {
+        // Track the current namespace during init form loading for symbol registration
+        let mut current_init_namespace = "user".to_string();
+        // Collect symbols to register after init form processing (avoids borrow checker issues)
+        let mut symbols_to_register: Vec<(String, String)> = Vec::new();
+
+        // Clone init_forms to avoid borrow checker issues when updating self.namespace
+        let init_forms_clone = self.init_forms.clone();
+
+        for (form_idx, init_input) in init_forms_clone.iter().enumerate() {
             let init_exprs = parse(init_input)?;
             if init_exprs.is_empty() {
                 continue;
@@ -276,26 +452,33 @@ impl<'ctx> ReplEngine<'ctx> {
 
                 // Handle namespace declarations
                 if let clorus_syntax::Expr::Ns { name, requires, rust_imports } = &expanded_expr {
-                    // Create new namespace context
-                    let mut new_namespace = NamespaceContext::new(name);
+                    // Update tracked namespace for symbol registration
+                    current_init_namespace = name.clone();
 
-                    // Process requires - manually update aliases and imports
+                    // Update ReplEngine's namespace (important so subsequent forms compile in correct namespace)
+                    self.set_namespace(name);
+
+                    // Process requires to update namespace imports/aliases
                     for req_spec in requires {
-                        // Add namespace alias if specified
-                        if let Some(alias) = &req_spec.alias {
-                            new_namespace.aliases.insert(alias.clone(), req_spec.module.clone());
-                        }
+                        self.process_require(req_spec);
+                    }
 
-                        // Add referred symbols to imports
-                        if !req_spec.refer.is_empty() {
-                            for symbol in &req_spec.refer {
-                                new_namespace.imports.insert(symbol.clone(), req_spec.module.clone());
-                            }
+                    // Process rust imports
+                    for rust_import in rust_imports {
+                        if let Some(alias) = &rust_import.alias {
+                            // Convert library name to module format: "egui-hello" -> "rust.egui_hello"
+                            let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                            self.namespace.aliases.insert(alias.clone(), rust_module);
                         }
                     }
 
-                    // Update codegen namespace
-                    codegen.set_namespace(new_namespace);
+                    // Create namespace context for codegen (with imports/aliases)
+                    let codegen_ns = clorus_codegen::NamespaceContext {
+                        current: self.namespace.current.clone(),
+                        aliases: self.namespace.aliases.clone(),
+                        imports: HashMap::new(),
+                    };
+                    codegen.set_namespace(codegen_ns);
 
                     // Skip compilation for ns form (it's metadata, not executable)
                     continue;
@@ -303,23 +486,9 @@ impl<'ctx> ReplEngine<'ctx> {
 
                 // Handle forward declarations (compile-time directive)
                 if let clorus_syntax::Expr::Declare { names } = &expanded_expr {
-                    // Process declare manually - it's a compile-time directive
-                    // The actual forward declaration tracking is now handled by codegen
+                    // Process declare directly - adds forward declarations to codegen
                     for name in names {
-                        // Generate mangled name based on current namespace
-                        let ns = codegen.get_namespace();
-                        let _mangled_name = if ns.current == "user" {
-                            name.clone()
-                        } else if ns.current.starts_with("clorus.") {
-                            format!("{}_{}",
-                                ns.current.replace('.', "_"),
-                                name.replace('-', "_"))
-                        } else {
-                            format!("clorus_{}_{}",
-                                ns.current.replace('.', "_"),
-                                name.replace('-', "_"))
-                        };
-                        // Forward declaration tracking is now handled by the compiler
+                        codegen.add_forward_declaration(name);
                     }
                     // Skip wrapping - declare is compile-time only
                     continue;
@@ -327,14 +496,31 @@ impl<'ctx> ReplEngine<'ctx> {
 
                 let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
 
+                // Extract symbol name for registration
+                let symbol_name = match &expanded_expr {
+                    clorus_syntax::Expr::Def { name, .. } => Some(name.clone()),
+                    clorus_syntax::Expr::Defn { name, .. } => Some(name.clone()),
+                    _ => None,
+                };
+
                 let fn_name = format!("init_{}_{}", form_idx, expr_idx);
                 codegen.wrap_in_function(&expanded_expr, &fn_name)?;
 
                 // Execute def/defn to initialize globals (required for JIT architecture)
                 if is_def_or_defn {
                     def_fn_names.push(fn_name);
+
+                    // Collect symbol for registration (will register after loop to avoid borrow issues)
+                    if let Some(name) = symbol_name {
+                        symbols_to_register.push((current_init_namespace.clone(), name));
+                    }
                 }
             }
+        }
+
+        // Register all symbols collected from init forms
+        for (namespace, symbol) in symbols_to_register {
+            self.register_symbol(&namespace, &symbol);
         }
 
         // Compile interactive history forms
@@ -396,6 +582,16 @@ impl<'ctx> ReplEngine<'ctx> {
             // Only add to history after successful evaluation
             if add_to_history {
                 self.history.push(input.to_string());
+            }
+
+            // Register symbol in the registry (for :refer :all support)
+            // This tracks symbols defined interactively in the REPL
+            match &eval_kind {
+                EvalKind::Def(name) | EvalKind::Defn(name) => {
+                    let current_ns = self.namespace.current.clone();
+                    self.register_symbol(&current_ns, name);
+                }
+                _ => {}
             }
 
             Ok(EvalResult { value, kind: eval_kind })

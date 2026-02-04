@@ -1,6 +1,6 @@
 #!/bin/bash
 # Clorus Installation Script
-# Installs clorus, repl, and runtime libraries
+# Installs clorus unified binary and runtime libraries
 
 set -e
 
@@ -25,14 +25,12 @@ mkdir -p "$STDLIB_DIR"
 # Check if release build exists
 if [ ! -f "target/release/clorus" ]; then
     echo "❌ Release build not found. Building..."
-    cargo build --release --bin clorus --bin repl
+    cargo build --release --bin clorus
 fi
 
 echo "📦 Copying binaries..."
 cp target/release/clorus "$BIN_DIR/"
-cp target/release/repl "$BIN_DIR/"
 chmod +x "$BIN_DIR/clorus"
-chmod +x "$BIN_DIR/repl"
 
 echo "📚 Copying libraries..."
 # Copy runtime libraries (both static and dynamic)
@@ -62,8 +60,7 @@ echo ""
 echo "Then run: source ~/.zshrc  (or source ~/.bashrc)"
 echo ""
 echo "Installed components:"
-echo "  • clorus        - Compiler and build tool"
-echo "  • repl          - Interactive REPL"
+echo "  • clorus        - Unified compiler, build tool, and REPL"
 echo "  • Runtime libs  - $LIB_DIR"
 echo "  • Standard lib  - $STDLIB_DIR"
 echo ""

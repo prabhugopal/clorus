@@ -13,6 +13,7 @@ clorus = { path = "../clorus" }
 clorus-syntax = { path = "../clorus-syntax" }
 clorus-codegen = { path = "../clorus-codegen" }
 clorus-runtime = { path = "../clorus-runtime" }
+clorus-repl = { path = "../clorus-repl" }
 clorus-ffi-gen = { path = "../clorus-ffi-gen" }
 inkwell = { workspace = true }
 toml = "0.8"

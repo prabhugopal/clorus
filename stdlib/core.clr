@@ -47,6 +47,22 @@
     coll
     (drop (dec n) (rest coll))))
 
+;; map - Apply function to each element of collection
+;; Example: (map inc [1 2 3]) ; => [2 3 4]
+(defn map [f coll]
+  (if (empty? coll)
+    []
+    (conj (map f (rest coll)) (f (first coll)))))
+
+;; filter - Keep only elements that satisfy predicate
+;; Example: (filter odd? [1 2 3 4]) ; => [1 3]
+(defn filter [pred coll]
+  (if (empty? coll)
+    []
+    (if (pred (first coll))
+      (conj (filter pred (rest coll)) (first coll))
+      (filter pred (rest coll)))))
+
 ;; comp - Function composition
 ;; Takes multiple functions and returns a new function that applies them
 ;; right-to-left (like mathematical composition)
@@ -163,8 +179,8 @@
 (defn partition [n coll]
   (if (< (count coll) n)
     []
-    (let [chunk (take coll n)
-          remaining (drop coll n)]
+    (let [chunk (take n coll)
+          remaining (drop n coll)]
       (conj (partition n remaining) chunk))))
 
 ;; partition-all - Like partition but includes incomplete final chunk
@@ -172,8 +188,8 @@
 (defn partition-all [n coll]
   (if (empty? coll)
     []
-    (let [chunk (take coll n)
-          remaining (drop coll n)]
+    (let [chunk (take n coll)
+          remaining (drop n coll)]
       (conj (partition-all n remaining) chunk))))
 
 ;; take-while - Take elements while predicate is true
@@ -198,7 +214,7 @@
 ;; split-at - Split collection at index n
 ;; Example: (split-at 3 [1 2 3 4 5]) ; => [[1 2 3] [4 5]]
 (defn split-at [n coll]
-  [(take coll n) (drop coll n)])
+  [(take n coll) (drop n coll)])
 
 ;; split-with - Split collection where predicate changes from true to false
 ;; Example: (split-with (partial > 5) [1 2 3 6 7 1]) ; => [[1 2 3] [6 7 1]]
@@ -458,22 +474,6 @@
 ;; ============================================================================
 ;; Higher-Order Collection Functions
 ;; ============================================================================
-
-;; map - Apply function to each element of collection
-;; Example: (map inc [1 2 3]) ; => [2 3 4]
-(defn map [f coll]
-  (if (empty? coll)
-    []
-    (conj (map f (rest coll)) (f (first coll)))))
-
-;; filter - Keep only elements that satisfy predicate
-;; Example: (filter odd? [1 2 3 4]) ; => [1 3]
-(defn filter [pred coll]
-  (if (empty? coll)
-    []
-    (if (pred (first coll))
-      (conj (filter pred (rest coll)) (first coll))
-      (filter pred (rest coll)))))
 
 ;; remove - Remove elements that satisfy predicate
 ;; Example: (remove odd? [1 2 3 4]) ; => [2 4]

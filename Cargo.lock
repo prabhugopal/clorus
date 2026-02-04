@@ -212,6 +212,7 @@ dependencies = [
  "clorus",
  "clorus-codegen",
  "clorus-ffi-gen",
+ "clorus-repl",
  "clorus-runtime",
  "clorus-syntax",
  "inkwell",
@@ -263,7 +264,6 @@ name = "clorus-repl"
 version = "0.1.0"
 dependencies = [
  "clorus",
- "clorus-cli",
  "clorus-codegen",
  "clorus-runtime",
  "clorus-syntax",

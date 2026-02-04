@@ -4,16 +4,21 @@ version = "0.1.0"
 edition = "2024"
 description = "Interactive REPL for Clorus language"
 
+[lib]
+name = "clorus_repl"
+path = "src/lib.rs"
+
+# Optional standalone binary for development/testing
 [[bin]]
-name = "repl"
-path = "src/main.rs"
+name = "repl-dev"
+path = "src/bin/main.rs"
+required-features = []
 
 [dependencies]
 clorus = { path = "../clorus" }
 clorus-syntax = { path = "../clorus-syntax" }
 clorus-codegen = { path = "../clorus-codegen" }
 clorus-runtime = { path = "../clorus-runtime" }
-clorus-cli = { path = "../clorus-cli" }
 inkwell = { workspace = true }
 libloading = "0.8"
 rustyline = "14.0"

@@ -15,6 +15,8 @@
 | **Learn a specific feature** | See [Feature Guides](#feature-guides) below |
 | **Understand the roadmap** | `ROADMAP_TO_100_PARITY.md` |
 | **See recent changes** | `sessions/` folder |
+| **Understand hardcoded values** | `HARDCODED_VALUES_ANALYSIS.md` |
+| **Understand architecture** | `ARCHITECTURE_ANALYSIS.md` |
 
 ---
 
@@ -36,6 +38,21 @@
    - What's missing
    - Implementation priorities
    - Timeline estimates
+
+### Architecture & Internals
+1. **`HARDCODED_VALUES_ANALYSIS.md`** 🔧 - Comprehensive analysis
+   - All 168 FFI functions
+   - 21 special forms
+   - ValueTag enum (17 types)
+   - Core functions registry
+   - Configurability assessment
+   - ~300+ hardcoded identifiers documented
+
+2. **`ARCHITECTURE_ANALYSIS.md`** 📐 - Built-in vs stdlib architecture
+   - Duplicate analysis (map, filter, take, drop)
+   - Forward reference issues
+   - Cleanup recommendations
+   - Test coverage gaps
 
 ---
 
@@ -79,6 +96,9 @@
 - `features/REPL_FEATURES.md` - REPL capabilities
 - `features/AUTOCOMPLETE_COMPLETE.md` - Tab completion
 - `guides/AUTOCOMPLETE_TEST_GUIDE.md` - Testing autocomplete
+- `REPL_INTEGRATION_COMPLETE.md` ⭐ - Professional single-binary architecture
+- `REPL_INTEGRATION_REFACTORING_PLAN.md` - Original refactoring plan
+- `REPL_INTEGRATION_TEST_PLAN.md` - Test strategy
 
 ---
 
@@ -249,8 +269,9 @@ Check `sessions/` folder, files are named with dates or have "Last Updated" in c
 
 ## 📊 Statistics
 
-**Total Documentation Files:** ~45+
+**Total Documentation Files:** ~47+
 **Primary References:** 3
+**Architecture Docs:** 2
 **Feature Guides:** ~25
 **Session Notes:** ~15
 **Implementation Guides:** ~10
@@ -259,5 +280,5 @@ Check `sessions/` folder, files are named with dates or have "Last Updated" in c
 
 ---
 
-**Last Updated:** January 29, 2026
+**Last Updated:** February 3, 2026
 **Maintainers:** Prabhu Gopal, Claude Code

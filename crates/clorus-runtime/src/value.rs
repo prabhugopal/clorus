@@ -387,6 +387,22 @@ pub extern "C" fn clorus_value_as_double(val: *mut Value) -> f64 {
     }
 }
 
+/// Extract numeric value as f64 (handles both Long and Double)
+/// Returns 0.0 if the value is neither Long nor Double
+#[no_mangle]
+pub extern "C" fn clorus_value_as_number(val: *mut Value) -> f64 {
+    if val.is_null() {
+        return 0.0;
+    }
+    unsafe {
+        match (*val).header.tag() {
+            ValueTag::Long => (*val).as_long() as f64,
+            ValueTag::Double => (*val).as_double(),
+            _ => 0.0,
+        }
+    }
+}
+
 /// Extract bool from Value (for REPL display)
 /// Returns false if the value is not a boolean
 #[no_mangle]
