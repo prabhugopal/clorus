@@ -34,31 +34,87 @@ impl AdaptiveWrapper {
             return (expr.to_string(), false);
         }
 
-        // Show message based on adaptation level
-        match self.config.level {
-            AdaptationLevel::None => {
-                (expr.to_string(), false)
+        // CRITICAL: On macOS, GUI functions MUST run on main thread
+        // Wrapping in go blocks crashes with "EventLoop must be created on the main thread"
+        // So we detect macOS + GUI and provide helpful guidance instead of auto-adapting
+        #[cfg(target_os = "macos")]
+        {
+            if metadata.needs_main_thread {
+                match self.config.level {
+                    AdaptationLevel::None => {
+                        return (expr.to_string(), false);
+                    }
+                    AdaptationLevel::Warn | AdaptationLevel::AutoAdapt => {
+                        println!("⚠️  macOS GUI detected: {} requires main thread", metadata.name);
+                        println!("💡 Note: GUI will block REPL until window closes");
+                        println!("   This is a macOS limitation - GUI EventLoop must run on main thread");
+                        return (expr.to_string(), false);
+                    }
+                    AdaptationLevel::Silent => {
+                        return (expr.to_string(), false);
+                    }
+                }
             }
+        }
 
-            AdaptationLevel::Warn => {
-                println!("⚠️  Warning: {} may block the REPL", metadata.name);
-                println!("💡 Suggestion: Use (go {}) for background execution", expr);
-                (expr.to_string(), false)
+        // For non-macOS or non-GUI functions, apply normal adaptation
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Show message based on adaptation level
+            match self.config.level {
+                AdaptationLevel::None => {
+                    (expr.to_string(), false)
+                }
+
+                AdaptationLevel::Warn => {
+                    println!("⚠️  Warning: {} may block the REPL", metadata.name);
+                    println!("💡 Suggestion: Use (go {}) for background execution", expr);
+                    (expr.to_string(), false)
+                }
+
+                AdaptationLevel::AutoAdapt => {
+                    println!("⚡ Detected: Blocking function");
+                    println!("✓ Auto-adapted: Running in go block");
+
+                    // Transform: (server/listen) -> (go (server/listen))
+                    let wrapped = format!("(go {})", expr);
+                    (wrapped, true)
+                }
+
+                AdaptationLevel::Silent => {
+                    // Auto-adapt silently
+                    let wrapped = format!("(go {})", expr);
+                    (wrapped, true)
+                }
             }
+        }
 
-            AdaptationLevel::AutoAdapt => {
-                println!("⚡ Detected: GUI function (blocks on main thread)");
-                println!("✓ Auto-adapted: Running in go block");
+        // Fallback for macOS non-GUI blocking functions
+        #[cfg(target_os = "macos")]
+        {
+            match self.config.level {
+                AdaptationLevel::None => {
+                    (expr.to_string(), false)
+                }
 
-                // Transform: (gui/show-gui "x") -> (go (gui/show-gui "x"))
-                let wrapped = format!("(go {})", expr);
-                (wrapped, true)
-            }
+                AdaptationLevel::Warn => {
+                    println!("⚠️  Warning: {} may block the REPL", metadata.name);
+                    println!("💡 Suggestion: Use (go {}) for background execution", expr);
+                    (expr.to_string(), false)
+                }
 
-            AdaptationLevel::Silent => {
-                // Auto-adapt silently
-                let wrapped = format!("(go {})", expr);
-                (wrapped, true)
+                AdaptationLevel::AutoAdapt => {
+                    println!("⚡ Detected: Blocking function");
+                    println!("✓ Auto-adapted: Running in go block");
+
+                    let wrapped = format!("(go {})", expr);
+                    (wrapped, true)
+                }
+
+                AdaptationLevel::Silent => {
+                    let wrapped = format!("(go {})", expr);
+                    (wrapped, true)
+                }
             }
         }
     }
