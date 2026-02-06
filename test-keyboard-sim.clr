@@ -1,0 +1,33 @@
+(ns test-keyboard-sim)
+
+;; Simulate CORAL's keyboard handling pattern
+(def name-atom (atom ""))
+(def email-atom (atom ""))
+(def active-field (atom :none))
+
+;; Simulate clicking name field
+(reset! active-field :name)
+
+;; Simulate typing in name field
+(when (= @active-field :name)
+  (reset! name-atom (str @name-atom "J"))
+  (reset! name-atom (str @name-atom "o"))
+  (reset! name-atom (str @name-atom "h"))
+  (reset! name-atom (str @name-atom "n")))
+
+(println @name-atom)
+
+;; Simulate clicking email field
+(reset! active-field :email)
+
+;; Simulate typing in email field
+(when (= @active-field :email)
+  (reset! email-atom (str @email-atom "a"))
+  (reset! email-atom (str @email-atom "@"))
+  (reset! email-atom (str @email-atom "b")))
+
+(println @email-atom)
+
+;; Now display both again
+(println @name-atom)
+(println @email-atom)

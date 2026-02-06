@@ -1,0 +1,8 @@
+(ns test-keyword-in-shorthand)
+
+;; Test 1: Simple def with keyword in shorthand
+(def widget {:name "Test"})
+(def get-name #((:name %)))
+
+(defn -main []
+  (println "Success!"))

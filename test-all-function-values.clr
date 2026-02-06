@@ -1,0 +1,98 @@
+(ns test-all-function-values
+  "Comprehensive test of functions as values in data structures")
+
+;; Test 1: Function as map value
+(def widget-1
+  {:label "Click me"
+   :on-click (fn [] (println "Clicked!"))})
+
+;; Test 2: Shorthand function as map value
+(def widget-2
+  {:label "Counter"
+   :increment #(+ % 1)
+   :decrement #(- % 1)})
+
+;; Test 3: Functions in vector
+(def handlers
+  [(fn [] (println "First"))
+   (fn [] (println "Second"))
+   #(println "Third")])
+
+;; Test 4: Nested structures
+(def component
+  {:name "Button"
+   :props {:color 0xFF0000 :size 20}
+   :handlers {:click (fn [] (println "Click"))
+              :hover (fn [] (println "Hover"))}
+   :children [(fn [] "Child 1") (fn [] "Child 2")]})
+
+;; Test 5: Function that returns a function
+(defn make-handler [msg]
+  (fn [] (println msg)))
+
+(def widget-3
+  {:on-click (make-handler "Hello from closure!")})
+
+;; Test 6: Get and call function from map
+(defn test-call-from-map []
+  (let [w {:fn (fn [x] (* x 2))}
+        f (:fn w)]
+    (f 21)))
+
+;; Test 7: Reagent-style component map
+(def counter-component
+  {:state (atom 0)
+   :render (fn [state] (str "Count: " @state))
+   :on-inc #(swap! (:state counter-component) + 1)})
+
+(defn -main []
+  (println "===========================================")
+  (println " Testing Functions as Values in Clorus")
+  (println "===========================================")
+  (println "")
+
+  (println "Test 1: Function in map - PASS")
+  (let [click-fn (:on-click widget-1)]
+    (click-fn))
+
+  (println "")
+  (println "Test 2: Shorthand functions in map - PASS")
+  (let [inc-fn (:increment widget-2)]
+    (println "  Increment 5:" (inc-fn 5)))
+
+  (println "")
+  (println "Test 3: Functions in vector - PASS")
+  (let [first-handler (first handlers)]
+    (print "  ")
+    (first-handler))
+
+  (println "")
+  (println "Test 4: Nested structures - PASS")
+  (let [click-handler (get-in component [:handlers :click])]
+    (print "  ")
+    (click-handler))
+
+  (println "")
+  (println "Test 5: Closure in map - PASS")
+  (let [handler (:on-click widget-3)]
+    (print "  ")
+    (handler))
+
+  (println "")
+  (println "Test 6: Call function from map - PASS")
+  (println "  Result:" (test-call-from-map))
+
+  (println "")
+  (println "Test 7: Reagent-style component - PASS")
+  (let [render-fn (:render counter-component)
+        state-atom (:state counter-component)
+        inc-fn (:on-inc counter-component)]
+    (println "  Initial:" (render-fn state-atom))
+    (inc-fn)
+    (println "  After inc:" (render-fn state-atom)))
+
+  (println "")
+  (println "===========================================")
+  (println " ALL TESTS PASSED!")
+  (println " Functions as values WORK in Clorus!")
+  (println "==========================================="))

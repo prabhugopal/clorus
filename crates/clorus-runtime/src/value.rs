@@ -792,6 +792,106 @@ pub extern "C" fn clorus_is_channel(val: *mut Value) -> bool {
     }
 }
 
+/// Compare two values for equality
+/// Returns 1 (true) if equal, 0 (false) if not equal
+/// Handles all value types properly:
+/// - Keywords: pointer equality (since they're interned)
+/// - Strings: string content comparison
+/// - Numbers (Long/Double): numeric comparison
+/// - Booleans: boolean comparison
+/// - Nil: both must be nil
+/// - Other types: pointer equality for now
+#[no_mangle]
+pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
+    // Handle null pointers
+    if left.is_null() && right.is_null() {
+        return true; // Both nil
+    }
+    if left.is_null() || right.is_null() {
+        return false; // One is nil, other is not
+    }
+
+    unsafe {
+        let left_tag = (*left).header().tag();
+        let right_tag = (*right).header().tag();
+
+        // Different types are not equal (except numeric types)
+        if left_tag != right_tag {
+            // Allow comparison between Long and Double
+            match (left_tag, right_tag) {
+                (ValueTag::Long, ValueTag::Double) | (ValueTag::Double, ValueTag::Long) => {
+                    let left_num = if left_tag == ValueTag::Long {
+                        (*left).as_long() as f64
+                    } else {
+                        (*left).as_double()
+                    };
+                    let right_num = if right_tag == ValueTag::Long {
+                        (*right).as_long() as f64
+                    } else {
+                        (*right).as_double()
+                    };
+                    return left_num == right_num;
+                }
+                _ => return false,
+            }
+        }
+
+        // Same type - compare based on type
+        match left_tag {
+            ValueTag::Nil => true, // Both are nil
+
+            ValueTag::Bool => (*left).as_bool() == (*right).as_bool(),
+
+            ValueTag::Long => (*left).as_long() == (*right).as_long(),
+
+            ValueTag::Double => {
+                let left_val = (*left).as_double();
+                let right_val = (*right).as_double();
+                // Handle NaN comparison
+                if left_val.is_nan() && right_val.is_nan() {
+                    return true; // NaN == NaN for our purposes
+                }
+                left_val == right_val
+            }
+
+            ValueTag::Keyword => {
+                // Keywords are interned, so we can use pointer equality
+                // But to be safe, also compare the strings
+                let left_ptr = (*left).as_ptr();
+                let right_ptr = (*right).as_ptr();
+                if left_ptr == right_ptr {
+                    return true; // Same interned keyword
+                }
+                // Fall back to string comparison
+                let left_str = (*left).as_keyword();
+                let right_str = (*right).as_keyword();
+                left_str == right_str
+            }
+
+            ValueTag::String => {
+                let left_str = (*left).as_string();
+                let right_str = (*right).as_string();
+                left_str == right_str
+            }
+
+            ValueTag::Symbol => {
+                // TODO: Implement proper symbol comparison
+                // For now, use pointer equality
+                (*left).as_ptr() == (*right).as_ptr()
+            }
+
+            // For collections, atoms, and other complex types:
+            // Use pointer equality for now (same object)
+            // TODO: Implement deep equality for collections
+            ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet |
+            ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
+            ValueTag::Function | ValueTag::Var => {
+                (*left).as_ptr() == (*right).as_ptr()
+            }
+        }
+    }
+}
+
 /// Create a symbol value from a C string pointer
 /// Used for map destructuring with :syms
 /// Note: Currently symbols are not fully implemented, so this creates a keyword instead

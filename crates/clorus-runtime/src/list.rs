@@ -192,10 +192,23 @@ pub extern "C" fn clorus_list_empty() -> *mut Value {
 #[no_mangle]
 pub extern "C" fn clorus_list_cons(list_val: *mut Value, elem: *mut Value) -> *mut Value {
     if list_val.is_null() {
-        return clorus_list_empty();
+        // Create single-element list
+        let empty = PersistentList::empty();
+        let new_list = empty.cons(elem);
+        let new_ptr = Box::into_raw(Box::new(new_list)) as *mut u8;
+        return Value::from_ptr(ValueTag::List, new_ptr);
     }
 
     unsafe {
+        // Check if it's nil
+        if (*list_val).header().tag() == ValueTag::Nil {
+            // Create single-element list
+            let empty = PersistentList::empty();
+            let new_list = empty.cons(elem);
+            let new_ptr = Box::into_raw(Box::new(new_list)) as *mut u8;
+            return Value::from_ptr(ValueTag::List, new_ptr);
+        }
+
         let list_ptr = (*list_val).as_ptr() as *mut PersistentList;
         let list = &*list_ptr;
 

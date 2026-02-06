@@ -159,6 +159,11 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_with_open_once(args, registry)
         }
 
+        // Lazy-seq macro - for Clojure-style lazy sequences
+        Expr::Call { func, args } if func == "lazy-seq" => {
+            expand_lazy_seq_once(args, registry)
+        }
+
         // User-defined macro call
         Expr::Call { func, args } => {
             // Check if it's a user-defined macro
@@ -341,6 +346,15 @@ fn expand_with_open_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
 fn expand_with_open_impl(args: &[Expr], _recurse: bool) -> Expr {
     let mut registry = MacroRegistry::new();
     expand_with_open(args, &mut registry)
+}
+
+fn expand_lazy_seq_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
+    expand_lazy_seq_impl(args, false)
+}
+
+fn expand_lazy_seq_impl(args: &[Expr], _recurse: bool) -> Expr {
+    let mut registry = MacroRegistry::new();
+    expand_lazy_seq(args, &mut registry)
 }
 
 fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
@@ -1852,6 +1866,38 @@ fn expand_with_open(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
 
     // Expand the result
     expand_macros_with_registry(&let_expr, registry)
+}
+
+/// Expand lazy-seq macro for Clojure-style lazy sequences
+/// (lazy-seq body...) => (clorus.lazy/make-lazy (fn [] body...))
+fn expand_lazy_seq(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.is_empty() {
+        return Expr::Nil;
+    }
+
+    // Wrap all args in a do block if multiple, or single expr if one
+    let body = if args.len() == 1 {
+        expand_macros_with_registry(&args[0], registry)
+    } else {
+        let expanded: Vec<_> = args
+            .iter()
+            .map(|e| expand_macros_with_registry(e, registry))
+            .collect();
+        Expr::Do { exprs: expanded }
+    };
+
+    // Create (fn [] body)
+    let lambda = Expr::Fn {
+        params: vec![],
+        rest_param: None,
+        body: Box::new(body),
+    };
+
+    // Create (clorus.lazy/make-lazy (fn [] body))
+    Expr::Call {
+        func: "clorus.lazy/make-lazy".to_string(),
+        args: vec![lambda],
+    }
 }
 
 #[cfg(test)]

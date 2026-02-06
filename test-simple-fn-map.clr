@@ -1,0 +1,8 @@
+(ns test-simple-fn-map)
+
+;; Test shorthand function in map
+(def m {:increment #(+ % 1)})
+
+(defn -main []
+  (println "Defined map with shorthand function"))
+

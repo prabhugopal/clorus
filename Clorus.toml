@@ -1,6 +1,6 @@
 [package]
-name = "test-arithmetic"
+name = "test-keyword-in-shorthand"
 version = "0.1.0"
 
 [build]
-entry = "main.clr"
+entry = "test-keyword-in-shorthand.clr"

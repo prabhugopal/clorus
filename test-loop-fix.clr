@@ -1,0 +1,25 @@
+(ns test-loop-fix)
+
+;; Test 1: Simple counter loop (should print 0 1 2 3 4)
+(loop [i 0]
+  (when (< i 5)
+    (println i)
+    (recur (+ i 1))))
+
+;; Test 2: Loop with accumulator
+(defn test-loop-acc []
+  (loop [i 0 acc []]
+    (if (>= i 5)
+      acc
+      (recur (+ i 1) (conj acc i)))))
+
+(println (test-loop-acc))
+
+;; Test 3: Factorial
+(defn factorial [n]
+  (loop [acc 1 n n]
+    (if (<= n 1)
+      acc
+      (recur (* acc n) (- n 1)))))
+
+(println (factorial 5))

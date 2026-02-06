@@ -1,0 +1,13 @@
+; Test keyword equality fix
+(let [a :colors
+      b :shapes
+      c :colors]
+  (do
+    (println (str "a = " a))
+    (println (str "b = " b))
+    (println (str "c = " c))
+    (println (str "(= a b) = " (= a b)))  ; Should be false
+    (println (str "(= a c) = " (= a c)))  ; Should be true
+    (println (str "(= b c) = " (= b c)))  ; Should be false
+    (println (str "(= a :colors) = " (= a :colors)))  ; Should be true
+    (println (str "(= a :shapes) = " (= a :shapes))))) ; Should be false

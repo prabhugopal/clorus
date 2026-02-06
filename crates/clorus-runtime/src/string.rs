@@ -8,7 +8,7 @@
 /// - New strings are created with refcount 1
 /// - Caller owns the returned reference
 
-use crate::value::{Value, ValueTag};
+use crate::value::{Value, ValueTag, Header, ValueData};
 use crate::vector::PersistentVector;
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -85,7 +85,9 @@ unsafe fn value_to_rust_string(val: *mut Value) -> String {
 }
 
 /// Create a String Value* from a Rust String
+/// The String is copied internally by Value::string, so this is safe
 unsafe fn rust_string_to_value(s: String) -> *mut Value {
+    // Pass by reference - Value::string will copy via .to_string()
     Value::string(&s)
 }
 

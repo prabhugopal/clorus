@@ -1,0 +1,32 @@
+(ns test-two-strings)
+
+;; Test multiple string atoms with string concatenation
+(def field1 (atom ""))
+(def field2 (atom ""))
+
+(println @field1)
+(println @field2)
+
+;; Update both fields with string concatenation
+(reset! field1 (str @field1 "a"))
+(reset! field2 (str @field2 "b"))
+
+(println @field1)
+(println @field2)
+
+;; Update again
+(reset! field1 (str @field1 "x"))
+(reset! field2 (str @field2 "y"))
+
+(println @field1)
+(println @field2)
+
+;; Multiple rapid updates using loop/recur (tests both fixes!)
+(loop [i 0]
+  (when (< i 5)
+    (reset! field1 (str @field1 "1"))
+    (reset! field2 (str @field2 "2"))
+    (recur (+ i 1))))
+
+(println @field1)
+(println @field2)

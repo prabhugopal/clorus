@@ -3655,6 +3655,25 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::List(list) if !list.is_empty() => {
+                // Handle keyword calls: (:key map) => (get map :key)
+                if let Expr::Keyword(key) = &list[0] {
+                    if list.len() == 2 {
+                        // Keyword call with one argument: (:key map) => (get map :key)
+                        return self.compile_core_call(
+                            "get",
+                            &[list[1].clone(), Expr::Keyword(key.clone())]
+                        );
+                    } else if list.len() == 3 {
+                        // Keyword call with default: (:key map default) => (get map :key default)
+                        return self.compile_core_call(
+                            "get",
+                            &[list[1].clone(), Expr::Keyword(key.clone()), list[2].clone()]
+                        );
+                    } else {
+                        return Err(format!("Keyword call {:?} requires 1 or 2 arguments", key));
+                    }
+                }
+
                 // Handle (op arg1 arg2 ...)
                 if let Expr::Symbol(op) = &list[0] {
                     match op.as_str() {
@@ -3668,7 +3687,7 @@ impl<'ctx> CodeGen<'ctx> {
                         _ => Err(format!("Unknown operator: {}", op)),
                     }
                 } else {
-                    Err("First element of list must be a symbol".to_string())
+                    Err("First element of list must be a symbol or keyword".to_string())
                 }
             }
 

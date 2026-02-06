@@ -1,0 +1,7 @@
+(ns simple-loop-test)
+
+;; Simplest possible loop test
+(loop [i 0]
+  (when (< i 3)
+    (println i)
+    (recur (+ i 1))))

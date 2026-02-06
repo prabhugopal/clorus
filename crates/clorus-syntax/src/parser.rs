@@ -1673,40 +1673,16 @@ impl Parser {
         // Shorthand syntax: #(* % 2) => (fn [%] (* % 2))
         //                   #(+ %1 %2) => (fn [%1 %2] (+ %1 %2))
 
-        eprintln!("DEBUG: parse_shorthand_fn - entering");
-        eprintln!("DEBUG: current token: {:?}", self.current_token());
-
         // Parse all elements until we hit )
         let mut elements = Vec::new();
-        let mut param_set = std::collections::HashSet::new();
-        let mut iteration = 0;
 
         while self.current_token() != &Token::RParen {
-            iteration += 1;
-            eprintln!("DEBUG: iteration {}, current token: {:?}", iteration, self.current_token());
-
-            if iteration > 10 {
-                return Err("DEBUG: Too many iterations, stopping".to_string());
-            }
-
             if self.current_token() == &Token::Eof {
                 return Err("Unclosed shorthand fn".to_string());
             }
 
-            // Check if current token is a % parameter before parsing
-            if let Token::Symbol(s) = self.current_token() {
-                if s.starts_with('%') {
-                    eprintln!("DEBUG: Found param: {}", s);
-                    param_set.insert(s.clone());
-                }
-            }
-
-            eprintln!("DEBUG: About to parse_expr");
             elements.push(self.parse_expr()?);
-            eprintln!("DEBUG: After parse_expr, current token: {:?}", self.current_token());
         }
-
-        eprintln!("DEBUG: Exited loop, parsed {} elements", elements.len());
 
         self.expect(Token::RParen)?;
 
@@ -1718,8 +1694,19 @@ impl Parser {
             elements.into_iter().next().unwrap()
         } else {
             // Multiple expressions: #(+ 1 2) => (+ 1 2)
-            Expr::List(elements)
+            // Convert to Expr::Call if first element is a symbol (function call)
+            if let Expr::Symbol(func_name) = &elements[0] {
+                Expr::Call {
+                    func: func_name.clone(),
+                    args: elements[1..].to_vec(),
+                }
+            } else {
+                Expr::List(elements)
+            }
         };
+
+        // Collect % parameters from the parsed body expression
+        let param_set = self.collect_shorthand_params(&body)?;
 
         // Generate parameter list from collected params
         let params = self.generate_param_list(&param_set)?;

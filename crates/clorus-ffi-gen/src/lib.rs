@@ -113,6 +113,11 @@ impl FfiGenerator {
                     .map(|seg| seg.ident.to_string())
                     .unwrap_or_else(|| "unknown".to_string())
             }
+            Type::Ptr(ptr) => {
+                // Handle pointer types: *mut T or *const T
+                // We represent all pointers as "*mut u8" for FFI
+                "*mut u8".to_string()
+            }
             _ => "unknown".to_string(),
         }
     }
@@ -171,15 +176,17 @@ impl FfiGenerator {
         match rust_type {
             "f64" => "f64".to_string(),
             "i32" => "i32".to_string(),
+            "bool" => "bool".to_string(),
             "String" => "*mut c_char".to_string(),  // CString::into_raw() returns *mut c_char
             "()" => "()".to_string(),
+            "*mut u8" => "*mut u8".to_string(), // Pointer types pass through as-is
             _ => "*mut u8".to_string(), // Generic pointer for complex types
         }
     }
 
     fn c_to_rust_conversion(&self, name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f64" | "i32" => format!("    let {}_rust = {};", name, name),
+            "f64" | "i32" | "bool" | "*mut u8" => format!("    let {}_rust = {};", name, name),
             "String" => format!(
                 "    let {}_rust = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};",
                 name, name
@@ -190,7 +197,7 @@ impl FfiGenerator {
 
     fn rust_to_c_conversion(&self, name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f64" | "i32" => format!("    {}", name),
+            "f64" | "i32" | "bool" | "*mut u8" => format!("    {}", name),
             "String" => format!(
                 "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
                 name

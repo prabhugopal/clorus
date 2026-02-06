@@ -1,0 +1,30 @@
+; Test Clojure-style cons usage
+(ns test-cons-clojure)
+
+(defn -main []
+  (do
+    (println "Testing Clojure-style cons...")
+
+    ; Build a list with cons
+    (let [nums (cons 1 (cons 2 (cons 3 nil)))]
+      (do
+        (println "\nList: ")
+        (println nums)
+        (println "first:")
+        (println (first nums))
+        (println "rest:")
+        (println (rest nums))
+        (println "count:")
+        (println (count nums))))
+
+    ; Recursive function using cons
+    (defn my-range [n]
+      (if (< n 1)
+        nil
+        (cons n (my-range (- n 1)))))
+
+    (println "\nRecursive range 1-5:")
+    (println (my-range 5))
+
+    (println "\ncons is now Clojure-compatible!")))
+

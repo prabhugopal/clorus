@@ -1,0 +1,11 @@
+(ns test-functions-in-data)
+
+;; Test 1: Simple function in map
+(def simple-map
+  {:name "test"
+   :fn (fn [] 42)})
+
+(defn -main []
+  (println "Testing functions in data structures...")
+  (println "Test 1: Defined simple-map successfully")
+  )
