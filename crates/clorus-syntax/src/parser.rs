@@ -1454,6 +1454,11 @@ impl Parser {
             _ => return Err("ns requires a namespace name (e.g., my.app.core)".to_string()),
         };
 
+        // Skip optional docstring (Clojure compatibility)
+        if matches!(self.current_token(), Token::String(_)) {
+            self.advance();
+        }
+
         let mut requires = Vec::new();
         let mut rust_imports = Vec::new();
 
@@ -1958,10 +1963,9 @@ impl Parser {
             params.extend(numbered_params.into_iter().map(|(_, sym)| Pattern::Symbol(sym)));
         }
 
-        // If no parameters found, it's an error (shorthand fn must use %)
-        if params.is_empty() {
-            return Err("Shorthand fn must use at least one % parameter".to_string());
-        }
+        // Allow zero-parameter shorthand functions (Clojure compatibility)
+        // #(reset! count 0) => (fn [] (reset! count 0))
+        // If no parameters found, return empty params list
 
         Ok(params)
     }

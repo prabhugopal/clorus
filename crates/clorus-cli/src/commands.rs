@@ -66,6 +66,91 @@ main-result
     Ok(())
 }
 
+/// Module loader for :require statements
+/// Recursively loads all required modules and returns expressions in dependency order
+fn load_module_recursive(
+    namespace: &str,
+    loaded_modules: &mut HashSet<String>,
+    base_path: &Path,
+) -> Result<Vec<Expr>, String> {
+    // Skip if already loaded
+    if loaded_modules.contains(namespace) {
+        return Ok(Vec::new());
+    }
+
+    // Mark as loaded (before recursion to handle circular deps)
+    loaded_modules.insert(namespace.to_string());
+
+    // Convert namespace to file path
+    // coral.widgets → src/coral/widgets.clrs
+    let file_path = namespace_to_path(namespace, base_path)?;
+
+    println!("     → Found: {}", file_path.display());
+
+    // Read the file
+    let source = fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read module {}: {}", namespace, e))?;
+
+    // Parse (with macro expansion)
+    let exprs = clorus::parse_and_expand(&source)
+        .map_err(|e| format!("Parse error in {}: {}", file_path.display(), e))?;
+
+    // Find all :require statements and recursively load dependencies
+    let mut all_exprs = Vec::new();
+
+    for expr in &exprs {
+        // Check top-level Expr::Require
+        if let Expr::Require { specs } = expr {
+            for spec in specs {
+                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path)?;
+                all_exprs.extend(dep_exprs);
+            }
+        }
+
+        // Check Expr::Ns for embedded :require clauses
+        if let Expr::Ns { requires, .. } = expr {
+            for spec in requires {
+                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path)?;
+                all_exprs.extend(dep_exprs);
+            }
+        }
+    }
+
+    // Add this module's expressions AFTER its dependencies
+    all_exprs.extend(exprs);
+
+    Ok(all_exprs)
+}
+
+/// Convert namespace to file path
+/// coral.widgets → src/coral/widgets.clrs
+/// coral.core → src/coral/core.clrs
+fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, String> {
+    let parts: Vec<&str> = namespace.split('.').collect();
+
+    if parts.is_empty() {
+        return Err(format!("Invalid namespace: {}", namespace));
+    }
+
+    // Build path: src/coral/widgets.clrs
+    let mut path = base_path.join("src");
+
+    // Add directory components
+    for part in &parts[..parts.len()-1] {
+        path = path.join(part);
+    }
+
+    // Add file name
+    let file_name = format!("{}.clrs", parts[parts.len()-1]);
+    path = path.join(file_name);
+
+    if !path.exists() {
+        return Err(format!("Module file not found: {} (looking for {})", namespace, path.display()));
+    }
+
+    Ok(path)
+}
+
 pub fn check() -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
     let entry_path = Path::new(&manifest.build.entry);
@@ -133,16 +218,46 @@ pub fn build() -> Result<(), String> {
         }
     }
 
-    // Load and parse the user's entry file
+    // Load and parse the user's entry file with module resolution
     let source = fs::read_to_string(entry_path)
         .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
 
-    // Parse and expand macros in user code
-    let exprs = clorus::parse_and_expand(&source)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    // Parse entry file to find dependencies
+    let entry_exprs = clorus::parse_and_expand(&source)
+        .map_err(|e| format!("Parse error in {}: {}", manifest.build.entry, e))?;
 
-    // Combine stdlib and user expressions
-    all_exprs.extend(exprs);
+    // Load all required modules recursively
+    let base_path = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+    let mut loaded_modules = HashSet::new();
+    let mut module_exprs = Vec::new();
+
+    for expr in &entry_exprs {
+        // Check top-level Expr::Require
+        if let Expr::Require { specs } = expr {
+            for spec in specs {
+                println!("   Loading module: {}", spec.module);
+                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path)?;
+                module_exprs.extend(dep_exprs);
+            }
+        }
+
+        // Check Expr::Ns for embedded :require clauses
+        if let Expr::Ns { requires, .. } = expr {
+            for spec in requires {
+                println!("   Loading module: {}", spec.module);
+                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path)?;
+                module_exprs.extend(dep_exprs);
+            }
+        }
+    }
+
+    // Add module expressions (dependencies first)
+    all_exprs.extend(module_exprs);
+
+    // Add entry file expressions (after dependencies)
+    all_exprs.extend(entry_exprs);
 
     if all_exprs.is_empty() {
         return Err("No expressions to compile".to_string());
@@ -226,9 +341,10 @@ pub fn build() -> Result<(), String> {
     for expr in &all_exprs {
         if let clorus_syntax::Expr::Ns { name, .. } = expr {
             if name != "user" {
-                // Construct mangled name matching codegen.rs:1817-1819
+                // Construct mangled name matching codegen.rs
+                // Must replace BOTH dots and hyphens with underscores
                 main_fn_name = format!("clorus_{}_{}",
-                    name.replace('.', "_"),
+                    name.replace('.', "_").replace('-', "_"),
                     "-main".replace('-', "_"));
             }
             break;
@@ -883,11 +999,10 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     for expr in &exprs {
         if let Expr::Ns { name, .. } = expr {
             if name != "user" {
-                // Construct mangled name matching codegen.rs:1817-1819
-                // Note: namespace.current.replace('.', "_") does NOT replace hyphens!
-                // examples.async-ffi -> clorus_examples_async-ffi__main
+                // Construct mangled name matching codegen.rs
+                // Must replace BOTH dots and hyphens with underscores
                 main_fn_name = format!("clorus_{}_{}",
-                    name.replace('.', "_"),  // Keep hyphens in namespace part!
+                    name.replace('.', "_").replace('-', "_"),
                     "-main".replace('-', "_"));
             }
             break;
