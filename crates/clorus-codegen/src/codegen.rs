@@ -3608,7 +3608,7 @@ impl<'ctx> CodeGen<'ctx> {
                         name.clone()
                     } else {
                         format!("clorus_{}_{}",
-                            self.namespace.current.replace('.', "_"),
+                            self.namespace.current.replace('.', "_").replace('-', "_"),
                             name.replace('-', "_"))
                     };
 
