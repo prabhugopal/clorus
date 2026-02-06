@@ -1,6 +1,6 @@
 [package]
-name = "test-keyword-in-shorthand"
+name = "test-code-samples"
 version = "0.1.0"
 
 [build]
-entry = "test-keyword-in-shorthand.clr"
+entry = "test-code-samples.clr"

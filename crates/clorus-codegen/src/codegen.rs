@@ -595,6 +595,8 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_replace", 3);
         self.declare_value_fn("clorus_replace_first", 3);
         self.declare_value_to_i32_fn("clorus_is_string");
+        self.declare_value_to_i32_fn("clorus_is_vector");
+        self.declare_value_to_i32_fn("clorus_is_map");
         self.declare_value2_to_i32_fn("clorus_starts_with");
         self.declare_value2_to_i32_fn("clorus_ends_with");
         self.declare_value2_to_i32_fn("clorus_includes");
@@ -3330,6 +3332,8 @@ impl<'ctx> CodeGen<'ctx> {
                     "trim", "trim-left", "trim-right",
                     "replace", "replace-first",
                     "string?", "starts-with?", "ends-with?", "includes?",
+                    // Type predicates
+                    "vector?", "map?",
                     // I/O operations
                     "print", "println"
                 ];
@@ -6174,15 +6178,135 @@ impl<'ctx> CodeGen<'ctx> {
                     "is_string_call"
                 ).unwrap();
 
-                // Convert i32 bool to Value* bool
-                let i32_result = result.try_as_basic_value().left().unwrap().into_int_value();
-                let float_result = self.builder.build_unsigned_int_to_float(
+                let i32_result = result.try_as_basic_value().left()
+                    .ok_or("is_string_call returned no value")?
+                    .into_int_value();
+
+                // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value
+                let bool_val = self.builder.build_int_compare(
+                    IntPredicate::NE,
                     i32_result,
-                    self.context.f64_type(),
-                    "bool_to_float"
+                    self.context.i32_type().const_int(0, false),
+                    "bool_val"
                 ).unwrap();
 
-                Ok(self.box_number(float_result))
+                let double = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "as_double"
+                ).unwrap();
+
+                let bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    bool_fn,
+                    &[double.into()],
+                    "bool_value"
+                ).unwrap();
+
+                let val = result.try_as_basic_value().left()
+                    .ok_or("bool_value returned no value")?
+                    .into_pointer_value();
+
+                Ok(val)
+            }
+
+            "vector?" => {
+                // vector? takes 1 arg: value
+                if args.len() != 1 {
+                    return Err("vector? requires 1 argument: value".to_string());
+                }
+
+                let val = self.compile_expr(&args[0])?;
+
+                let is_vector_fn = self.module.get_function("clorus_is_vector")
+                    .ok_or("clorus_is_vector not declared")?;
+                let result = self.builder.build_call(
+                    is_vector_fn,
+                    &[val.into()],
+                    "is_vector_call"
+                ).unwrap();
+
+                let i32_result = result.try_as_basic_value().left()
+                    .ok_or("is_vector_call returned no value")?
+                    .into_int_value();
+
+                // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value
+                let bool_val = self.builder.build_int_compare(
+                    IntPredicate::NE,
+                    i32_result,
+                    self.context.i32_type().const_int(0, false),
+                    "bool_val"
+                ).unwrap();
+
+                let double = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "as_double"
+                ).unwrap();
+
+                let bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    bool_fn,
+                    &[double.into()],
+                    "bool_value"
+                ).unwrap();
+
+                let val = result.try_as_basic_value().left()
+                    .ok_or("bool_value returned no value")?
+                    .into_pointer_value();
+
+                Ok(val)
+            }
+
+            "map?" => {
+                // map? takes 1 arg: value
+                if args.len() != 1 {
+                    return Err("map? requires 1 argument: value".to_string());
+                }
+
+                let val = self.compile_expr(&args[0])?;
+
+                let is_map_fn = self.module.get_function("clorus_is_map")
+                    .ok_or("clorus_is_map not declared")?;
+                let result = self.builder.build_call(
+                    is_map_fn,
+                    &[val.into()],
+                    "is_map_call"
+                ).unwrap();
+
+                let i32_result = result.try_as_basic_value().left()
+                    .ok_or("is_map_call returned no value")?
+                    .into_int_value();
+
+                // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value
+                let bool_val = self.builder.build_int_compare(
+                    IntPredicate::NE,
+                    i32_result,
+                    self.context.i32_type().const_int(0, false),
+                    "bool_val"
+                ).unwrap();
+
+                let double = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "as_double"
+                ).unwrap();
+
+                let bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    bool_fn,
+                    &[double.into()],
+                    "bool_value"
+                ).unwrap();
+
+                let val = result.try_as_basic_value().left()
+                    .ok_or("bool_value returned no value")?
+                    .into_pointer_value();
+
+                Ok(val)
             }
 
             "starts-with?" => {

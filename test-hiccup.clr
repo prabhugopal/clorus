@@ -1,0 +1,13 @@
+(ns test-hiccup)
+
+; Test simple Hiccup vector
+(def simple-hiccup [:text {:label "Hello"}])
+
+; Test nested Hiccup
+(def nested-hiccup
+  [:column {:padding 20.0}
+   [:text {:label "Line 1"}]
+   [:text {:label "Line 2"}]])
+
+(defn -main []
+  (println "Hiccup vectors work!"))

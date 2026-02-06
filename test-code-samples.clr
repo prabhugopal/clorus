@@ -1,0 +1,26 @@
+(ns test-code-samples)
+
+;; Test multi-line string vector (like our reagent-form-code)
+(def code-sample
+  ["; REAGENT-STYLE COMPONENTS"
+   "; Components return DATA (Hiccup vectors)"
+   "; Renderer converts vectors to gfx calls"
+   ""
+   "(defn form-component [state]"
+   "  [:column {:padding 20 :spacing 15}"
+   "    [:text {:label \"Contact Form\""
+   "            :size 18}]"
+   "    "
+   "    [:text-field {:value (:name @state)"
+   "                  :width 250}]"
+   "    "
+   "    [:checkbox {:label \"Subscribe\""
+   "                :checked (:subscribe @state)}]"
+   "    "
+   "    [:button {:label \"Submit\"}]])"
+   ""
+   "; Clean separation: UI as data!"
+   "; Compare with imperative Forms demo"])
+
+(defn -main []
+  (println "Code sample test passed!"))

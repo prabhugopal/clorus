@@ -1,8 +1,8 @@
 (ns test-keyword-in-shorthand)
 
-;; Test 1: Simple def with keyword in shorthand
-(def widget {:name "Test"})
-(def get-name #((:name %)))
+;; The CORE pattern that was failing: keyword call in shorthand fn
+(def m {:x 42})
+(def f #((:x %)))
 
 (defn -main []
-  (println "Success!"))
+  (println "Keyword call in shorthand function works!"))

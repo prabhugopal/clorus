@@ -1,0 +1,30 @@
+(ns test-vectors)
+
+;; Test 1: Simple vector
+(def simple-vec [:text {:label "Hello"}])
+
+;; Test 2: Nested vectors
+(def nested-vec
+  [:column {:padding 20.0}
+   [:text {:label "Line 1"}]
+   [:text {:label "Line 2"}]])
+
+;; Test 3: Vector in function return
+(defn make-component []
+  [:text {:label "Test"}])
+
+;; Test 4: Vector with computed values
+(defn make-dynamic []
+  (let [x 10.0]
+    [:text {:size x}]))
+
+;; Test 5: Multiple nested levels
+(defn complex-component []
+  [:column {:padding 20.0}
+   [:text {:label "Header"}]
+   [:row {:spacing 10.0}
+    [:button {:label "OK"}]
+    [:button {:label "Cancel"}]]])
+
+(defn -main []
+  (println "Vector tests passed!"))

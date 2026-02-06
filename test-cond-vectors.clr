@@ -1,0 +1,30 @@
+(ns test-cond-vectors)
+
+;; Test cond with vector returns
+(defn render-by-tag [tag]
+  (cond
+    (= tag :text)
+    [:text {:label "Text component"}]
+
+    (= tag :button)
+    [:button {:label "Button"}]
+
+    :else
+    [:text {:label "Unknown"}]))
+
+;; Test cond in let
+(defn render-with-let [tag]
+  (let [x 10.0
+        y 20.0]
+    (cond
+      (= tag :text)
+      [:text {:size x}]
+
+      (= tag :button)
+      [:button {:width y}]
+
+      :else
+      nil)))
+
+(defn -main []
+  (println "Cond with vectors test passed!"))
