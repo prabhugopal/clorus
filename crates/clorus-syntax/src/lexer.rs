@@ -133,6 +133,33 @@ impl Lexer {
             self.advance();
         }
 
+        // Check for hexadecimal (0x...)
+        if self.current_char() == Some('0') && self.peek_char(1) == Some('x') {
+            self.advance(); // skip '0'
+            self.advance(); // skip 'x'
+
+            let mut hex_str = String::new();
+            while let Some(ch) = self.current_char() {
+                if ch.is_ascii_hexdigit() {
+                    hex_str.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            if hex_str.is_empty() {
+                return Token::Long(0);
+            }
+
+            // Parse hex string to i64
+            if let Ok(value) = i64::from_str_radix(&hex_str, 16) {
+                return Token::Long(value);
+            } else {
+                return Token::Long(0); // Fallback on overflow
+            }
+        }
+
         // Read digits and decimal point
         while let Some(ch) = self.current_char() {
             if ch.is_ascii_digit() {
