@@ -41,13 +41,13 @@ Box the String before creating Value to keep it on heap with stable pointer.
 
 ---
 
-## Issue #3: Mutual Recursion with `declare` 🔴 CRITICAL
-**Status:** 🔴 OPEN - NO WORKAROUND
-**Severity:** 🔴 CRITICAL
-**Impact:** Cannot implement tree-walking renderers, visitors, or recursive data processors
+## Issue #3: Mutual Recursion with `declare` ✅ FIXED
+**Status:** ✅ FIXED in commit cc04caa
+**Severity:** 🔴 CRITICAL (was blocking)
+**Impact:** Can now implement tree-walking renderers, visitors, and recursive data processors
 
 ### Problem
-The `declare` form doesn't create proper forward declarations, causing "Undefined function" errors even when functions are declared.
+The `declare` form had a namespace mangling mismatch - it was missing `.replace('-', "_")` on the namespace name, causing forward-declared functions to be stored under different mangled names than what function call resolution looked up.
 
 ### Expected Behavior (Clojure)
 ```clojure
