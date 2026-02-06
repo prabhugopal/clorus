@@ -244,9 +244,23 @@ impl Parser {
         };
         self.advance();
 
+        // Check for optional docstring
+        // (defn foo "docstring" [...] body) or (defn foo "docstring" ([] ...) ([x] ...))
+        let _docstring = if let Token::String(_) = self.current_token() {
+            // Consume the docstring but don't use it yet (could be added to AST later)
+            let docstring = match self.current_token() {
+                Token::String(s) => Some(s.clone()),
+                _ => None,
+            };
+            self.advance();
+            docstring
+        } else {
+            None
+        };
+
         // Check if this is single-arity or multi-arity
-        // Single: (defn foo [x y] body)
-        // Multi:  (defn foo ([] body1) ([x] body2))
+        // Single: (defn foo [x y] body) or (defn foo "doc" [x y] body)
+        // Multi:  (defn foo ([] body1) ([x] body2)) or (defn foo "doc" ([] ...) ([x] ...))
         if self.current_token() == &Token::LBracket {
             // Single arity
             self.parse_single_arity_defn(name)
@@ -956,8 +970,9 @@ impl Parser {
             Box::new(body_exprs.into_iter().next().unwrap())
         } else {
             // Multiple expressions in body - wrap in an implicit do
-            // For now, just take the last one
-            Box::new(body_exprs.into_iter().last().unwrap())
+            Box::new(Expr::Do {
+                exprs: body_exprs
+            })
         };
 
         Ok(Expr::Let { bindings, body })

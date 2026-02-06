@@ -1,0 +1,60 @@
+(ns test-forms-bug)
+
+;; Minimal reproduction of the forms bug
+
+(def active-field-atom (atom :none))
+
+(println "Test 1: Setting active field to :name")
+(reset! active-field-atom :name)
+(let [active-field @active-field-atom]
+  (println (str "Active field: " active-field))
+  (if (= active-field :name)
+    (println "Comparison says NAME")
+    (println "Comparison says NOT NAME")))
+
+(println "Test 2: Setting active field to :email")
+(reset! active-field-atom :email)
+(let [active-field @active-field-atom]
+  (println (str "Active field: " active-field))
+  (if (= active-field :email)
+    (println "Comparison says EMAIL")
+    (println "Comparison says NOT EMAIL")))
+
+(println "Test 3: Setting active field to :none")
+(reset! active-field-atom :none)
+(let [active-field @active-field-atom]
+  (println (str "Active field: " active-field))
+  (if (= active-field :none)
+    (println "Comparison says NONE")
+    (println "Comparison says NOT NONE")))
+
+(println "Test 4: Testing within a when block (like forms handler)")
+(reset! active-field-atom :name)
+(when true
+  (println "Step 1: Before let binding")
+  (let [active-field @active-field-atom]
+    (println "Step 2: After let binding")
+    (println "Step 3: About to test equality")
+    (println (str "Step 4: active-field value type check"))
+    (when (= active-field :name)
+      (println "Step 5: Inside name handler"))
+    (println "Step 6: After name when block")
+    (when (= active-field :email)
+      (println "Step 7: Inside email handler"))
+    (println "Step 8: After email when block")))
+
+(println "Test 5: Same test but with :email")
+(reset! active-field-atom :email)
+(when true
+  (println "Step 1: Before let binding")
+  (let [active-field @active-field-atom]
+    (println "Step 2: After let binding")
+    (println "Step 3: About to test equality")
+    (when (= active-field :name)
+      (println "Step 4: Inside name handler"))
+    (println "Step 5: After name when block")
+    (when (= active-field :email)
+      (println "Step 6: Inside email handler"))
+    (println "Step 7: After email when block")))
+
+(println "All tests completed")

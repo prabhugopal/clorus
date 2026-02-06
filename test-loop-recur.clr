@@ -1,0 +1,39 @@
+(ns test-loop-recur)
+
+;; Test 1: Simple counter loop
+(println "=== Test 1: Simple counter loop ===")
+(loop [i 0]
+  (when (< i 5)
+    (println (str "Count: " i))
+    (recur (+ i 1))))
+
+;; Test 2: Factorial using loop/recur
+(println "\n=== Test 2: Factorial ===")
+(defn factorial [n]
+  (loop [acc 1 n n]
+    (if (<= n 1)
+      acc
+      (recur (* acc n) (- n 1)))))
+
+(println (str "5! = " (factorial 5)))
+(println (str "10! = " (factorial 10)))
+
+;; Test 3: Sum with accumulator
+(println "\n=== Test 3: Sum 1 to N ===")
+(defn sum-to-n [n]
+  (loop [i 1 acc 0]
+    (if (> i n)
+      acc
+      (recur (+ i 1) (+ acc i)))))
+
+(println (str "Sum 1 to 10: " (sum-to-n 10)))
+(println (str "Sum 1 to 100: " (sum-to-n 100)))
+
+;; Test 4: Multiple parameters updating
+(println "\n=== Test 4: Multiple parameters ===")
+(loop [x 0 y 10 z 20]
+  (when (< x 3)
+    (println (str "x=" x " y=" y " z=" z))
+    (recur (+ x 1) (+ y 10) (+ z 5))))
+
+(println "\nAll loop/recur tests completed!")

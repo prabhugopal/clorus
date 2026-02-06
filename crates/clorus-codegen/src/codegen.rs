@@ -4,7 +4,7 @@ use clorus_types::{FfiFunction, FfiType};
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::builder::Builder;
-use inkwell::values::{FloatValue, FunctionValue, PointerValue, GlobalValue, BasicMetadataValueEnum};
+use inkwell::values::{FloatValue, FunctionValue, PointerValue, GlobalValue, BasicMetadataValueEnum, PhiValue};
 use inkwell::basic_block::BasicBlock;
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::AddressSpace;
@@ -42,6 +42,8 @@ struct LoopContext<'ctx> {
     loop_end: BasicBlock<'ctx>,
     /// The binding variable names in order
     binding_names: Vec<String>,
+    /// Phi nodes for loop parameters (for proper recur updates)
+    phi_nodes: Vec<PhiValue<'ctx>>,
 }
 
 pub struct CodeGen<'ctx> {
@@ -128,6 +130,7 @@ impl<'ctx> CodeGen<'ctx> {
                     "f64" => f64_type.into(),
                     "i32" => self.context.i32_type().into(),
                     "bool" => self.context.bool_type().into(),
+                    "*mut u8" => i8_ptr_type.into(), // Opaque pointers
                     other => return Err(format!("Unsupported parameter type in FFI: {}", other)),
                 };
                 param_types.push(llvm_type);
@@ -140,6 +143,7 @@ impl<'ctx> CodeGen<'ctx> {
                 "i32" => self.context.i32_type().fn_type(&param_types, false),
                 "bool" => self.context.bool_type().fn_type(&param_types, false),
                 "()" => self.context.void_type().fn_type(&param_types, false),
+                "*mut u8" => i8_ptr_type.fn_type(&param_types, false), // Opaque pointers
                 other => return Err(format!("Unsupported return type in FFI: {}", other)),
             };
 
@@ -203,6 +207,10 @@ impl<'ctx> CodeGen<'ctx> {
                         "f64_to_bool"
                     ).unwrap().into()
                 }
+                "*mut u8" => {
+                    // Extract pointer from Value*
+                    self.extract_pointer_from_value(arg_val).into()
+                }
                 other => return Err(format!("Unsupported parameter type: {}", other)),
             };
 
@@ -251,6 +259,11 @@ impl<'ctx> CodeGen<'ctx> {
             "()" => {
                 // Void return - return nil (0.0)
                 Ok(self.box_number(self.context.f64_type().const_float(0.0)))
+            }
+            "*mut u8" => {
+                // Box pointer return value
+                let ptr = call_result.try_as_basic_value().left().unwrap().into_pointer_value();
+                Ok(self.box_pointer(ptr))
             }
             other => Err(format!("Unsupported return type: {}", other)),
         }
@@ -487,6 +500,9 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_f64_to_value_fn("clorus_value_bool");
         self.declare_value_to_i32_fn("clorus_is_truthy");
         self.declare_bool_to_value_fn("clorus_value_boolean");
+
+        // ===== Value Comparison =====
+        self.declare_value2_to_bool_fn("clorus_equals");  // General equality function
 
         // ===== Collection Access Functions =====
         self.declare_value_fn("clorus_get", 2);
@@ -966,6 +982,16 @@ impl<'ctx> CodeGen<'ctx> {
     fn declare_value2_to_i64_fn(&mut self, name: &str) {
         let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
         let fn_type = self.context.i64_type().fn_type(
+            &[i8_ptr_type.into(), i8_ptr_type.into()],
+            false
+        );
+        self.module.add_function(name, fn_type, None);
+    }
+
+    /// Declare a function that takes 2 Value* args and returns bool
+    fn declare_value2_to_bool_fn(&mut self, name: &str) {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let fn_type = self.context.bool_type().fn_type(
             &[i8_ptr_type.into(), i8_ptr_type.into()],
             false
         );
@@ -2065,7 +2091,7 @@ impl<'ctx> CodeGen<'ctx> {
                     name.clone()
                 } else {
                     format!("clorus_{}_{}",
-                        self.namespace.current.replace('.', "_"),
+                        self.namespace.current.replace('.', "_").replace('-', "_"),
                         name.replace('-', "_"))
                 };
 
@@ -2148,8 +2174,25 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.position_at_end(block);
                 }
 
-                // Return 0.0 boxed as Value* (defn returns nil-like value)
-                Ok(self.box_number(self.context.f64_type().const_float(0.0)))
+                // Return a symbol representing the var: #'namespace/function-name
+                let var_name = if self.namespace.current == "user" {
+                    format!("#'{}", name)
+                } else {
+                    format!("#'{}/{}", self.namespace.current, name)
+                };
+
+                // Create symbol (symbols are implemented as keywords in runtime)
+                let keyword_fn = self.module.get_function("clorus_keyword")
+                    .ok_or("clorus_keyword not declared")?;
+                let var_str = self.builder.build_global_string_ptr(&var_name, "var_name")
+                    .expect("Failed to build var name string");
+                let symbol_result = self.builder.build_call(
+                    keyword_fn,
+                    &[var_str.as_pointer_value().into()],
+                    "var_symbol"
+                ).unwrap();
+
+                Ok(symbol_result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             Expr::DefnMulti { name, arities } => {
@@ -2160,7 +2203,7 @@ impl<'ctx> CodeGen<'ctx> {
                     name.clone()
                 } else {
                     format!("clorus_{}_{}",
-                        self.namespace.current.replace('.', "_"),
+                        self.namespace.current.replace('.', "_").replace('-', "_"),
                         name.replace('-', "_"))
                 };
 
@@ -2224,16 +2267,35 @@ impl<'ctx> CodeGen<'ctx> {
                         self.builder.position_at_end(block);
                     }
 
-                    // Register this arity function
-                    // For now, we'll register the last one under the base name
-                    // TODO: Implement proper multi-arity dispatch
+                    // Register this arity function under its arity-specific name
+                    // This allows the function call code to find it via arity dispatch
+                    self.functions.insert(arity_name.clone(), function);
+
+                    // Also register the last arity under the base name for backward compatibility
                     if arity_index == arities.len() - 1 {
                         self.functions.insert(base_name.clone(), function);
                     }
                 }
 
-                // Return nil
-                Ok(self.box_number(self.context.f64_type().const_float(0.0)))
+                // Return a symbol representing the var: #'namespace/function-name
+                let var_name = if self.namespace.current == "user" {
+                    format!("#'{}", name)
+                } else {
+                    format!("#'{}/{}", self.namespace.current, name)
+                };
+
+                // Create symbol (symbols are implemented as keywords in runtime)
+                let keyword_fn = self.module.get_function("clorus_keyword")
+                    .ok_or("clorus_keyword not declared")?;
+                let var_str = self.builder.build_global_string_ptr(&var_name, "var_name")
+                    .expect("Failed to build var name string");
+                let symbol_result = self.builder.build_call(
+                    keyword_fn,
+                    &[var_str.as_pointer_value().into()],
+                    "var_symbol"
+                ).unwrap();
+
+                Ok(symbol_result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             Expr::Fn { params, rest_param, body } => {
@@ -2613,18 +2675,24 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Loop { bindings, body } => {
-                // Compile loop with tail-call optimization using LLVM basic blocks
+                // Compile loop with tail-call optimization using LLVM basic blocks and phi nodes
+                // CRITICAL FIX: Use phi nodes to properly update loop parameters on recur
+                //
                 // Strategy:
-                // 1. Create loop_start, loop_body, loop_end basic blocks
-                // 2. Initialize binding variables
-                // 3. Branch to loop_start
-                // 4. In loop_body, compile the body
-                // 5. If body contains recur, it will update bindings and branch back to loop_start
-                // 6. Otherwise, branch to loop_end with result
+                // 1. Compile initial values in pre-loop block
+                // 2. Branch to loop_start
+                // 3. At loop_start: Create phi nodes for each binding
+                // 4. Store phi values into allocas (so body can read them normally)
+                // 5. Compile body reading from allocas
+                // 6. On recur: Load from allocas, add to phi nodes, branch back
+                // This ensures loop parameters update via phi nodes between iterations
 
                 let current_fn = self.builder.get_insert_block()
                     .and_then(|b| b.get_parent())
                     .ok_or("Loop must be inside a function")?;
+
+                // Save current block (pre-loop)
+                let pre_loop_block = self.builder.get_insert_block().unwrap();
 
                 // Create basic blocks
                 let loop_start = self.context.append_basic_block(current_fn, "loop_start");
@@ -2638,27 +2706,57 @@ impl<'ctx> CodeGen<'ctx> {
                     .flat_map(|(pattern, _)| Self::collect_pattern_names(pattern))
                     .collect();
 
-                // Set new loop context
+                // Compile initial values IN PRE-LOOP BLOCK
+                let mut init_values = Vec::new();
+                for (pattern, init_expr) in bindings {
+                    let val = self.compile_expr(init_expr)?;
+                    init_values.push(val);
+                }
+
+                // Branch from pre-loop to loop_start
+                self.builder.build_unconditional_branch(loop_start).unwrap();
+
+                // Position at loop_start
+                self.builder.position_at_end(loop_start);
+
+                // CREATE PHI NODES for each binding variable
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let mut phi_nodes = Vec::new();
+                for (i, name) in binding_names.iter().enumerate() {
+                    let phi = self.builder.build_phi(value_ptr_type, &format!("loop_phi_{}", name)).unwrap();
+                    phi.add_incoming(&[(&init_values[i], pre_loop_block)]);
+                    phi_nodes.push(phi);
+                }
+
+                // CREATE ALLOCAS and store phi values into them
+                // This allows the body to read variables normally via load instructions
+                let mut loop_allocas = Vec::new();
+                for (i, name) in binding_names.iter().enumerate() {
+                    let alloca = self.create_entry_block_alloca(name);
+                    let phi_val = phi_nodes[i].as_basic_value().into_pointer_value();
+                    self.builder.build_store(alloca, phi_val).unwrap();
+                    loop_allocas.push(alloca);
+                }
+
+                // Update variables map to point to these allocas
+                let saved_variables = self.variables.clone();
+                for (i, name) in binding_names.iter().enumerate() {
+                    self.variables.insert(name.clone(), loop_allocas[i]);
+                }
+
+                // Set new loop context WITH PHI NODES
                 self.loop_context = Some(LoopContext {
                     loop_start,
                     loop_end,
                     binding_names: binding_names.clone(),
+                    phi_nodes: phi_nodes.clone(),
                 });
 
-                // Initialize binding variables with destructuring
-                for (pattern, init_val) in bindings {
-                    let val = self.compile_expr(init_val)?;
-                    self.destructure_pattern(pattern, val)?;
-                }
-
-                // Branch to loop start
-                self.builder.build_unconditional_branch(loop_start).unwrap();
-
-                // Position builder at loop_start
-                self.builder.position_at_end(loop_start);
-
-                // Compile body
+                // Compile body (will read from allocas)
                 let result = self.compile_expr(body)?;
+
+                // Restore variables map
+                self.variables = saved_variables;
 
                 // If we reach here (no recur), branch to loop_end with result value
                 // Check if the current block already has a terminator (from recur/return/throw)
@@ -2677,7 +2775,6 @@ impl<'ctx> CodeGen<'ctx> {
                 // Create phi node if the loop_end is reachable
                 // If the body always recurses (has terminator), loop_end is unreachable
                 if !has_terminator {
-                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let phi = self.builder.build_phi(value_ptr_type, "loop_result").unwrap();
                     phi.add_incoming(&[(&result, result_block)]);
                     Ok(phi.as_basic_value().into_pointer_value())
@@ -2693,6 +2790,8 @@ impl<'ctx> CodeGen<'ctx> {
 
             Expr::Recur { args } => {
                 // Jump back to the nearest loop with new values
+                // CRITICAL FIX: Add incoming values to phi nodes instead of updating allocas
+                // The phi nodes will carry updated values to the next iteration
                 let loop_ctx = self.loop_context.clone()
                     .ok_or("recur can only be used inside a loop")?;
 
@@ -2705,20 +2804,23 @@ impl<'ctx> CodeGen<'ctx> {
                     ));
                 }
 
-                // Evaluate all new values first
+                // Evaluate all new values first (before any phi updates)
                 let mut new_values = Vec::new();
                 for arg in args {
                     new_values.push(self.compile_expr(arg)?);
                 }
 
-                // Update all binding variables
-                for (i, name) in loop_ctx.binding_names.iter().enumerate() {
-                    let alloca = self.variables.get(name)
-                        .ok_or(format!("Loop binding '{}' not found", name))?;
-                    self.builder.build_store(*alloca, new_values[i]).unwrap();
+                // Get current block (recur source block)
+                let current_block = self.builder.get_insert_block().unwrap();
+
+                // ADD INCOMING VALUES TO PHI NODES
+                // This is the key fix - phi nodes properly merge control flow
+                for (i, phi) in loop_ctx.phi_nodes.iter().enumerate() {
+                    phi.add_incoming(&[(&new_values[i], current_block)]);
                 }
 
                 // Branch back to loop start
+                // When execution returns to loop_start, phi nodes will have the new values
                 self.builder.build_unconditional_branch(loop_ctx.loop_start).unwrap();
 
                 // Position builder after the branch (unreachable code, but required)
@@ -3214,7 +3316,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // Check if this is a clorus.core function call
                 let core_functions = [
                     "slurp", "spit", "get", "nth", "first", "rest", "last", "count", "empty?",
-                    "reduce", "apply", "conj", "disj", "contains?", "concat", "assoc", "dissoc",
+                    "reduce", "apply", "conj", "cons", "disj", "contains?", "concat", "assoc", "dissoc",
                     "atom", "reset!", "swap!",
                     // Agent operations
                     "agent", "send", "await", "await-for", "agent-error",
@@ -3303,12 +3405,12 @@ impl<'ctx> CodeGen<'ctx> {
                 let function_to_lookup = if let Some(source_namespace) = self.namespace.imports.get(func) {
                     // This is a referred symbol - create the mangled name
                     format!("clorus_{}_{}",
-                        source_namespace.replace('.', "_"),
+                        source_namespace.replace('.', "_").replace('-', "_"),
                         func.replace('-', "_"))
                 } else if self.namespace.current != "user" {
                     // Try current namespace's function (for local calls)
                     format!("clorus_{}_{}",
-                        self.namespace.current.replace('.', "_"),
+                        self.namespace.current.replace('.', "_").replace('-', "_"),
                         func.replace('-', "_"))
                 } else {
                     // Default namespace - use simple name
@@ -3862,22 +3964,26 @@ impl<'ctx> CodeGen<'ctx> {
             return Err("= requires exactly two arguments".to_string());
         }
 
-        // Unbox arguments
+        // Compile both arguments to Value*
         let left_ptr = self.compile_expr(&args[0])?;
         let right_ptr = self.compile_expr(&args[1])?;
-        let left = self.unbox_number(left_ptr);
-        let right = self.unbox_number(right_ptr);
 
-        let cmp = self.builder.build_float_compare(
-            FloatPredicate::OEQ,
-            left,
-            right,
-            "eq"
+        // Call runtime equality function: clorus_equals(left, right) -> bool
+        let equals_fn = self.module.get_function("clorus_equals")
+            .ok_or("clorus_equals not declared - runtime functions not initialized")?;
+
+        let eq_result = self.builder.build_call(
+            equals_fn,
+            &[left_ptr.into(), right_ptr.into()],
+            "eq_call"
         ).unwrap();
+
+        // clorus_equals returns bool (i1)
+        let bool_result = eq_result.try_as_basic_value().left().unwrap().into_int_value();
 
         // Convert bool to float: true => 1.0, false => 0.0
         let bool_as_float = self.builder.build_unsigned_int_to_float(
-            cmp,
+            bool_result,
             self.context.f64_type(),
             "bool_to_float"
         ).unwrap();
@@ -4673,6 +4779,29 @@ impl<'ctx> CodeGen<'ctx> {
                     conj_fn,
                     &[coll_ptr.into(), elem_ptr.into()],
                     "conj_call"
+                ).unwrap();
+
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
+            "cons" => {
+                // cons takes 2 args: element, collection
+                // Note: cons is like conj but with reversed argument order (Clojure style)
+                if args.len() != 2 {
+                    return Err("cons requires 2 arguments: element, collection".to_string());
+                }
+
+                let elem_ptr = self.compile_expr(&args[0])?;
+                let coll_ptr = self.compile_expr(&args[1])?;
+
+                // Use clorus_list_cons
+                let cons_fn = self.module.get_function("clorus_list_cons")
+                    .ok_or("clorus_list_cons not declared")?;
+
+                let result = self.builder.build_call(
+                    cons_fn,
+                    &[coll_ptr.into(), elem_ptr.into()],  // Note: cons takes (list, elem)
+                    "cons_call"
                 ).unwrap();
 
                 Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
