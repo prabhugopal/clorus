@@ -120,6 +120,18 @@ pub extern "C" fn clorus_function_call(
                 let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
                 f(*args.offset(0), *args.offset(1), *args.offset(2), env_ptr)
             }
+            4 => {
+                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), env_ptr)
+            }
+            5 => {
+                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), env_ptr)
+            }
+            6 => {
+                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), *args.offset(5), env_ptr)
+            }
             _ => {
                 eprintln!("Function call with {} arguments not yet supported", arg_count);
                 Value::nil()
