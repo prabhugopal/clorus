@@ -1756,13 +1756,38 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Symbol(name) => {
                 // Variable reference - check globals first, then locals, then functions
                 // Variables now store Value* instead of f64
-                if let Some(global) = self.globals.get(name) {
+
+                // First, try to resolve qualified names (namespace/var or alias/var)
+                let resolved_name = if name.contains('/') {
+                    let parts: Vec<&str> = name.split('/').collect();
+                    if parts.len() == 2 {
+                        let namespace_or_alias = parts[0];
+                        let var_name = parts[1];
+
+                        // Resolve alias to actual namespace
+                        let resolved_namespace = self.namespace.aliases
+                            .get(namespace_or_alias)
+                            .map(|s| s.as_str())
+                            .unwrap_or(namespace_or_alias);
+
+                        // For now, globals are stored with simple names, not mangled
+                        // So we look up the simple name directly
+                        // TODO: Once globals are namespace-mangled, use mangled lookup
+                        var_name.to_string()
+                    } else {
+                        name.clone()
+                    }
+                } else {
+                    name.clone()
+                };
+
+                if let Some(global) = self.globals.get(&resolved_name) {
                     // Load Value* from global variable
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let val = self.builder.build_load(
                         value_ptr_type,
                         global.as_pointer_value(),
-                        name
+                        &resolved_name
                     ).unwrap();
                     Ok(val.into_pointer_value())
                 } else if let Some(ptr) = self.variables.get(name) {
@@ -1776,17 +1801,43 @@ impl<'ctx> CodeGen<'ctx> {
                     Ok(val.into_pointer_value())
                 } else {
                     // Try to find function - check both unmangled and mangled names
-                    let function = self.functions.get(name).or_else(|| {
-                        // Try mangled name for current namespace
-                        let mangled_name = if self.namespace.current == "user" {
-                            name.clone()
+                    // Also handle qualified names (namespace/function or alias/function)
+                    let function = if name.contains('/') {
+                        // Qualified name - resolve alias and look up function
+                        let parts: Vec<&str> = name.split('/').collect();
+                        if parts.len() == 2 {
+                            let namespace_or_alias = parts[0];
+                            let func_name = parts[1];
+
+                            // Resolve alias to actual namespace
+                            let resolved_namespace = self.namespace.aliases
+                                .get(namespace_or_alias)
+                                .map(|s| s.as_str())
+                                .unwrap_or(namespace_or_alias);
+
+                            // Generate mangled name: demos.textfield-demo/render -> clorus_demos_textfield_demo_render
+                            let mangled_name = format!("clorus_{}_{}",
+                                resolved_namespace.replace('.', "_").replace('-', "_"),
+                                func_name.replace('-', "_"));
+
+                            self.functions.get(&mangled_name).copied()
                         } else {
-                            format!("clorus_{}_{}",
-                                self.namespace.current.replace('.', "_"),
-                                name.replace('-', "_"))
-                        };
-                        self.functions.get(&mangled_name)
-                    });
+                            None
+                        }
+                    } else {
+                        // Unqualified name - try direct lookup first, then mangled for current namespace
+                        self.functions.get(name).or_else(|| {
+                            // Try mangled name for current namespace
+                            let mangled_name = if self.namespace.current == "user" {
+                                name.clone()
+                            } else {
+                                format!("clorus_{}_{}",
+                                    self.namespace.current.replace('.', "_"),
+                                    name.replace('-', "_"))
+                            };
+                            self.functions.get(&mangled_name)
+                        }).copied()
+                    };
 
                     if let Some(function) = function {
                         // Function reference - wrap in function value
