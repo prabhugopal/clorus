@@ -1,6 +1,6 @@
 /// Parser for S-expressions
 use crate::ast::Expr;
-use crate::lexer::{Lexer, Token, Span};
+use crate::lexer::{Lexer, Token};
 use std::cell::Cell;
 
 thread_local! {
@@ -10,7 +10,6 @@ thread_local! {
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
-    eof_token: Token,
 }
 
 impl Parser {
@@ -18,7 +17,6 @@ impl Parser {
         Parser {
             tokens,
             position: 0,
-            eof_token: Token::Eof(Span::dummy()),
         }
     }
 
@@ -26,7 +24,7 @@ impl Parser {
         if self.position < self.tokens.len() {
             &self.tokens[self.position]
         } else {
-            &self.eof_token
+            &Token::Eof
         }
     }
 
@@ -35,74 +33,71 @@ impl Parser {
     }
 
     fn expect(&mut self, expected: Token) -> Result<(), String> {
-        if std::mem::discriminant(self.current_token()) == std::mem::discriminant(&expected) {
+        if self.current_token() == &expected {
             self.advance();
             Ok(())
         } else {
-            let span = self.current_token().span();
             Err(format!(
-                "Expected {:?}, found {:?} at line {}, column {}",
+                "Expected {:?}, found {:?}",
                 expected,
-                self.current_token(),
-                span.line,
-                span.column
+                self.current_token()
             ))
         }
     }
 
     pub fn parse_expr(&mut self) -> Result<Expr, String> {
         match self.current_token() {
-            Token::Long(n, _) => {
+            Token::Long(n) => {
                 let num = *n;
                 self.advance();
                 Ok(Expr::Long(num))
             }
 
-            Token::Double(n, _) => {
+            Token::Double(n) => {
                 let num = *n;
                 self.advance();
                 Ok(Expr::Double(num))
             }
 
-            Token::String(s, _) => {
+            Token::String(s) => {
                 let string = s.clone();
                 self.advance();
                 Ok(Expr::String(string))
             }
 
-            Token::Symbol(s, _) => {
+            Token::Symbol(s) => {
                 let symbol = s.clone();
                 self.advance();
                 Ok(Expr::Symbol(symbol))
             }
 
-            Token::Keyword(k, _) => {
+            Token::Keyword(k) => {
                 let keyword = k.clone();
                 self.advance();
                 Ok(Expr::Keyword(keyword))
             }
 
-            Token::Bool(b, _) => {
+            Token::Bool(b) => {
                 let bool_val = *b;
                 self.advance();
                 Ok(Expr::Bool(bool_val))
             }
 
-            Token::Nil(_) => {
+            Token::Nil => {
                 self.advance();
                 Ok(Expr::Nil)
             }
 
-            Token::LParen(_) => self.parse_list_or_special(),
-            Token::LBracket(_) => self.parse_vector(),
-            Token::LBrace(_) => self.parse_map(),
+            Token::LParen => self.parse_list_or_special(),
+            Token::LBracket => self.parse_vector(),
+            Token::LBrace => self.parse_map(),
 
-            Token::HashSetStart(_) => {
+            Token::HashSetStart => {
                 self.advance(); // Consume the HashSetStart token
                 self.parse_set()
             }
 
-            Token::Quote(_) => {
+            Token::Quote => {
                 self.advance(); // Consume the ' token
                 let quoted_expr = self.parse_expr()?;
                 Ok(Expr::Quote {
@@ -110,7 +105,7 @@ impl Parser {
                 })
             }
 
-            Token::SyntaxQuote(_) => {
+            Token::SyntaxQuote => {
                 self.advance(); // Consume the ` token
                 let quoted_expr = self.parse_expr()?;
                 Ok(Expr::SyntaxQuote {
@@ -118,7 +113,7 @@ impl Parser {
                 })
             }
 
-            Token::Unquote(_) => {
+            Token::Unquote => {
                 self.advance(); // Consume the ~ token
                 let unquoted_expr = self.parse_expr()?;
                 Ok(Expr::Unquote {
@@ -126,7 +121,7 @@ impl Parser {
                 })
             }
 
-            Token::UnquoteSplicing(_) => {
+            Token::UnquoteSplicing => {
                 self.advance(); // Consume the ~@ token
                 let spliced_expr = self.parse_expr()?;
                 Ok(Expr::UnquoteSplicing {
@@ -134,7 +129,7 @@ impl Parser {
                 })
             }
 
-            Token::Deref(_) => {
+            Token::Deref => {
                 self.advance(); // Consume the @ token
                 let deref_expr = self.parse_expr()?;
                 Ok(Expr::Deref {
@@ -142,12 +137,12 @@ impl Parser {
                 })
             }
 
-            Token::ShorthandFnStart(_) => {
+            Token::ShorthandFnStart => {
                 self.advance(); // CRITICAL: Consume the ShorthandFnStart token!
                 self.parse_shorthand_fn()
             }
 
-            Token::VarQuote(_) => {
+            Token::VarQuote => {
                 self.advance(); // Consume the #' token
                 let var_symbol = self.parse_expr()?;
                 // Extract name from symbol
@@ -158,39 +153,26 @@ impl Parser {
                 Ok(Expr::Var { name })
             }
 
-            Token::Meta(_) => {
+            Token::Meta => {
                 self.advance(); // Consume the ^ token
                 // Parse metadata and the expression it applies to
                 // For now, just skip metadata and parse the next expression
                 self.parse_expr()
             }
 
-            Token::RParen(_) | Token::RBracket(_) | Token::RBrace(_) => {
-                let span = self.current_token().span();
-                Err(format!(
-                    "Unexpected closing delimiter: {:?} at line {}, column {}",
-                    self.current_token(),
-                    span.line,
-                    span.column
-                ))
+            Token::RParen | Token::RBracket | Token::RBrace => {
+                Err(format!("Unexpected closing delimiter: {:?}", self.current_token()))
             }
 
-            Token::Eof(_) => {
-                let span = self.current_token().span();
-                Err(format!(
-                    "Unexpected end of input at line {}, column {}",
-                    span.line,
-                    span.column
-                ))
-            }
+            Token::Eof => Err("Unexpected end of input".to_string()),
         }
     }
 
     fn parse_list_or_special(&mut self) -> Result<Expr, String> {
-        self.expect(Token::LParen(Span::dummy()))?;
+        self.expect(Token::LParen)?;
 
         // Check for special forms: ns, require, let, def, defn, defmacro, fn, if, do, quote, use, loop, recur, try, throw, declare
-        if let Token::Symbol(sym, _) = self.current_token() {
+        if let Token::Symbol(sym) = self.current_token() {
             match sym.as_str() {
                 "ns" => return self.parse_ns(),
                 "require" => return self.parse_require(),
@@ -220,14 +202,14 @@ impl Parser {
 
         // Check if this is a function call or operator call
         let mut elements = Vec::new();
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed list".to_string());
             }
             elements.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         // If first element is a symbol, it might be a function call
         if !elements.is_empty() {
@@ -249,7 +231,7 @@ impl Parser {
 
     fn parse_defn(&mut self) -> Result<Expr, String> {
         // Already saw 'defn', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "defn" {
                 self.advance();
             }
@@ -257,17 +239,17 @@ impl Parser {
 
         // Get function name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("defn requires a function name".to_string()),
         };
         self.advance();
 
         // Check for optional docstring
         // (defn foo "docstring" [...] body) or (defn foo "docstring" ([] ...) ([x] ...))
-        let _docstring = if let Token::String(_, _) = self.current_token() {
+        let _docstring = if let Token::String(_) = self.current_token() {
             // Consume the docstring but don't use it yet (could be added to AST later)
             let docstring = match self.current_token() {
-                Token::String(s, _) => Some(s.clone()),
+                Token::String(s) => Some(s.clone()),
                 _ => None,
             };
             self.advance();
@@ -279,10 +261,10 @@ impl Parser {
         // Check if this is single-arity or multi-arity
         // Single: (defn foo [x y] body) or (defn foo "doc" [x y] body)
         // Multi:  (defn foo ([] body1) ([x] body2)) or (defn foo "doc" ([] ...) ([x] ...))
-        if matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() == &Token::LBracket {
             // Single arity
             self.parse_single_arity_defn(name)
-        } else if matches!(self.current_token(), Token::LParen(_)) {
+        } else if self.current_token() == &Token::LParen {
             // Multi arity
             self.parse_multi_arity_defn(name)
         } else {
@@ -292,7 +274,7 @@ impl Parser {
 
     fn parse_single_arity_defn(&mut self, name: String) -> Result<Expr, String> {
         // Expect parameter vector: [x y z]
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("defn requires a parameter vector [...]".to_string());
         }
         self.advance(); // consume [
@@ -301,19 +283,19 @@ impl Parser {
         let mut params = Vec::new();
         let mut rest_param = None;
 
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed parameter vector in defn".to_string());
             }
 
             // Check for & symbol (rest parameter marker)
-            if let Token::Symbol(s, _) = self.current_token() {
+            if let Token::Symbol(s) = self.current_token() {
                 if s == "&" {
                     self.advance(); // consume &
 
                     // Next symbol should be the rest parameter name
                     let rest_name = match self.current_token() {
-                        Token::Symbol(s, _) => s.clone(),
+                        Token::Symbol(s) => s.clone(),
                         _ => return Err("Rest parameter after & must be a symbol".to_string()),
                     };
                     self.advance();
@@ -321,7 +303,7 @@ impl Parser {
                     rest_param = Some(rest_name);
 
                     // After rest parameter, there should be no more parameters
-                    if !matches!(self.current_token(), Token::RBracket(_)) {
+                    if self.current_token() != &Token::RBracket {
                         return Err("Rest parameter must be the last parameter".to_string());
                     }
                     break;
@@ -333,12 +315,12 @@ impl Parser {
             params.push(param);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+        self.expect(Token::RBracket)?; // consume ]
 
         // Parse body (single expression for now)
         let body = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Defn {
             name,
@@ -354,11 +336,11 @@ impl Parser {
         let mut arities = Vec::new();
 
         // Parse each arity clause: ([] body) ([x] body) ([x y] body)
-        while matches!(self.current_token(), Token::LParen(_)) {
+        while self.current_token() == &Token::LParen {
             self.advance(); // consume (
 
             // Parse parameter vector
-            if !matches!(self.current_token(), Token::LBracket(_)) {
+            if self.current_token() != &Token::LBracket {
                 return Err("Each arity clause must start with parameter vector [...]".to_string());
             }
             self.advance(); // consume [
@@ -366,25 +348,25 @@ impl Parser {
             let mut params = Vec::new();
             let mut rest_param = None;
 
-            while !matches!(self.current_token(), Token::RBracket(_)) {
-                if self.current_token() == &self.eof_token {
+            while self.current_token() != &Token::RBracket {
+                if self.current_token() == &Token::Eof {
                     return Err("Unclosed parameter vector in arity clause".to_string());
                 }
 
                 // Check for & symbol
-                if let Token::Symbol(s, _) = self.current_token() {
+                if let Token::Symbol(s) = self.current_token() {
                     if s == "&" {
                         self.advance(); // consume &
 
                         let rest_name = match self.current_token() {
-                            Token::Symbol(s, _) => s.clone(),
+                            Token::Symbol(s) => s.clone(),
                             _ => return Err("Rest parameter after & must be a symbol".to_string()),
                         };
                         self.advance();
 
                         rest_param = Some(rest_name);
 
-                        if !matches!(self.current_token(), Token::RBracket(_)) {
+                        if self.current_token() != &Token::RBracket {
                             return Err("Rest parameter must be the last parameter".to_string());
                         }
                         break;
@@ -396,12 +378,12 @@ impl Parser {
                 params.push(param);
             }
 
-            self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+            self.expect(Token::RBracket)?; // consume ]
 
             // Parse body
             let body = self.parse_expr()?;
 
-            self.expect(Token::RParen(Span::dummy()))?; // consume ) closing arity clause
+            self.expect(Token::RParen)?; // consume ) closing arity clause
 
             arities.push(FunctionArity {
                 params,
@@ -410,7 +392,7 @@ impl Parser {
             });
         }
 
-        self.expect(Token::RParen(Span::dummy()))?; // consume ) closing defn
+        self.expect(Token::RParen)?; // consume ) closing defn
 
         if arities.is_empty() {
             return Err("Multi-arity defn must have at least one arity clause".to_string());
@@ -422,7 +404,7 @@ impl Parser {
     fn parse_defmacro(&mut self) -> Result<Expr, String> {
         // (defmacro when [test & body] `(if ~test (do ~@body) nil))
         // Already saw 'defmacro', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "defmacro" {
                 self.advance();
             }
@@ -430,13 +412,13 @@ impl Parser {
 
         // Get macro name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("defmacro requires a macro name".to_string()),
         };
         self.advance();
 
         // Expect parameter vector: [x y z] or [x & rest]
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("defmacro requires a parameter vector [...]".to_string());
         }
         self.advance(); // consume [
@@ -445,19 +427,19 @@ impl Parser {
         let mut params = Vec::new();
         let mut rest_param = None;
 
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed parameter vector in defmacro".to_string());
             }
 
             // Check for & symbol (rest parameter marker)
-            if let Token::Symbol(s, _) = self.current_token() {
+            if let Token::Symbol(s) = self.current_token() {
                 if s == "&" {
                     self.advance(); // consume &
 
                     // Next symbol should be the rest parameter name
                     let rest_name = match self.current_token() {
-                        Token::Symbol(s, _) => s.clone(),
+                        Token::Symbol(s) => s.clone(),
                         _ => return Err("Rest parameter after & must be a symbol".to_string()),
                     };
                     self.advance();
@@ -465,7 +447,7 @@ impl Parser {
                     rest_param = Some(rest_name);
 
                     // After rest parameter, there should be no more parameters
-                    if !matches!(self.current_token(), Token::RBracket(_)) {
+                    if self.current_token() != &Token::RBracket {
                         return Err("Rest parameter must be the last parameter".to_string());
                     }
                     break;
@@ -474,7 +456,7 @@ impl Parser {
 
             // Get parameter name (must be a symbol for macros)
             let param = match self.current_token() {
-                Token::Symbol(s, _) => s.clone(),
+                Token::Symbol(s) => s.clone(),
                 _ => return Err("Macro parameter name must be a symbol".to_string()),
             };
             self.advance();
@@ -482,12 +464,12 @@ impl Parser {
             params.push(param);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+        self.expect(Token::RBracket)?; // consume ]
 
         // Parse body (single expression, usually a syntax-quoted form)
         let body = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Defmacro {
             name,
@@ -500,7 +482,7 @@ impl Parser {
     fn parse_defrecord(&mut self) -> Result<Expr, String> {
         // (defrecord Person [name age email])
         // Already saw 'defrecord', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "defrecord" {
                 self.advance();
             }
@@ -508,13 +490,13 @@ impl Parser {
 
         // Get record type name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("defrecord requires a record type name".to_string()),
         };
         self.advance();
 
         // Expect field vector: [field1 field2 field3]
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("defrecord requires a field vector [...]".to_string());
         }
         self.advance(); // consume [
@@ -522,14 +504,14 @@ impl Parser {
         // Parse field names (all must be symbols)
         let mut fields = Vec::new();
 
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed field vector in defrecord".to_string());
             }
 
             // Get field name (must be a symbol)
             let field = match self.current_token() {
-                Token::Symbol(s, _) => s.clone(),
+                Token::Symbol(s) => s.clone(),
                 _ => return Err("Record field name must be a symbol".to_string()),
             };
             self.advance();
@@ -537,8 +519,8 @@ impl Parser {
             fields.push(field);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
-        self.expect(Token::RParen(Span::dummy()))?;   // consume )
+        self.expect(Token::RBracket)?; // consume ]
+        self.expect(Token::RParen)?;   // consume )
 
         Ok(Expr::Defrecord {
             name,
@@ -549,7 +531,7 @@ impl Parser {
     fn parse_defprotocol(&mut self) -> Result<Expr, String> {
         // (defprotocol Drawable (draw [this]) (bounds [this]))
         // Already saw 'defprotocol', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "defprotocol" {
                 self.advance();
             }
@@ -557,7 +539,7 @@ impl Parser {
 
         // Get protocol name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("defprotocol requires a protocol name".to_string()),
         };
         self.advance();
@@ -565,48 +547,48 @@ impl Parser {
         // Parse method signatures: (method-name [params] "optional docstring")
         let mut methods = Vec::new();
 
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed defprotocol".to_string());
             }
 
             // Each method is a list: (method-name [params] docstring?)
-            if !matches!(self.current_token(), Token::LParen(_)) {
+            if self.current_token() != &Token::LParen {
                 return Err("Protocol method must be a list (method-name [params])".to_string());
             }
             self.advance(); // consume (
 
             // Get method name
             let method_name = match self.current_token() {
-                Token::Symbol(s, _) => s.clone(),
+                Token::Symbol(s) => s.clone(),
                 _ => return Err("Protocol method name must be a symbol".to_string()),
             };
             self.advance();
 
             // Parse parameter vector
-            if !matches!(self.current_token(), Token::LBracket(_)) {
+            if self.current_token() != &Token::LBracket {
                 return Err("Protocol method requires a parameter vector [...]".to_string());
             }
             self.advance(); // consume [
 
             let mut params = Vec::new();
-            while !matches!(self.current_token(), Token::RBracket(_)) {
-                if self.current_token() == &self.eof_token {
+            while self.current_token() != &Token::RBracket {
+                if self.current_token() == &Token::Eof {
                     return Err("Unclosed parameter vector in protocol method".to_string());
                 }
 
                 let param = match self.current_token() {
-                    Token::Symbol(s, _) => s.clone(),
+                    Token::Symbol(s) => s.clone(),
                     _ => return Err("Protocol method parameter must be a symbol".to_string()),
                 };
                 self.advance();
                 params.push(param);
             }
 
-            self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+            self.expect(Token::RBracket)?; // consume ]
 
             // Optional docstring
-            let docstring = if let Token::String(s, _) = self.current_token() {
+            let docstring = if let Token::String(s) = self.current_token() {
                 let doc = s.clone();
                 self.advance();
                 Some(doc)
@@ -614,7 +596,7 @@ impl Parser {
                 None
             };
 
-            self.expect(Token::RParen(Span::dummy()))?; // consume ) for method
+            self.expect(Token::RParen)?; // consume ) for method
 
             methods.push(crate::ast::ProtocolMethod {
                 name: method_name,
@@ -623,7 +605,7 @@ impl Parser {
             });
         }
 
-        self.expect(Token::RParen(Span::dummy()))?; // consume ) for defprotocol
+        self.expect(Token::RParen)?; // consume ) for defprotocol
 
         Ok(Expr::Defprotocol { name, methods })
     }
@@ -631,7 +613,7 @@ impl Parser {
     fn parse_extend_type(&mut self) -> Result<Expr, String> {
         // (extend-type Point Drawable (draw [this] ...) (bounds [this] ...))
         // Already saw 'extend-type', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "extend-type" {
                 self.advance();
             }
@@ -639,14 +621,14 @@ impl Parser {
 
         // Get type name
         let type_name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("extend-type requires a type name".to_string()),
         };
         self.advance();
 
         // Get protocol name
         let protocol_name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("extend-type requires a protocol name".to_string()),
         };
         self.advance();
@@ -654,33 +636,33 @@ impl Parser {
         // Parse method implementations: (method-name [params] body...)
         let mut methods = Vec::new();
 
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed extend-type".to_string());
             }
 
             // Each method is a list: (method-name [params] body)
-            if !matches!(self.current_token(), Token::LParen(_)) {
+            if self.current_token() != &Token::LParen {
                 return Err("extend-type method must be a list (method-name [params] body)".to_string());
             }
             self.advance(); // consume (
 
             // Get method name
             let method_name = match self.current_token() {
-                Token::Symbol(s, _) => s.clone(),
+                Token::Symbol(s) => s.clone(),
                 _ => return Err("Method name must be a symbol".to_string()),
             };
             self.advance();
 
             // Parse parameter vector with destructuring support
-            if !matches!(self.current_token(), Token::LBracket(_)) {
+            if self.current_token() != &Token::LBracket {
                 return Err("Method requires a parameter vector [...]".to_string());
             }
             self.advance(); // consume [
 
             let mut params = Vec::new();
-            while !matches!(self.current_token(), Token::RBracket(_)) {
-                if self.current_token() == &self.eof_token {
+            while self.current_token() != &Token::RBracket {
+                if self.current_token() == &Token::Eof {
                     return Err("Unclosed parameter vector in method".to_string());
                 }
 
@@ -688,12 +670,12 @@ impl Parser {
                 params.push(self.parse_pattern()?);
             }
 
-            self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+            self.expect(Token::RBracket)?; // consume ]
 
             // Parse body (single expression, or use do for multiple)
             let body = self.parse_expr()?;
 
-            self.expect(Token::RParen(Span::dummy()))?; // consume ) for method
+            self.expect(Token::RParen)?; // consume ) for method
 
             methods.push(crate::ast::ProtocolMethodImpl {
                 name: method_name,
@@ -702,7 +684,7 @@ impl Parser {
             });
         }
 
-        self.expect(Token::RParen(Span::dummy()))?; // consume ) for extend-type
+        self.expect(Token::RParen)?; // consume ) for extend-type
 
         Ok(Expr::ExtendType {
             type_name,
@@ -714,7 +696,7 @@ impl Parser {
     fn parse_defmulti(&mut self) -> Result<Expr, String> {
         // (defmulti area :type)
         // Already saw 'defmulti', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "defmulti" {
                 self.advance();
             }
@@ -722,7 +704,7 @@ impl Parser {
 
         // Get multimethod name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("defmulti requires a multimethod name".to_string()),
         };
         self.advance();
@@ -730,7 +712,7 @@ impl Parser {
         // Parse dispatch function (can be any expression)
         let dispatch_fn = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Defmulti {
             name,
@@ -741,7 +723,7 @@ impl Parser {
     fn parse_defmethod(&mut self) -> Result<Expr, String> {
         // (defmethod area :circle [shape] (* 3.14 ...))
         // Already saw 'defmethod', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "defmethod" {
                 self.advance();
             }
@@ -749,7 +731,7 @@ impl Parser {
 
         // Get multimethod name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("defmethod requires a multimethod name".to_string()),
         };
         self.advance();
@@ -758,14 +740,14 @@ impl Parser {
         let dispatch_value = self.parse_expr()?;
 
         // Parse parameter vector
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("defmethod requires a parameter vector [...]".to_string());
         }
         self.advance(); // consume [
 
         let mut params = Vec::new();
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed parameter vector in defmethod".to_string());
             }
 
@@ -773,12 +755,12 @@ impl Parser {
             params.push(self.parse_pattern()?);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+        self.expect(Token::RBracket)?; // consume ]
 
         // Parse body
         let body = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Defmethod {
             name,
@@ -790,7 +772,7 @@ impl Parser {
 
     fn parse_fn(&mut self) -> Result<Expr, String> {
         // Already saw 'fn', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "fn" {
                 self.advance();
             }
@@ -799,10 +781,10 @@ impl Parser {
         // Check if this is single-arity or multi-arity
         // Single: (fn [x y] body)
         // Multi:  (fn ([] body1) ([x] body2))
-        if matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() == &Token::LBracket {
             // Single arity
             self.parse_single_arity_fn()
-        } else if matches!(self.current_token(), Token::LParen(_)) {
+        } else if self.current_token() == &Token::LParen {
             // Multi arity
             self.parse_multi_arity_fn()
         } else {
@@ -812,7 +794,7 @@ impl Parser {
 
     fn parse_single_arity_fn(&mut self) -> Result<Expr, String> {
         // Expect parameter vector: [x y z]
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("fn requires a parameter vector [...]".to_string());
         }
         self.advance(); // consume [
@@ -821,19 +803,19 @@ impl Parser {
         let mut params = Vec::new();
         let mut rest_param = None;
 
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed parameter vector in fn".to_string());
             }
 
             // Check for & symbol (rest parameter marker)
-            if let Token::Symbol(s, _) = self.current_token() {
+            if let Token::Symbol(s) = self.current_token() {
                 if s == "&" {
                     self.advance(); // consume &
 
                     // Next symbol should be the rest parameter name
                     let rest_name = match self.current_token() {
-                        Token::Symbol(s, _) => s.clone(),
+                        Token::Symbol(s) => s.clone(),
                         _ => return Err("Rest parameter after & must be a symbol".to_string()),
                     };
                     self.advance();
@@ -841,7 +823,7 @@ impl Parser {
                     rest_param = Some(rest_name);
 
                     // After rest parameter, there should be no more parameters
-                    if !matches!(self.current_token(), Token::RBracket(_)) {
+                    if self.current_token() != &Token::RBracket {
                         return Err("Rest parameter must be the last parameter".to_string());
                     }
                     break;
@@ -853,12 +835,12 @@ impl Parser {
             params.push(param);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+        self.expect(Token::RBracket)?; // consume ]
 
         // Parse body (single expression for now)
         let body = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Fn {
             params,
@@ -873,11 +855,11 @@ impl Parser {
         let mut arities = Vec::new();
 
         // Parse each arity clause: ([] body) ([x] body) ([x y] body)
-        while matches!(self.current_token(), Token::LParen(_)) {
+        while self.current_token() == &Token::LParen {
             self.advance(); // consume (
 
             // Parse parameter vector
-            if !matches!(self.current_token(), Token::LBracket(_)) {
+            if self.current_token() != &Token::LBracket {
                 return Err("Each arity clause must start with parameter vector [...]".to_string());
             }
             self.advance(); // consume [
@@ -885,25 +867,25 @@ impl Parser {
             let mut params = Vec::new();
             let mut rest_param = None;
 
-            while !matches!(self.current_token(), Token::RBracket(_)) {
-                if self.current_token() == &self.eof_token {
+            while self.current_token() != &Token::RBracket {
+                if self.current_token() == &Token::Eof {
                     return Err("Unclosed parameter vector in arity clause".to_string());
                 }
 
                 // Check for & symbol
-                if let Token::Symbol(s, _) = self.current_token() {
+                if let Token::Symbol(s) = self.current_token() {
                     if s == "&" {
                         self.advance(); // consume &
 
                         let rest_name = match self.current_token() {
-                            Token::Symbol(s, _) => s.clone(),
+                            Token::Symbol(s) => s.clone(),
                             _ => return Err("Rest parameter after & must be a symbol".to_string()),
                         };
                         self.advance();
 
                         rest_param = Some(rest_name);
 
-                        if !matches!(self.current_token(), Token::RBracket(_)) {
+                        if self.current_token() != &Token::RBracket {
                             return Err("Rest parameter must be the last parameter".to_string());
                         }
                         break;
@@ -915,12 +897,12 @@ impl Parser {
                 params.push(param);
             }
 
-            self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+            self.expect(Token::RBracket)?; // consume ]
 
             // Parse body
             let body = self.parse_expr()?;
 
-            self.expect(Token::RParen(Span::dummy()))?; // consume ) closing arity clause
+            self.expect(Token::RParen)?; // consume ) closing arity clause
 
             arities.push(FunctionArity {
                 params,
@@ -929,7 +911,7 @@ impl Parser {
             });
         }
 
-        self.expect(Token::RParen(Span::dummy()))?; // consume ) closing fn
+        self.expect(Token::RParen)?; // consume ) closing fn
 
         if arities.is_empty() {
             return Err("Multi-arity fn must have at least one arity clause".to_string());
@@ -940,22 +922,22 @@ impl Parser {
 
     fn parse_let(&mut self) -> Result<Expr, String> {
         // Already saw 'let', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "let" {
                 self.advance();
             }
         }
 
         // Expect binding vector: [x 10 y 20]
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("let requires a binding vector [...]".to_string());
         }
         self.advance(); // consume [
 
         // Parse bindings
         let mut bindings = Vec::new();
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed binding vector in let".to_string());
             }
 
@@ -968,18 +950,18 @@ impl Parser {
             bindings.push((pattern, Box::new(value)));
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+        self.expect(Token::RBracket)?; // consume ]
 
         // Parse body (rest of expressions until closing paren)
         let mut body_exprs = Vec::new();
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed let form".to_string());
             }
             body_exprs.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         // Body is the last expression (or implicit nil if empty)
         let body = if body_exprs.is_empty() {
@@ -1001,19 +983,19 @@ impl Parser {
         use crate::ast::Pattern;
 
         match self.current_token() {
-            Token::Symbol(s, _) if s == "_" => {
+            Token::Symbol(s) if s == "_" => {
                 self.advance();
                 Ok(Pattern::Ignore)
             }
 
-            Token::Symbol(s, _) => {
+            Token::Symbol(s) => {
                 let name = s.clone();
                 self.advance();
                 Ok(Pattern::Symbol(name))
             }
 
-            Token::LBracket(_) => self.parse_vector_pattern(),
-            Token::LBrace(_) => self.parse_map_pattern(),
+            Token::LBracket => self.parse_vector_pattern(),
+            Token::LBrace => self.parse_map_pattern(),
 
             _ => Err(format!("Invalid pattern: {:?}", self.current_token()))
         }
@@ -1023,24 +1005,24 @@ impl Parser {
     fn parse_vector_pattern(&mut self) -> Result<crate::ast::Pattern, String> {
         use crate::ast::Pattern;
 
-        self.expect(Token::LBracket(Span::dummy()))?;
+        self.expect(Token::LBracket)?;
 
         let mut elements = Vec::new();
         let mut rest_param = None;
 
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed vector pattern".to_string());
             }
 
             // Check for & (rest parameter)
-            if let Token::Symbol(s, _) = self.current_token() {
+            if let Token::Symbol(s) = self.current_token() {
                 if s == "&" {
                     self.advance(); // consume &
 
                     // Next must be a symbol
                     let rest_name = match self.current_token() {
-                        Token::Symbol(s, _) => s.clone(),
+                        Token::Symbol(s) => s.clone(),
                         _ => return Err("Rest parameter must be a symbol".to_string()),
                     };
                     self.advance();
@@ -1048,7 +1030,7 @@ impl Parser {
                     rest_param = Some(rest_name);
 
                     // Rest must be last
-                    if !matches!(self.current_token(), Token::RBracket(_)) {
+                    if self.current_token() != &Token::RBracket {
                         return Err("Rest parameter must be last in pattern".to_string());
                     }
                     break;
@@ -1059,7 +1041,7 @@ impl Parser {
             elements.push(self.parse_pattern()?);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?;
+        self.expect(Token::RBracket)?;
         Ok(Pattern::Vector { elements, rest: rest_param, as_binding: None })
     }
 
@@ -1067,23 +1049,23 @@ impl Parser {
     fn parse_map_pattern(&mut self) -> Result<crate::ast::Pattern, String> {
         use crate::ast::{MapPatternKey, Pattern};
 
-        self.expect(Token::LBrace(Span::dummy()))?;
+        self.expect(Token::LBrace)?;
 
         // For MVP: Only support :keys shorthand
-        if let Token::Keyword(kw, _) = self.current_token() {
+        if let Token::Keyword(kw) = self.current_token() {
             if kw == "keys" {
                 self.advance(); // consume :keys
 
                 // Expect vector of symbols
-                if !matches!(self.current_token(), Token::LBracket(_)) {
+                if self.current_token() != &Token::LBracket {
                     return Err(":keys requires a vector of symbols".to_string());
                 }
                 self.advance(); // consume [
 
                 let mut bindings = Vec::new();
-                while !matches!(self.current_token(), Token::RBracket(_)) {
+                while self.current_token() != &Token::RBracket {
                     match self.current_token() {
-                        Token::Symbol(s, _) => {
+                        Token::Symbol(s) => {
                             let name = s.clone();
                             bindings.push((
                                 MapPatternKey::Symbol(name.clone()),
@@ -1095,8 +1077,8 @@ impl Parser {
                     }
                 }
 
-                self.expect(Token::RBracket(Span::dummy()))?;
-                self.expect(Token::RBrace(Span::dummy()))?;
+                self.expect(Token::RBracket)?;
+                self.expect(Token::RBrace)?;
                 return Ok(Pattern::Map { bindings, defaults: None });
             }
         }
@@ -1106,7 +1088,7 @@ impl Parser {
 
     fn parse_def(&mut self) -> Result<Expr, String> {
         // Already saw 'def', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "def" {
                 self.advance();
             }
@@ -1114,7 +1096,7 @@ impl Parser {
 
         // Get variable name
         let name = match self.current_token() {
-            Token::Symbol(s, _) => s.clone(),
+            Token::Symbol(s) => s.clone(),
             _ => return Err("def requires a symbol name".to_string()),
         };
         self.advance();
@@ -1122,7 +1104,7 @@ impl Parser {
         // Get value
         let value = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Def {
             name,
@@ -1133,7 +1115,7 @@ impl Parser {
 
     fn parse_if(&mut self) -> Result<Expr, String> {
         // Already saw 'if', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "if" {
                 self.advance();
             }
@@ -1148,7 +1130,7 @@ impl Parser {
         // Parse else branch
         let else_branch = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::If {
             condition: Box::new(condition),
@@ -1159,7 +1141,7 @@ impl Parser {
 
     fn parse_do(&mut self) -> Result<Expr, String> {
         // Already saw 'do', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "do" {
                 self.advance();
             }
@@ -1167,14 +1149,14 @@ impl Parser {
 
         // Parse all expressions until )
         let mut exprs = Vec::new();
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed do expression".to_string());
             }
             exprs.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         // do must have at least one expression
         if exprs.is_empty() {
@@ -1186,7 +1168,7 @@ impl Parser {
 
     fn parse_dosync(&mut self) -> Result<Expr, String> {
         // Already saw 'dosync', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "dosync" {
                 self.advance();
             }
@@ -1194,14 +1176,14 @@ impl Parser {
 
         // Parse all expressions until )
         let mut exprs = Vec::new();
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed dosync expression".to_string());
             }
             exprs.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         // dosync must have at least one expression
         if exprs.is_empty() {
@@ -1214,7 +1196,7 @@ impl Parser {
     fn parse_quote(&mut self) -> Result<Expr, String> {
         // (quote x)
         // Already saw 'quote', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "quote" {
                 self.advance();
             }
@@ -1223,7 +1205,7 @@ impl Parser {
         // Parse the quoted expression
         let quoted_expr = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Quote {
             expr: Box::new(quoted_expr),
@@ -1236,7 +1218,7 @@ impl Parser {
 
         // Parse module path (e.g., rust.fs)
         let module = match self.current_token() {
-            Token::Symbol(name, _) => {
+            Token::Symbol(name) => {
                 let module_name = name.clone();
                 self.advance();
                 module_name
@@ -1245,17 +1227,17 @@ impl Parser {
         };
 
         // Check for optional import list [read write]
-        let imports = if matches!(self.current_token(), Token::LBracket(_)) {
+        let imports = if matches!(self.current_token(), Token::LBracket) {
             self.advance(); // Skip [
             let mut import_list = Vec::new();
 
-            while !matches!(self.current_token(), Token::RBracket(_)) {
-                if matches!(self.current_token(), Token::Eof(_)) {
+            while !matches!(self.current_token(), Token::RBracket) {
+                if matches!(self.current_token(), Token::Eof) {
                     return Err("Unclosed import list in use".to_string());
                 }
 
                 match self.current_token() {
-                    Token::Symbol(name, _) => {
+                    Token::Symbol(name) => {
                         import_list.push(name.clone());
                         self.advance();
                     }
@@ -1263,13 +1245,13 @@ impl Parser {
                 }
             }
 
-            self.expect(Token::RBracket(Span::dummy()))?;
+            self.expect(Token::RBracket)?;
             import_list
         } else {
             Vec::new() // Empty = import all
         };
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Use { module, imports })
     }
@@ -1277,22 +1259,22 @@ impl Parser {
     fn parse_loop(&mut self) -> Result<Expr, String> {
         // (loop [x 0 y 10] body)
         // Already saw 'loop', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "loop" {
                 self.advance();
             }
         }
 
         // Expect binding vector: [x 0 y 10]
-        if !matches!(self.current_token(), Token::LBracket(_)) {
+        if self.current_token() != &Token::LBracket {
             return Err("loop requires a binding vector [...]".to_string());
         }
         self.advance(); // consume [
 
         // Parse bindings (same as let)
         let mut bindings = Vec::new();
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed binding vector in loop".to_string());
             }
 
@@ -1305,12 +1287,12 @@ impl Parser {
             bindings.push((pattern, Box::new(value)));
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+        self.expect(Token::RBracket)?; // consume ]
 
         // Parse body (single expression)
         let body = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Loop { bindings, body: Box::new(body) })
     }
@@ -1318,7 +1300,7 @@ impl Parser {
     fn parse_recur(&mut self) -> Result<Expr, String> {
         // (recur new-x new-y)
         // Already saw 'recur', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "recur" {
                 self.advance();
             }
@@ -1326,14 +1308,14 @@ impl Parser {
 
         // Parse arguments
         let mut args = Vec::new();
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed recur expression".to_string());
             }
             args.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Recur { args })
     }
@@ -1346,7 +1328,7 @@ impl Parser {
         //   (finally cleanup-expr))
 
         // Already saw 'try', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "try" {
                 self.advance();
             }
@@ -1359,25 +1341,25 @@ impl Parser {
         let mut finally_block = None;
 
         // Parse catch and finally clauses
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed try expression".to_string());
             }
 
             // Must be either (catch ...) or (finally ...)
-            if !matches!(self.current_token(), Token::LParen(_)) {
+            if self.current_token() != &Token::LParen {
                 return Err("Expected catch or finally clause in try".to_string());
             }
             self.advance(); // consume (
 
             match self.current_token() {
-                Token::Symbol(s, _) if s == "catch" => {
+                Token::Symbol(s) if s == "catch" => {
                     self.advance(); // consume 'catch'
 
                     // Parse exception type (optional - if not present, catch all)
-                    let exception_type = if matches!(self.current_token(), Token::Symbol(_, _)) {
+                    let exception_type = if matches!(self.current_token(), Token::Symbol(_)) {
                         let next = self.current_token().clone();
-                        if let Token::Symbol(type_name, _) = next {
+                        if let Token::Symbol(type_name) = next {
                             self.advance();
                             Some(type_name)
                         } else {
@@ -1389,7 +1371,7 @@ impl Parser {
 
                     // Parse binding variable
                     let binding = match self.current_token() {
-                        Token::Symbol(var, _) => {
+                        Token::Symbol(var) => {
                             let v = var.clone();
                             self.advance();
                             v
@@ -1400,7 +1382,7 @@ impl Parser {
                     // Parse handler expression
                     let handler = self.parse_expr()?;
 
-                    self.expect(Token::RParen(Span::dummy()))?; // close catch clause
+                    self.expect(Token::RParen)?; // close catch clause
 
                     catch_clauses.push(crate::ast::CatchClause {
                         exception_type,
@@ -1409,13 +1391,13 @@ impl Parser {
                     });
                 }
 
-                Token::Symbol(s, _) if s == "finally" => {
+                Token::Symbol(s) if s == "finally" => {
                     self.advance(); // consume 'finally'
 
                     // Parse finally expression
                     let finally_expr = self.parse_expr()?;
 
-                    self.expect(Token::RParen(Span::dummy()))?; // close finally clause
+                    self.expect(Token::RParen)?; // close finally clause
 
                     finally_block = Some(Box::new(finally_expr));
 
@@ -1427,7 +1409,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::RParen(Span::dummy()))?; // close try
+        self.expect(Token::RParen)?; // close try
 
         Ok(Expr::Try {
             body: Box::new(body),
@@ -1439,7 +1421,7 @@ impl Parser {
     fn parse_throw(&mut self) -> Result<Expr, String> {
         // (throw exception-expr)
         // Already saw 'throw', consume it
-        if let Token::Symbol(s, _) = self.current_token() {
+        if let Token::Symbol(s) = self.current_token() {
             if s == "throw" {
                 self.advance();
             }
@@ -1448,7 +1430,7 @@ impl Parser {
         // Parse the expression to throw
         let expr = self.parse_expr()?;
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Throw {
             expr: Box::new(expr),
@@ -1464,7 +1446,7 @@ impl Parser {
 
         // Parse namespace name
         let name = match self.current_token() {
-            Token::Symbol(ns_name, _) => {
+            Token::Symbol(ns_name) => {
                 let name = ns_name.clone();
                 self.advance();
                 name
@@ -1473,7 +1455,7 @@ impl Parser {
         };
 
         // Skip optional docstring (Clojure compatibility)
-        if matches!(self.current_token(), Token::String(_, _)) {
+        if matches!(self.current_token(), Token::String(_)) {
             self.advance();
         }
 
@@ -1481,40 +1463,40 @@ impl Parser {
         let mut rust_imports = Vec::new();
 
         // Parse optional clauses: (:require ...) (:rust ...)
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if matches!(self.current_token(), Token::Eof(_)) {
+        while !matches!(self.current_token(), Token::RParen) {
+            if matches!(self.current_token(), Token::Eof) {
                 return Err("Unclosed ns declaration".to_string());
             }
 
             // Expect a clause starting with (
-            if !matches!(self.current_token(), Token::LParen(_)) {
+            if !matches!(self.current_token(), Token::LParen) {
                 return Err("ns clauses must be lists starting with :require or :rust".to_string());
             }
             self.advance(); // Skip (
 
             // Check the clause type
             match self.current_token() {
-                Token::Keyword(kw, _) if kw == "require" => {
+                Token::Keyword(kw) if kw == "require" => {
                     self.advance(); // Skip :require
                     // Parse all require specs until )
-                    while !matches!(self.current_token(), Token::RParen(_)) {
+                    while !matches!(self.current_token(), Token::RParen) {
                         requires.push(self.parse_require_spec()?);
                     }
-                    self.expect(Token::RParen(Span::dummy()))?;
+                    self.expect(Token::RParen)?;
                 }
-                Token::Keyword(kw, _) if kw == "rust" => {
+                Token::Keyword(kw) if kw == "rust" => {
                     self.advance(); // Skip :rust
                     // Parse all rust import specs until )
-                    while !matches!(self.current_token(), Token::RParen(_)) {
+                    while !matches!(self.current_token(), Token::RParen) {
                         rust_imports.push(self.parse_rust_import_spec()?);
                     }
-                    self.expect(Token::RParen(Span::dummy()))?;
+                    self.expect(Token::RParen)?;
                 }
                 _ => return Err("Unknown ns clause. Expected :require or :rust".to_string()),
             }
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Ns {
             name,
@@ -1531,15 +1513,15 @@ impl Parser {
 
         let mut specs = Vec::new();
 
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if matches!(self.current_token(), Token::Eof(_)) {
+        while !matches!(self.current_token(), Token::RParen) {
+            if matches!(self.current_token(), Token::Eof) {
                 return Err("Unclosed require statement".to_string());
             }
 
             specs.push(self.parse_require_spec()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         Ok(Expr::Require { specs })
     }
@@ -1552,14 +1534,14 @@ impl Parser {
 
         let mut names = Vec::new();
 
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if matches!(self.current_token(), Token::Eof(_)) {
+        while !matches!(self.current_token(), Token::RParen) {
+            if matches!(self.current_token(), Token::Eof) {
                 return Err("Unclosed declare statement".to_string());
             }
 
             // Each name should be a symbol
             match self.current_token() {
-                Token::Symbol(name, _) => {
+                Token::Symbol(name) => {
                     names.push(name.clone());
                     self.advance();
                 }
@@ -1567,7 +1549,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         if names.is_empty() {
             return Err("declare requires at least one function name".to_string());
@@ -1580,11 +1562,11 @@ impl Parser {
         // [my.lib :as lib :refer [func1 func2]]
         // or [my.lib :refer :all]
 
-        self.expect(Token::LBracket(Span::dummy()))?;
+        self.expect(Token::LBracket)?;
 
         // Parse module name
         let module = match self.current_token() {
-            Token::Symbol(name, _) => {
+            Token::Symbol(name) => {
                 let mod_name = name.clone();
                 self.advance();
                 mod_name
@@ -1597,38 +1579,38 @@ impl Parser {
         let mut refer_all = false;
 
         // Parse options: :as alias, :refer [...]
-        while !matches!(self.current_token(), Token::RBracket(_)) {
+        while !matches!(self.current_token(), Token::RBracket) {
             match self.current_token() {
-                Token::Keyword(kw, _) if kw == "as" => {
+                Token::Keyword(kw) if kw == "as" => {
                     self.advance(); // Skip :as
                     match self.current_token() {
-                        Token::Symbol(alias_name, _) => {
+                        Token::Symbol(alias_name) => {
                             alias = Some(alias_name.clone());
                             self.advance();
                         }
                         _ => return Err(":as requires an alias name".to_string()),
                     }
                 }
-                Token::Keyword(kw, _) if kw == "refer" => {
+                Token::Keyword(kw) if kw == "refer" => {
                     self.advance(); // Skip :refer
 
                     // Check for :all
-                    if matches!(self.current_token(), Token::Keyword(kw, _) if kw == "all") {
+                    if matches!(self.current_token(), Token::Keyword(kw) if kw == "all") {
                         refer_all = true;
                         self.advance();
-                    } else if matches!(self.current_token(), Token::LBracket(_)) {
+                    } else if matches!(self.current_token(), Token::LBracket) {
                         // Parse [func1 func2 ...]
                         self.advance(); // Skip [
-                        while !matches!(self.current_token(), Token::RBracket(_)) {
+                        while !matches!(self.current_token(), Token::RBracket) {
                             match self.current_token() {
-                                Token::Symbol(name, _) => {
+                                Token::Symbol(name) => {
                                     refer.push(name.clone());
                                     self.advance();
                                 }
                                 _ => return Err(":refer list must contain symbols".to_string()),
                             }
                         }
-                        self.expect(Token::RBracket(Span::dummy()))?;
+                        self.expect(Token::RBracket)?;
                     } else {
                         return Err(":refer requires :all or a vector [func1 func2]".to_string());
                     }
@@ -1637,7 +1619,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?;
+        self.expect(Token::RBracket)?;
 
         Ok(crate::ast::RequireSpec {
             module,
@@ -1650,11 +1632,11 @@ impl Parser {
     fn parse_rust_import_spec(&mut self) -> Result<crate::ast::RustImport, String> {
         // [egui-hello :as gui]
 
-        self.expect(Token::LBracket(Span::dummy()))?;
+        self.expect(Token::LBracket)?;
 
         // Parse library name
         let library = match self.current_token() {
-            Token::Symbol(name, _) => {
+            Token::Symbol(name) => {
                 let lib_name = name.clone();
                 self.advance();
                 lib_name
@@ -1665,12 +1647,12 @@ impl Parser {
         let mut alias = None;
 
         // Parse :as option
-        while !matches!(self.current_token(), Token::RBracket(_)) {
+        while !matches!(self.current_token(), Token::RBracket) {
             match self.current_token() {
-                Token::Keyword(kw, _) if kw == "as" => {
+                Token::Keyword(kw) if kw == "as" => {
                     self.advance(); // Skip :as
                     match self.current_token() {
-                        Token::Symbol(alias_name, _) => {
+                        Token::Symbol(alias_name) => {
                             alias = Some(alias_name.clone());
                             self.advance();
                         }
@@ -1681,7 +1663,7 @@ impl Parser {
             }
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?;
+        self.expect(Token::RBracket)?;
 
         Ok(crate::ast::RustImport { library, alias })
     }
@@ -1694,15 +1676,15 @@ impl Parser {
         // Parse all elements until we hit )
         let mut elements = Vec::new();
 
-        while !matches!(self.current_token(), Token::RParen(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RParen {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed shorthand fn".to_string());
             }
 
             elements.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RParen(Span::dummy()))?;
+        self.expect(Token::RParen)?;
 
         // The body is the list of elements
         let body = if elements.is_empty() {
@@ -1976,31 +1958,31 @@ impl Parser {
     }
 
     fn parse_vector(&mut self) -> Result<Expr, String> {
-        self.expect(Token::LBracket(Span::dummy()))?;
+        self.expect(Token::LBracket)?;
         let mut elements = Vec::new();
 
-        while !matches!(self.current_token(), Token::RBracket(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBracket {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed vector".to_string());
             }
             elements.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RBracket(Span::dummy()))?;
+        self.expect(Token::RBracket)?;
         Ok(Expr::Vector(elements))
     }
 
     fn parse_map(&mut self) -> Result<Expr, String> {
-        self.expect(Token::LBrace(Span::dummy()))?;
+        self.expect(Token::LBrace)?;
         let mut pairs = Vec::new();
 
-        while !matches!(self.current_token(), Token::RBrace(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBrace {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed map".to_string());
             }
 
             let key = self.parse_expr()?;
-            if matches!(self.current_token(), Token::RBrace(_)) {
+            if self.current_token() == &Token::RBrace {
                 return Err("Map has odd number of elements".to_string());
             }
             let value = self.parse_expr()?;
@@ -2008,7 +1990,7 @@ impl Parser {
             pairs.push((key, value));
         }
 
-        self.expect(Token::RBrace(Span::dummy()))?;
+        self.expect(Token::RBrace)?;
         Ok(Expr::Map(pairs))
     }
 
@@ -2016,21 +1998,21 @@ impl Parser {
         // Note: HashSetStart already consumed the #{ tokens
         let mut elements = Vec::new();
 
-        while !matches!(self.current_token(), Token::RBrace(_)) {
-            if self.current_token() == &self.eof_token {
+        while self.current_token() != &Token::RBrace {
+            if self.current_token() == &Token::Eof {
                 return Err("Unclosed set".to_string());
             }
             elements.push(self.parse_expr()?);
         }
 
-        self.expect(Token::RBrace(Span::dummy()))?;
+        self.expect(Token::RBrace)?;
         Ok(Expr::Set(elements))
     }
 
     pub fn parse(&mut self) -> Result<Vec<Expr>, String> {
         let mut expressions = Vec::new();
 
-        while !matches!(self.current_token(), Token::Eof(_)) {
+        while self.current_token() != &Token::Eof {
             expressions.push(self.parse_expr()?);
         }
 

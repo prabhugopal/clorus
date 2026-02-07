@@ -1,42 +1,77 @@
 /// Lexer/Tokenizer for Clojure-like syntax
 
+/// Source code span tracking line, column, and position
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Span {
+    pub start: usize,   // Character position in input
+    pub end: usize,
+    pub line: usize,    // Line number (1-indexed)
+    pub column: usize,  // Column number (1-indexed)
+}
+
+impl Span {
+    pub fn new(start: usize, end: usize, line: usize, column: usize) -> Self {
+        Span { start, end, line, column }
+    }
+
+    pub fn dummy() -> Self {
+        Span { start: 0, end: 0, line: 1, column: 1 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     // Delimiters
-    LParen,
-    RParen,
-    LBracket,
-    RBracket,
-    LBrace,
-    RBrace,
+    LParen(Span),
+    RParen(Span),
+    LBracket(Span),
+    RBracket(Span),
+    LBrace(Span),
+    RBrace(Span),
 
     // Reader macros
-    ShorthandFnStart,  // #(
-    HashSetStart,      // #{
-    VarQuote,          // #' (var quote)
-    Meta,              // ^ (metadata prefix)
-    Quote,             // '
-    SyntaxQuote,       // ` (backtick)
-    Unquote,           // ~
-    UnquoteSplicing,   // ~@
-    Deref,             // @ (dereference atom/ref)
+    ShorthandFnStart(Span),  // #(
+    HashSetStart(Span),      // #{
+    VarQuote(Span),          // #' (var quote)
+    Meta(Span),              // ^ (metadata prefix)
+    Quote(Span),             // '
+    SyntaxQuote(Span),       // ` (backtick)
+    Unquote(Span),           // ~
+    UnquoteSplicing(Span),   // ~@
+    Deref(Span),             // @ (dereference atom/ref)
 
     // Literals
-    Long(i64),
-    Double(f64),
-    String(String),
-    Symbol(String),
-    Keyword(String),
-    Bool(bool),
-    Nil,
+    Long(i64, Span),
+    Double(f64, Span),
+    String(String, Span),
+    Symbol(String, Span),
+    Keyword(String, Span),
+    Bool(bool, Span),
+    Nil(Span),
 
     // End of input
-    Eof,
+    Eof(Span),
+}
+
+impl Token {
+    pub fn span(&self) -> Span {
+        match self {
+            Token::LParen(s) | Token::RParen(s) | Token::LBracket(s) | Token::RBracket(s)
+            | Token::LBrace(s) | Token::RBrace(s) | Token::ShorthandFnStart(s)
+            | Token::HashSetStart(s) | Token::VarQuote(s) | Token::Meta(s) | Token::Quote(s)
+            | Token::SyntaxQuote(s) | Token::Unquote(s) | Token::UnquoteSplicing(s)
+            | Token::Deref(s) | Token::Nil(s) | Token::Eof(s) => *s,
+            Token::Long(_, s) | Token::Double(_, s) | Token::String(_, s)
+            | Token::Symbol(_, s) | Token::Keyword(_, s) | Token::Bool(_, s) => *s,
+        }
+    }
 }
 
 pub struct Lexer {
     input: Vec<char>,
     position: usize,
+    line: usize,      // Current line (1-indexed)
+    column: usize,    // Current column (1-indexed)
 }
 
 impl Lexer {
@@ -44,7 +79,17 @@ impl Lexer {
         Lexer {
             input: input.chars().collect(),
             position: 0,
+            line: 1,
+            column: 1,
         }
+    }
+
+    fn current_span(&self) -> Span {
+        Span::new(self.position, self.position + 1, self.line, self.column)
+    }
+
+    fn make_span(&self, start_pos: usize, start_line: usize, start_col: usize) -> Span {
+        Span::new(start_pos, self.position, start_line, start_col)
     }
 
     fn current_char(&self) -> Option<char> {
@@ -65,7 +110,15 @@ impl Lexer {
     }
 
     fn advance(&mut self) {
-        self.position += 1;
+        if let Some(ch) = self.current_char() {
+            self.position += 1;
+            if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+        }
     }
 
     fn skip_whitespace(&mut self) {
@@ -90,14 +143,19 @@ impl Lexer {
         }
     }
 
-    fn read_string(&mut self) -> Result<String, String> {
+    fn read_string(&mut self) -> Result<(String, Span), String> {
+        let start_pos = self.position;
+        let start_line = self.line;
+        let start_col = self.column;
+
         let mut result = String::new();
         self.advance(); // skip opening "
 
         while let Some(ch) = self.current_char() {
             if ch == '"' {
                 self.advance(); // skip closing "
-                return Ok(result);
+                let span = self.make_span(start_pos, start_line, start_col);
+                return Ok((result, span));
             } else if ch == '\\' {
                 self.advance();
                 if let Some(escaped) = self.current_char() {
@@ -124,6 +182,10 @@ impl Lexer {
     }
 
     fn read_number(&mut self) -> Token {
+        let start_pos = self.position;
+        let start_line = self.line;
+        let start_col = self.column;
+
         let mut num_str = String::new();
         let mut has_decimal = false;
 
@@ -148,15 +210,17 @@ impl Lexer {
                 }
             }
 
+            let span = self.make_span(start_pos, start_line, start_col);
+
             if hex_str.is_empty() {
-                return Token::Long(0);
+                return Token::Long(0, span);
             }
 
             // Parse hex string to i64
             if let Ok(value) = i64::from_str_radix(&hex_str, 16) {
-                return Token::Long(value);
+                return Token::Long(value, span);
             } else {
-                return Token::Long(0); // Fallback on overflow
+                return Token::Long(0, span); // Fallback on overflow
             }
         }
 
@@ -197,13 +261,15 @@ impl Lexer {
             }
         }
 
+        let span = self.make_span(start_pos, start_line, start_col);
+
         // Parse as Long or Double based on presence of decimal point/exponent
         if has_decimal {
             let value = num_str.parse().unwrap_or(0.0);
-            Token::Double(value)
+            Token::Double(value, span)
         } else {
             let value = num_str.parse().unwrap_or(0);
-            Token::Long(value)
+            Token::Long(value, span)
         }
     }
 
@@ -247,50 +313,71 @@ impl Lexer {
         }
 
         match self.current_char() {
-            None => Ok(Token::Eof),
+            None => {
+                let span = self.current_span();
+                Ok(Token::Eof(span))
+            }
 
             Some('(') => {
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::LParen)
+                Ok(Token::LParen(span))
             }
             Some(')') => {
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::RParen)
+                Ok(Token::RParen(span))
             }
             Some('[') => {
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::LBracket)
+                Ok(Token::LBracket(span))
             }
             Some(']') => {
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::RBracket)
+                Ok(Token::RBracket(span))
             }
             Some('{') => {
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::LBrace)
+                Ok(Token::LBrace(span))
             }
             Some('}') => {
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::RBrace)
+                Ok(Token::RBrace(span))
             }
 
             Some('#') => {
                 // Check for reader macros starting with #
                 if self.peek_char(1) == Some('(') {
                     // Shorthand function: #(...)
+                    let start_pos = self.position;
+                    let start_line = self.line;
+                    let start_col = self.column;
                     self.advance(); // skip #
                     self.advance(); // skip (
-                    Ok(Token::ShorthandFnStart)
+                    let span = self.make_span(start_pos, start_line, start_col);
+                    Ok(Token::ShorthandFnStart(span))
                 } else if self.peek_char(1) == Some('{') {
                     // Hash set: #{...}
+                    let start_pos = self.position;
+                    let start_line = self.line;
+                    let start_col = self.column;
                     self.advance(); // skip #
                     self.advance(); // skip {
-                    Ok(Token::HashSetStart)
+                    let span = self.make_span(start_pos, start_line, start_col);
+                    Ok(Token::HashSetStart(span))
                 } else if self.peek_char(1) == Some('\'') {
                     // Var quote: #'symbol
+                    let start_pos = self.position;
+                    let start_line = self.line;
+                    let start_col = self.column;
                     self.advance(); // skip #
                     self.advance(); // skip '
-                    Ok(Token::VarQuote)
+                    let span = self.make_span(start_pos, start_line, start_col);
+                    Ok(Token::VarQuote(span))
                 } else {
                     // Other # forms not yet supported
                     return Err(format!("Unsupported reader macro: #{:?}", self.peek_char(1)));
@@ -299,49 +386,62 @@ impl Lexer {
 
             Some('\'') => {
                 // Quote: 'x or '(...)
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::Quote)
+                Ok(Token::Quote(span))
             }
 
             Some('`') => {
                 // Syntax-quote: `x or `(...)
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::SyntaxQuote)
+                Ok(Token::SyntaxQuote(span))
             }
 
             Some('~') => {
                 // Check for unquote-splicing ~@ or plain unquote ~
                 if self.peek_char(1) == Some('@') {
+                    let start_pos = self.position;
+                    let start_line = self.line;
+                    let start_col = self.column;
                     self.advance(); // skip ~
                     self.advance(); // skip @
-                    Ok(Token::UnquoteSplicing)
+                    let span = self.make_span(start_pos, start_line, start_col);
+                    Ok(Token::UnquoteSplicing(span))
                 } else {
+                    let span = self.current_span();
                     self.advance();
-                    Ok(Token::Unquote)
+                    Ok(Token::Unquote(span))
                 }
             }
 
             Some('@') => {
                 // Deref: @my-atom
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::Deref)
+                Ok(Token::Deref(span))
             }
 
             Some('^') => {
                 // Metadata: ^:dynamic or ^{:doc "..."}
+                let span = self.current_span();
                 self.advance();
-                Ok(Token::Meta)
+                Ok(Token::Meta(span))
             }
 
             Some('"') => {
-                let s = self.read_string()?;
-                Ok(Token::String(s))
+                let (s, span) = self.read_string()?;
+                Ok(Token::String(s, span))
             }
 
             Some(':') => {
+                let start_pos = self.position;
+                let start_line = self.line;
+                let start_col = self.column;
                 self.advance();
                 let keyword = self.read_symbol();
-                Ok(Token::Keyword(keyword))
+                let span = self.make_span(start_pos, start_line, start_col);
+                Ok(Token::Keyword(keyword, span))
             }
 
             Some(ch) if ch.is_ascii_digit() || (ch == '-' && self.peek_char(1).map_or(false, |c| c.is_ascii_digit())) => {
@@ -349,12 +449,16 @@ impl Lexer {
             }
 
             Some(_) => {
+                let start_pos = self.position;
+                let start_line = self.line;
+                let start_col = self.column;
                 let sym = self.read_symbol();
+                let span = self.make_span(start_pos, start_line, start_col);
                 match sym.as_str() {
-                    "true" => Ok(Token::Bool(true)),
-                    "false" => Ok(Token::Bool(false)),
-                    "nil" => Ok(Token::Nil),
-                    _ => Ok(Token::Symbol(sym)),
+                    "true" => Ok(Token::Bool(true, span)),
+                    "false" => Ok(Token::Bool(false, span)),
+                    "nil" => Ok(Token::Nil(span)),
+                    _ => Ok(Token::Symbol(sym, span)),
                 }
             }
         }
@@ -365,11 +469,11 @@ impl Lexer {
 
         loop {
             let token = self.next_token()?;
-            if token == Token::Eof {
-                tokens.push(token);
+            let is_eof = matches!(token, Token::Eof(_));
+            tokens.push(token);
+            if is_eof {
                 break;
             }
-            tokens.push(token);
         }
 
         Ok(tokens)
@@ -384,45 +488,47 @@ mod tests {
     fn test_simple_tokens() {
         let mut lexer = Lexer::new("() [] {}");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens, vec![
-            Token::LParen, Token::RParen,
-            Token::LBracket, Token::RBracket,
-            Token::LBrace, Token::RBrace,
-            Token::Eof,
-        ]);
+        assert_eq!(tokens.len(), 7);
+        assert!(matches!(tokens[0], Token::LParen(_)));
+        assert!(matches!(tokens[1], Token::RParen(_)));
+        assert!(matches!(tokens[2], Token::LBracket(_)));
+        assert!(matches!(tokens[3], Token::RBracket(_)));
+        assert!(matches!(tokens[4], Token::LBrace(_)));
+        assert!(matches!(tokens[5], Token::RBrace(_)));
+        assert!(matches!(tokens[6], Token::Eof(_)));
     }
 
     #[test]
     fn test_numbers() {
         let mut lexer = Lexer::new("42 3.14 -10");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0], Token::Long(42));
-        assert_eq!(tokens[1], Token::Double(3.14));
-        assert_eq!(tokens[2], Token::Long(-10));
+        assert!(matches!(tokens[0], Token::Long(42, _)));
+        assert!(matches!(tokens[1], Token::Double(v, _) if (v - 3.14).abs() < 0.001));
+        assert!(matches!(tokens[2], Token::Long(-10, _)));
     }
 
     #[test]
     fn test_symbols() {
         let mut lexer = Lexer::new("defn + my-var?");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0], Token::Symbol("defn".to_string()));
-        assert_eq!(tokens[1], Token::Symbol("+".to_string()));
-        assert_eq!(tokens[2], Token::Symbol("my-var?".to_string()));
+        assert!(matches!(&tokens[0], Token::Symbol(s, _) if s == "defn"));
+        assert!(matches!(&tokens[1], Token::Symbol(s, _) if s == "+"));
+        assert!(matches!(&tokens[2], Token::Symbol(s, _) if s == "my-var?"));
     }
 
     #[test]
     fn test_keywords() {
         let mut lexer = Lexer::new(":name :type");
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0], Token::Keyword("name".to_string()));
-        assert_eq!(tokens[1], Token::Keyword("type".to_string()));
+        assert!(matches!(&tokens[0], Token::Keyword(k, _) if k == "name"));
+        assert!(matches!(&tokens[1], Token::Keyword(k, _) if k == "type"));
     }
 
     #[test]
     fn test_strings() {
         let mut lexer = Lexer::new(r#""hello" "world\n""#);
         let tokens = lexer.tokenize().unwrap();
-        assert_eq!(tokens[0], Token::String("hello".to_string()));
-        assert_eq!(tokens[1], Token::String("world\n".to_string()));
+        assert!(matches!(&tokens[0], Token::String(s, _) if s == "hello"));
+        assert!(matches!(&tokens[1], Token::String(s, _) if s == "world\n"));
     }
 }

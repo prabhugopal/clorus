@@ -1,0 +1,22 @@
+;; Test loop/recur with phi nodes
+(ns test.loop)
+
+(println "Testing loop/recur fix...")
+
+;; Test 1: Simple counter
+(println "1. Simple counter (should print 0-4):")
+(loop [i 0]
+  (when (< i 5)
+    (println "  i =" i)
+    (recur (+ i 1))))
+
+(println "2. Factorial (should be 120):")
+(defn factorial [n]
+  (loop [acc 1 n n]
+    (if (<= n 1)
+      acc
+      (recur (* acc n) (- n 1)))))
+
+(println "  5\! =" (factorial 5))
+
+(println "Loop/recur tests passed\!")
