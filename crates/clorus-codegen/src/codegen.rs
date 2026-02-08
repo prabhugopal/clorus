@@ -1855,10 +1855,11 @@ impl<'ctx> CodeGen<'ctx> {
                         ).unwrap();
 
                         // Get arity from function type
-                        // For top-level defn functions, arity = param_count
-                        // (they don't have an environment parameter)
+                        // All functions now have an environment parameter as the LAST parameter
+                        // So arity = param_count - 1 (excluding the environment parameter)
                         let fn_type = function.get_type();
-                        let arity = fn_type.count_param_types();
+                        let param_count = fn_type.count_param_types();
+                        let arity = if param_count > 0 { param_count - 1 } else { 0 };
                         let arity_val = self.context.i32_type().const_int(arity as u64, false);
 
                         // Empty environment (nullptr)
@@ -2163,9 +2164,13 @@ impl<'ctx> CodeGen<'ctx> {
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
 
                 // For variadic functions, we need all fixed params
-                let param_types: Vec<_> = params.iter()
+                let mut param_types: Vec<_> = params.iter()
                     .map(|_| value_ptr_type.into())
                     .collect();
+
+                // Add environment parameter as the LAST parameter (for consistency with runtime)
+                // Even top-level defn functions need this to match the calling convention
+                param_types.push(value_ptr_type.into());
 
                 // If there's a rest parameter, the function is variadic
                 let is_variadic = rest_param.is_some();

@@ -119,7 +119,8 @@
       "Bash(./test-simple-param:*)",
       "Bash(git stash:*)",
       "Bash(/tmp/target/test:*)",
-      "Bash(./target/test-stdlib)"
+      "Bash(./target/test-stdlib)",
+      "Bash(xargs basename:*)"
     ]
   }
 }

@@ -353,7 +353,8 @@ pub fn build() -> Result<(), String> {
 
     // Try to call -main if it exists
     let i8_ptr_type = context.i8_type().ptr_type(inkwell::AddressSpace::default());
-    let main_fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+    // All Clorus functions now have an environment parameter as the last argument
+    let main_fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
 
     if let Some(user_main_fn) = codegen.get_module().get_function(&main_fn_name) {
         // Call -main with empty args vector (like clorus run does)
@@ -368,8 +369,9 @@ pub fn build() -> Result<(), String> {
             .expect("clorus_vector_empty should return a value")
             .into_pointer_value();
 
-        // Call -main with the empty vector
-        let main_result = builder.build_call(user_main_fn, &[empty_vec_ptr.into()], "call_main").unwrap();
+        // Call -main with the empty vector and NULL environment (no captured variables)
+        let null_env = i8_ptr_type.const_null();
+        let main_result = builder.build_call(user_main_fn, &[empty_vec_ptr.into(), null_env.into()], "call_main").unwrap();
 
         // Use the result from -main instead of last expression
         if let Some(result_val) = main_result.try_as_basic_value().left() {
@@ -634,9 +636,8 @@ fn load_and_compile_modules<'ctx>(
         }
 
         // Convert module name to file path: math -> src/math.clrs
-        // Clojure convention: hyphens in namespace become underscores in filesystem
-        // e.g., my-module.core -> src/my_module/core.clrs
-        let module_path = module_name.replace('.', "/").replace('-', "_");
+        // We preserve hyphens in the file path (e.g., text-field.core -> src/text-field/core.clrs)
+        let module_path = module_name.replace('.', "/");
         let module_file = project_root.join("src").join(format!("{}.clrs", module_path));
 
         if !module_file.exists() {
