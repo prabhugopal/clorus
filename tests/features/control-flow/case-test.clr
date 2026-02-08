@@ -1,0 +1,106 @@
+;; Test for case statement
+;; This is a P1 high-priority feature for efficient dispatch
+
+(defn test-case-basic []
+  ;; case should match constants efficiently
+  (do
+    ;; Test matching first case
+    (let [result (case 1
+                   1 "one"
+                   2 "two"
+                   3 "three"
+                   "default")]
+      (if (= result "one")
+        nil
+        (throw "case should match 1")))
+
+    ;; Test matching second case
+    (let [result (case 2
+                   1 "one"
+                   2 "two"
+                   3 "three"
+                   "default")]
+      (if (= result "two")
+        nil
+        (throw "case should match 2")))
+
+    ;; Test default case
+    (let [result (case 99
+                   1 "one"
+                   2 "two"
+                   3 "three"
+                   "default")]
+      (if (= result "default")
+        nil
+        (throw "case should return default for non-matching value")))))
+
+(defn test-case-keywords []
+  ;; case should work with keywords
+  (do
+    (let [result (case :bar
+                   :foo "foo"
+                   :bar "bar"
+                   :baz "baz"
+                   "default")]
+      (if (= result "bar")
+        nil
+        (throw "case should match :bar keyword")))))
+
+(defn test-case-strings []
+  ;; case should work with strings
+  (do
+    (let [result (case "hello"
+                   "hi" "greeting1"
+                   "hello" "greeting2"
+                   "bye" "farewell"
+                   "unknown")]
+      (if (= result "greeting2")
+        nil
+        (throw "case should match \"hello\" string")))))
+
+(defn test-case-multiple-constants []
+  ;; case can have multiple constants map to same result
+  (do
+    (let [result (case 2
+                   (1 2 3) "small"
+                   (4 5 6) "medium"
+                   "large")]
+      (if (= result "small")
+        nil
+        (throw "case should match 2 in list (1 2 3)")))))
+
+(defn test-case-with-expressions []
+  ;; case should evaluate result expressions
+  (do
+    (let [x 5
+          result (case 1
+                   1 (+ x 10)
+                   2 (* x 2)
+                   0)]
+      (if (= result 15)
+        nil
+        (throw "case should evaluate result expression (+ x 10)")))))
+
+(defn -main []
+  (do
+    (println "Testing case basic functionality...")
+    (test-case-basic)
+    (println "✓ case basic tests passed")
+
+    (println "Testing case with keywords...")
+    (test-case-keywords)
+    (println "✓ case keyword tests passed")
+
+    (println "Testing case with strings...")
+    (test-case-strings)
+    (println "✓ case string tests passed")
+
+    (println "Testing case with multiple constants...")
+    (test-case-multiple-constants)
+    (println "✓ case multiple constants tests passed")
+
+    (println "Testing case with expressions...")
+    (test-case-with-expressions)
+    (println "✓ case expression tests passed")
+
+    (println "All case statement tests passed!")))

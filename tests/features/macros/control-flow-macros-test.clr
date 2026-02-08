@@ -1,0 +1,116 @@
+;; Test for control flow macros: when, when-not, cond
+;; These are P1 high-priority macros for common control flow patterns
+
+(defn test-when-macro []
+  ;; when should execute body only if condition is true
+  (do
+    ;; Test when with true condition
+    (let [result (when true
+                   (+ 1 2)
+                   (+ 3 4))]
+      (if (= result 7)
+        nil
+        (throw "when with true condition should return last expression")))
+
+    ;; Test when with false condition should return nil
+    (let [result (when false
+                   (throw "Should not execute"))]
+      (if (= result nil)
+        nil
+        (throw "when with false condition should return nil")))
+
+    ;; Test when with nil condition should return nil
+    (let [result (when nil
+                   (throw "Should not execute"))]
+      (if (= result nil)
+        nil
+        (throw "when with nil condition should return nil")))))
+
+(defn test-when-not-macro []
+  ;; when-not should execute body only if condition is false
+  (do
+    ;; Test when-not with false condition
+    (let [result (when-not false
+                   (+ 1 2)
+                   (+ 3 4))]
+      (if (= result 7)
+        nil
+        (throw "when-not with false condition should return last expression")))
+
+    ;; Test when-not with true condition should return nil
+    (let [result (when-not true
+                   (throw "Should not execute"))]
+      (if (= result nil)
+        nil
+        (throw "when-not with true condition should return nil")))
+
+    ;; Test when-not with nil condition should execute
+    (let [result (when-not nil
+                   42)]
+      (if (= result 42)
+        nil
+        (throw "when-not with nil condition should execute body")))))
+
+(defn test-cond-macro []
+  ;; cond should test multiple conditions and return first matching result
+  (do
+    ;; Test cond with first condition matching
+    (let [result (cond
+                   true 1
+                   true 2
+                   :else 3)]
+      (if (= result 1)
+        nil
+        (throw "cond should return first matching clause")))
+
+    ;; Test cond with second condition matching
+    (let [result (cond
+                   false 1
+                   true 2
+                   :else 3)]
+      (if (= result 2)
+        nil
+        (throw "cond should return second matching clause")))
+
+    ;; Test cond with :else clause
+    (let [result (cond
+                   false 1
+                   false 2
+                   :else 3)]
+      (if (= result 3)
+        nil
+        (throw "cond should return :else clause when no match")))
+
+    ;; Test cond with no match should return nil
+    (let [result (cond
+                   false 1
+                   false 2)]
+      (if (= result nil)
+        nil
+        (throw "cond with no match should return nil")))
+
+    ;; Test cond with expressions as conditions
+    (let [x 10
+          result (cond
+                   (< x 5) "small"
+                   (< x 15) "medium"
+                   :else "large")]
+      (if (= result "medium")
+        nil
+        (throw "cond should evaluate condition expressions")))))
+
+(defn -main []
+  (do
+    (println "Testing when macro...")
+    (test-when-macro)
+    (println "✓ when tests passed")
+
+    (println "Testing when-not macro...")
+    (test-when-not-macro)
+    (println "✓ when-not tests passed")
+
+    (println "Testing cond macro...")
+    (test-cond-macro)
+    (println "✓ cond tests passed")
+
+    (println "All control flow macro tests passed!")))

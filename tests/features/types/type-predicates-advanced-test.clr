@@ -1,0 +1,92 @@
+;; Test for seq?, coll?, and fn? type predicates
+;; These are P1 high-priority features that should be implemented
+
+(defn test-seq?-predicate []
+  ;; seq? should return true for lists and vectors, false for others
+  (do
+    ;; Test with list
+    (if (seq? '(1 2 3))
+      nil
+      (throw "seq? should return true for list"))
+
+    ;; Test with vector
+    (if (seq? [1 2 3])
+      nil
+      (throw "seq? should return true for vector"))
+
+    ;; Test with map (should be false)
+    (if (seq? {:a 1})
+      (throw "seq? should return false for map")
+      nil)
+
+    ;; Test with number (should be false)
+    (if (seq? 42)
+      (throw "seq? should return false for number")
+      nil)))
+
+(defn test-coll?-predicate []
+  ;; coll? should return true for any collection type
+  (do
+    ;; Test with vector
+    (if (coll? [1 2 3])
+      nil
+      (throw "coll? should return true for vector"))
+
+    ;; Test with list
+    (if (coll? '(1 2 3))
+      nil
+      (throw "coll? should return true for list"))
+
+    ;; Test with map
+    (if (coll? {:a 1})
+      nil
+      (throw "coll? should return true for map"))
+
+    ;; Test with set
+    (if (coll? #{1 2 3})
+      nil
+      (throw "coll? should return true for set"))
+
+    ;; Test with number (should be false)
+    (if (coll? 42)
+      (throw "coll? should return false for number")
+      nil)))
+
+(defn test-fn?-predicate []
+  ;; fn? should return true for functions, false for others
+  (do
+    ;; Test with named function
+    (if (fn? +)
+      nil
+      (throw "fn? should return true for function"))
+
+    ;; Test with anonymous function
+    (if (fn? (fn [x] x))
+      nil
+      (throw "fn? should return true for anonymous function"))
+
+    ;; Test with number (should be false)
+    (if (fn? 42)
+      (throw "fn? should return false for number")
+      nil)
+
+    ;; Test with vector (should be false)
+    (if (fn? [1 2 3])
+      (throw "fn? should return false for vector")
+      nil)))
+
+(defn -main []
+  (do
+    (println "Testing seq? predicate...")
+    (test-seq?-predicate)
+    (println "✓ seq? tests passed")
+
+    (println "Testing coll? predicate...")
+    (test-coll?-predicate)
+    (println "✓ coll? tests passed")
+
+    (println "Testing fn? predicate...")
+    (test-fn?-predicate)
+    (println "✓ fn? tests passed")
+
+    (println "All type predicate tests passed!")))

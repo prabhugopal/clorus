@@ -1,2 +1,0 @@
-;; Test predicates
-(starts-with? "hello world" "hello")

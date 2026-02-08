@@ -1,0 +1,71 @@
+;; Test for range function
+;; This test will FAIL if range is not defined or doesn't work correctly
+
+(defn test-range-basic []
+  ;; Test (range n) - should return [0 1 2 ... n-1]
+  (let [result (range 5)]
+    (do
+      (if (= (count result) 5)
+        nil
+        (throw "range 5 should return 5 elements"))
+      (if (= (nth result 0) 0)
+        nil
+        (throw "range 5 first element should be 0"))
+      (if (= (nth result 4) 4)
+        nil
+        (throw "range 5 last element should be 4")))))
+
+(defn test-range-start-end []
+  ;; Test (range start end) - should return [start start+1 ... end-1]
+  (let [result (range 2 7)]
+    (do
+      (if (= (count result) 5)
+        nil
+        (throw "range 2 7 should return 5 elements"))
+      (if (= (nth result 0) 2)
+        nil
+        (throw "range 2 7 first element should be 2"))
+      (if (= (nth result 4) 6)
+        nil
+        (throw "range 2 7 last element should be 6")))))
+
+(defn test-range-step []
+  ;; Test (range start end step) - should return [start start+step ... ]
+  (let [result (range 0 10 2)]
+    (do
+      (if (= (count result) 5)
+        nil
+        (throw "range 0 10 2 should return 5 elements"))
+      (if (= (nth result 0) 0)
+        nil
+        (throw "range 0 10 2 first element should be 0"))
+      (if (= (nth result 4) 8)
+        nil
+        (throw "range 0 10 2 last element should be 8")))))
+
+(defn test-range-empty []
+  ;; Test edge case: range where start >= end should return empty
+  (let [result (range 5 5)]
+    (if (= (count result) 0)
+      nil
+      (throw "range 5 5 should return empty vector"))))
+
+(defn -main []
+  (do
+    (println "Testing (range n)...")
+    (test-range-basic)
+    (println "✓ range basic test passed")
+
+    (println "Testing (range start end)...")
+    (test-range-start-end)
+    (println "✓ range start-end test passed")
+
+    (println "Testing (range start end step)...")
+    (test-range-step)
+    (println "✓ range step test passed")
+
+    (println "Testing range edge cases...")
+    (test-range-empty)
+    (println "✓ range edge case test passed")
+
+    (println "All range tests passed!")))

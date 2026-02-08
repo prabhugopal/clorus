@@ -1,0 +1,83 @@
+;; Test for letfn - local function definitions with mutual recursion
+;; This is a P2 medium-priority feature
+
+(defn test-letfn-basic []
+  ;; letfn should define local functions
+  (letfn [(double [x]
+            (* x 2))
+          (triple [x]
+            (* x 3))]
+    (do
+      (if (= (double 5) 10)
+        nil
+        (throw "letfn double function should work"))
+
+      (if (= (triple 5) 15)
+        nil
+        (throw "letfn triple function should work")))))
+
+(defn test-letfn-mutual-recursion []
+  ;; letfn should support mutual recursion
+  (letfn [(is-even? [n]
+            (if (= n 0)
+              true
+              (is-odd? (- n 1))))
+          (is-odd? [n]
+            (if (= n 0)
+              false
+              (is-even? (- n 1))))]
+    (do
+      (if (= (is-even? 4) true)
+        nil
+        (throw "mutually recursive is-even? 4 should be true"))
+
+      (if (= (is-odd? 4) false)
+        nil
+        (throw "mutually recursive is-odd? 4 should be false"))
+
+      (if (= (is-even? 5) false)
+        nil
+        (throw "mutually recursive is-even? 5 should be false"))
+
+      (if (= (is-odd? 5) true)
+        nil
+        (throw "mutually recursive is-odd? 5 should be true")))))
+
+(defn test-letfn-closure []
+  ;; letfn functions should close over outer scope
+  (let [multiplier 10]
+    (letfn [(scale [x]
+              (* x multiplier))]
+      (if (= (scale 5) 50)
+        nil
+        (throw "letfn function should close over multiplier")))))
+
+(defn test-letfn-nested []
+  ;; letfn should work in nested contexts
+  (letfn [(outer [x]
+            (letfn [(inner [y]
+                      (+ x y))]
+              (inner (* x 2))))]
+    (if (= (outer 5) 15)  ; outer calls inner with 10, which does 5 + 10 = 15
+      nil
+      (throw "nested letfn should work"))))
+
+(defn -main []
+  (do
+    (println "Testing letfn basic functionality...")
+    (test-letfn-basic)
+    (println "✓ letfn basic tests passed")
+
+    (println "Testing letfn mutual recursion...")
+    (test-letfn-mutual-recursion)
+    (println "✓ letfn mutual recursion tests passed")
+
+    (println "Testing letfn with closures...")
+    (test-letfn-closure)
+    (println "✓ letfn closure tests passed")
+
+    (println "Testing nested letfn...")
+    (test-letfn-nested)
+    (println "✓ letfn nested tests passed")
+
+    (println "All letfn tests passed!")))

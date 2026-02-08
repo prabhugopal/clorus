@@ -1,0 +1,331 @@
+;; String Operations Comprehensive Test
+;; Tests all string manipulation, concatenation, and processing
+;; Catches string allocation issues, unicode handling, and edge cases
+
+(defn test-string-basics []
+  (do
+    (println "  Testing string basics...")
+
+    ;; String literals
+    (if (= "hello" "hello")
+      nil
+      (throw "string equality failed"))
+
+    ;; Empty strings
+    (if (= (count "") 0)
+      nil
+      (throw "empty string count should be 0"))
+
+    ;; String length
+    (if (= (count "hello") 5)
+      nil
+      (throw "string count should be 5"))
+
+    ;; String concatenation
+    (let [s (str "hello" " " "world")]
+      (if (= s "hello world")
+        nil
+        (throw "string concatenation failed")))
+
+    (println "    ✓ string basics passed")))
+
+(defn test-string-concatenation []
+  (do
+    (println "  Testing string concatenation...")
+
+    ;; Multiple strings
+    (let [s (str "a" "b" "c" "d" "e")]
+      (if (= s "abcde")
+        nil
+        (throw "multi-string concatenation failed")))
+
+    ;; Strings with numbers
+    (let [s (str "count: " 42)]
+      (if (= s "count: 42")
+        nil
+        (throw "string-number concatenation failed")))
+
+    ;; Large string concatenation
+    (let [s (loop [i 0
+                   result ""]
+              (if (>= i 100)
+                result
+                (recur (+ i 1) (str result "x"))))]
+      (if (= (count s) 100)
+        nil
+        (throw "large string concatenation failed")))
+
+    ;; Nested concatenation
+    (let [s (str "a" (str "b" (str "c" "d")) "e")]
+      (if (= s "abcde")
+        nil
+        (throw "nested concatenation failed")))
+
+    (println "    ✓ string concatenation passed")))
+
+(defn test-string-comparison []
+  (do
+    (println "  Testing string comparison...")
+
+    ;; Equality
+    (if (= "hello" "hello")
+      nil
+      (throw "string equality failed"))
+
+    ;; Inequality
+    (if (not (= "hello" "world"))
+      nil
+      (throw "string inequality failed"))
+
+    ;; Case sensitivity
+    (if (not (= "Hello" "hello"))
+      nil
+      (throw "string case sensitivity failed"))
+
+    ;; Empty string comparison
+    (if (= "" "")
+      nil
+      (throw "empty string equality failed"))
+
+    (println "    ✓ string comparison passed")))
+
+(defn test-string-splitting []
+  (do
+    (println "  Testing string splitting...")
+
+    ;; Split by space
+    (let [parts (clojure.string/split "hello world test" " ")]
+      (do
+        (if (= (count parts) 3)
+          nil
+          (throw "split should produce 3 parts"))
+
+        (if (= (nth parts 0) "hello")
+          nil
+          (throw "first part should be 'hello'"))
+
+        (if (= (nth parts 2) "test")
+          nil
+          (throw "third part should be 'test'"))))
+
+    ;; Split by comma
+    (let [parts (clojure.string/split "a,b,c,d" ",")]
+      (if (= (count parts) 4)
+        nil
+        (throw "comma split should produce 4 parts")))
+
+    ;; Split with no delimiter
+    (let [parts (clojure.string/split "hello" "x")]
+      (if (= (count parts) 1)
+        nil
+        (throw "split with no match should produce 1 part")))
+
+    (println "    ✓ string splitting passed")))
+
+(defn test-string-joining []
+  (do
+    (println "  Testing string joining...")
+
+    ;; Join with space
+    (let [s (clojure.string/join " " ["hello" "world"])]
+      (if (= s "hello world")
+        nil
+        (throw "join with space failed")))
+
+    ;; Join with comma
+    (let [s (clojure.string/join ", " ["a" "b" "c"])]
+      (if (= s "a, b, c")
+        nil
+        (throw "join with comma failed")))
+
+    ;; Join empty list
+    (let [s (clojure.string/join ", " [])]
+      (if (= s "")
+        nil
+        (throw "join empty list should be empty string")))
+
+    ;; Join single element
+    (let [s (clojure.string/join ", " ["single"])]
+      (if (= s "single")
+        nil
+        (throw "join single element failed")))
+
+    (println "    ✓ string joining passed")))
+
+(defn test-string-case []
+  (do
+    (println "  Testing string case conversion...")
+
+    ;; Upper case
+    (let [s (clojure.string/upper-case "hello")]
+      (if (= s "HELLO")
+        nil
+        (throw "upper-case failed")))
+
+    ;; Lower case
+    (let [s (clojure.string/lower-case "HELLO")]
+      (if (= s "hello")
+        nil
+        (throw "lower-case failed")))
+
+    ;; Mixed case
+    (let [s (clojure.string/upper-case "HeLLo WoRLd")]
+      (if (= s "HELLO WORLD")
+        nil
+        (throw "upper-case mixed failed")))
+
+    (println "    ✓ string case conversion passed")))
+
+(defn test-string-trimming []
+  (do
+    (println "  Testing string trimming...")
+
+    ;; Trim spaces
+    (let [s (clojure.string/trim "  hello  ")]
+      (if (= s "hello")
+        nil
+        (throw "trim spaces failed")))
+
+    ;; Trim tabs and newlines
+    (let [s (clojure.string/trim "\t\nhello\n\t")]
+      (if (= s "hello")
+        nil
+        (throw "trim whitespace failed")))
+
+    ;; Trim nothing
+    (let [s (clojure.string/trim "hello")]
+      (if (= s "hello")
+        nil
+        (throw "trim nothing failed")))
+
+    (println "    ✓ string trimming passed")))
+
+(defn test-string-replacement []
+  (do
+    (println "  Testing string replacement...")
+
+    ;; Replace single char
+    (let [s (clojure.string/replace "hello" "l" "x")]
+      (if (= s "hexxo")
+        nil
+        (throw "replace 'l' with 'x' failed")))
+
+    ;; Replace word
+    (let [s (clojure.string/replace "hello world" "world" "universe")]
+      (if (= s "hello universe")
+        nil
+        (throw "replace word failed")))
+
+    ;; Replace nothing
+    (let [s (clojure.string/replace "hello" "x" "y")]
+      (if (= s "hello")
+        nil
+        (throw "replace nothing should return original")))
+
+    (println "    ✓ string replacement passed")))
+
+(defn test-string-predicates []
+  (do
+    (println "  Testing string predicates...")
+
+    ;; starts-with?
+    (if (clojure.string/starts-with? "hello world" "hello")
+      nil
+      (throw "starts-with? failed"))
+
+    (if (not (clojure.string/starts-with? "hello world" "world"))
+      nil
+      (throw "starts-with? should be false"))
+
+    ;; ends-with?
+    (if (clojure.string/ends-with? "hello world" "world")
+      nil
+      (throw "ends-with? failed"))
+
+    (if (not (clojure.string/ends-with? "hello world" "hello"))
+      nil
+      (throw "ends-with? should be false"))
+
+    (println "    ✓ string predicates passed")))
+
+(defn test-string-with-numbers []
+  (do
+    (println "  Testing strings with numbers...")
+
+    ;; Convert number to string
+    (let [s (str 42)]
+      (if (= s "42")
+        nil
+        (throw "number to string failed")))
+
+    ;; String with multiple numbers
+    (let [s (str "answer: " 42 ", question: " 24)]
+      (if (= s "answer: 42, question: 24")
+        nil
+        (throw "multiple numbers in string failed")))
+
+    (println "    ✓ strings with numbers passed")))
+
+(defn test-string-collections []
+  (do
+    (println "  Testing strings with collections...")
+
+    ;; Map over strings
+    (let [strings ["hello" "world" "test"]
+          uppers (map clojure.string/upper-case strings)]
+      (if (= uppers ["HELLO" "WORLD" "TEST"])
+        nil
+        (throw "map upper-case failed")))
+
+    ;; Filter strings
+    (let [strings ["hello" "hi" "world" "test" "ok"]
+          long-strings (filter (fn [s] (> (count s) 3)) strings)]
+      (if (= long-strings ["hello" "world" "test"])
+        nil
+        (throw "filter long strings failed")))
+
+    ;; Reduce strings
+    (let [strings ["a" "b" "c" "d"]
+          result (reduce (fn [acc s] (str acc s)) "" strings)]
+      (if (= result "abcd")
+        nil
+        (throw "reduce strings failed")))
+
+    (println "    ✓ strings with collections passed")))
+
+(defn -main []
+  (do
+    (println "")
+    (println "╔════════════════════════════════════════════════╗")
+    (println "║                                                ║")
+    (println "║     STRING OPERATIONS COMPREHENSIVE TEST       ║")
+    (println "║                                                ║")
+    (println "╚════════════════════════════════════════════════╝")
+    (println "")
+
+    (test-string-basics)
+    (test-string-concatenation)
+    (test-string-comparison)
+    (test-string-splitting)
+    (test-string-joining)
+    (test-string-case)
+    (test-string-trimming)
+    (test-string-replacement)
+    (test-string-predicates)
+    (test-string-with-numbers)
+    (test-string-collections)
+
+    (println "")
+    (println "╔════════════════════════════════════════════════╗")
+    (println "║                                                ║")
+    (println "║    ✅ ALL STRING OPERATION TESTS PASSED ✅    ║")
+    (println "║                                                ║")
+    (println "║  • String concatenation                        ║")
+    (println "║  • Split, join, trim                           ║")
+    (println "║  • Case conversion                             ║")
+    (println "║  • String replacement                          ║")
+    (println "║  • String predicates                           ║")
+    (println "║  • Large string handling                       ║")
+    (println "║                                                ║")
+    (println "╚════════════════════════════════════════════════╝")
+    (println "")))

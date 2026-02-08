@@ -1,5 +1,0 @@
-(do
-  (def v [1 2 3])
-  (def m {:x 10})
-  (def s "hello")
-  (+ 5 5))

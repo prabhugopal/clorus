@@ -1,0 +1,4 @@
+;; This test will fail with "Undefined function: range" if range doesn't exist
+
+(defn -main []
+  (range 5))

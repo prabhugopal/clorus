@@ -1,0 +1,110 @@
+;; Test for sequence generation functions: repeat, cycle, iterate
+;; These are P2 medium-priority functions for generating sequences
+
+(defn test-repeat-function []
+  ;; repeat should generate a sequence of n identical values
+  (do
+    ;; Test repeat with specific count
+    (let [result (repeat 5 :x)]
+      (do
+        (if (= (count result) 5)
+          nil
+          (throw "repeat 5 :x should generate 5 elements"))
+
+        (if (= (nth result 0) :x)
+          nil
+          (throw "repeat should have :x at index 0"))
+
+        (if (= (nth result 4) :x)
+          nil
+          (throw "repeat should have :x at index 4"))))
+
+    ;; Test repeat with 0 count
+    (let [result (repeat 0 :x)]
+      (if (= (count result) 0)
+        nil
+        (throw "repeat 0 should generate empty sequence")))
+
+    ;; Test repeat with 1 count
+    (let [result (repeat 1 :x)]
+      (if (= (count result) 1)
+        nil
+        (throw "repeat 1 should generate single element")))))
+
+(defn test-cycle-function []
+  ;; cycle should infinitely repeat a collection
+  ;; Note: We can only test finite operations on cycle
+  (do
+    ;; Test taking from cycled sequence
+    (let [result (take 7 (cycle [1 2 3]))]
+      (do
+        (if (= (count result) 7)
+          nil
+          (throw "take 7 from cycle should give 7 elements"))
+
+        (if (= (nth result 0) 1)
+          nil
+          (throw "cycle should start with first element"))
+
+        (if (= (nth result 3) 1)
+          nil
+          (throw "cycle should repeat at index 3"))
+
+        (if (= (nth result 6) 1)
+          nil
+          (throw "cycle should repeat at index 6"))))
+
+    ;; Test cycle with single element
+    (let [result (take 5 (cycle [:a]))]
+      (if (= (count result) 5)
+        nil
+        (throw "take 5 from cycle [:a] should give 5 elements")))))
+
+(defn test-iterate-function []
+  ;; iterate should generate infinite sequence by repeatedly applying function
+  (do
+    ;; Test iterate with inc
+    (let [result (take 5 (iterate inc 0))]
+      (do
+        (if (= (count result) 5)
+          nil
+          (throw "take 5 from iterate should give 5 elements"))
+
+        (if (= (nth result 0) 0)
+          nil
+          (throw "iterate should start with initial value 0"))
+
+        (if (= (nth result 4) 4)
+          nil
+          (throw "iterate inc 0 should have 4 at index 4"))))
+
+    ;; Test iterate with custom function
+    (let [result (take 4 (iterate (fn [x] (* x 2)) 1))]
+      (do
+        (if (= (nth result 0) 1)
+          nil
+          (throw "iterate should start with 1"))
+
+        (if (= (nth result 1) 2)
+          nil
+          (throw "iterate (* 2) should have 2 at index 1"))
+
+        (if (= (nth result 3) 8)
+          nil
+          (throw "iterate (* 2) should have 8 at index 3"))))))
+
+(defn -main []
+  (do
+    (println "Testing repeat function...")
+    (test-repeat-function)
+    (println "✓ repeat tests passed")
+
+    (println "Testing cycle function...")
+    (test-cycle-function)
+    (println "✓ cycle tests passed")
+
+    (println "Testing iterate function...")
+    (test-iterate-function)
+    (println "✓ iterate tests passed")
+
+    (println "All sequence generation tests passed!")))

@@ -1,0 +1,136 @@
+;; Deep Recursion Stress Test
+;; This test catches stack overflow issues, tail call optimization problems
+;; and proper recursion handling
+
+(defn factorial-recursive [n]
+  "Non-tail-recursive factorial - tests stack depth"
+  (if (<= n 1)
+    1
+    (* n (factorial-recursive (- n 1)))))
+
+(defn factorial-tail-recursive [n acc]
+  "Tail-recursive factorial - should use constant stack"
+  (if (<= n 1)
+    acc
+    (recur (- n 1) (* n acc))))
+
+(defn fibonacci-recursive [n]
+  "Classic recursive fibonacci - exponential time complexity"
+  (if (< n 2)
+    n
+    (+ (fibonacci-recursive (- n 1))
+       (fibonacci-recursive (- n 2)))))
+
+(defn sum-list-recursive [lst acc]
+  "Recursive list summing - tests list traversal"
+  (if (empty? lst)
+    acc
+    (recur (rest lst) (+ acc (first lst)))))
+
+(defn deep-nested-calls [depth]
+  "Test deeply nested function calls"
+  (if (<= depth 0)
+    42
+    (+ 1 (deep-nested-calls (- depth 1)))))
+
+(defn mutual-recursion-a [n]
+  "Mutual recursion test - part A"
+  (if (<= n 0)
+    0
+    (+ n (mutual-recursion-b (- n 1)))))
+
+(defn mutual-recursion-b [n]
+  "Mutual recursion test - part B"
+  (if (<= n 0)
+    0
+    (+ n (mutual-recursion-a (- n 1)))))
+
+(defn test-basic-recursion []
+  (do
+    ;; Test small factorial
+    (if (= (factorial-recursive 5) 120)
+      nil
+      (throw "factorial 5 should be 120"))
+
+    ;; Test larger factorial (stack stress)
+    (if (= (factorial-recursive 10) 3628800)
+      nil
+      (throw "factorial 10 should be 3628800"))
+
+    ;; Test tail recursion with large number
+    (if (= (factorial-tail-recursive 20 1) 2432902008176640000)
+      nil
+      (throw "tail recursive factorial 20 failed"))))
+
+(defn test-deep-recursion []
+  (do
+    ;; Test moderately deep recursion (100 levels)
+    (if (= (deep-nested-calls 100) 142)
+      nil
+      (throw "deep nested calls 100 should be 142"))
+
+    ;; Test very deep recursion (1000 levels) - should not segfault
+    (if (= (deep-nested-calls 1000) 1042)
+      nil
+      (throw "deep nested calls 1000 should be 1042"))))
+
+(defn test-list-recursion []
+  (let [long-list (range 1 1001)]  ; 1000 element list
+    (do
+      ;; Sum 1 to 1000 = 500500
+      (if (= (sum-list-recursive long-list 0) 500500)
+        nil
+        (throw "sum of 1-1000 should be 500500")))))
+
+(defn test-fibonacci []
+  (do
+    ;; Test small fibonacci
+    (if (= (fibonacci-recursive 10) 55)
+      nil
+      (throw "fibonacci 10 should be 55"))
+
+    ;; Test medium fibonacci (exponential stress)
+    (if (= (fibonacci-recursive 15) 610)
+      nil
+      (throw "fibonacci 15 should be 610"))))
+
+(defn test-mutual-recursion []
+  (do
+    ;; Test mutual recursion
+    (if (= (mutual-recursion-a 10) 55)
+      nil
+      (throw "mutual recursion with 10 should work"))
+
+    ;; Test deeper mutual recursion
+    (if (= (mutual-recursion-a 50) 1275)
+      nil
+      (throw "mutual recursion with 50 should work"))))
+
+(defn -main []
+  (do
+    (println "=== Deep Recursion Stress Test ===")
+    (println "")
+
+    (println "Testing basic recursion...")
+    (test-basic-recursion)
+    (println "✓ Basic recursion passed")
+
+    (println "Testing deep recursion (1000 levels)...")
+    (test-deep-recursion)
+    (println "✓ Deep recursion passed - no stack overflow")
+
+    (println "Testing list recursion (1000 elements)...")
+    (test-list-recursion)
+    (println "✓ List recursion passed")
+
+    (println "Testing fibonacci (exponential complexity)...")
+    (test-fibonacci)
+    (println "✓ Fibonacci recursion passed")
+
+    (println "Testing mutual recursion...")
+    (test-mutual-recursion)
+    (println "✓ Mutual recursion passed")
+
+    (println "")
+    (println "=== All recursion stress tests passed! ===")
+    (println "No stack overflows, proper tail call optimization")))

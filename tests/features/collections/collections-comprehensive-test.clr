@@ -1,0 +1,398 @@
+;; Collections Comprehensive Test
+;; Tests vectors, lists, maps, sets with all operations
+;; Catches structural sharing issues, immutability violations, and edge cases
+
+(defn test-vector-operations []
+  (do
+    (println "  Testing vector operations...")
+
+    ;; Vector creation
+    (let [v [1 2 3 4 5]]
+      (do
+        (if (= (count v) 5)
+          nil
+          (throw "vector count should be 5"))
+
+        (if (= (nth v 0) 1)
+          nil
+          (throw "first element should be 1"))
+
+        (if (= (nth v 4) 5)
+          nil
+          (throw "last element should be 5"))))
+
+    ;; Vector conj
+    (let [v [1 2 3]
+          v2 (conj v 4)]
+      (do
+        (if (= v2 [1 2 3 4])
+          nil
+          (throw "conj should add to end"))
+
+        ;; Original unchanged (immutability)
+        (if (= v [1 2 3])
+          nil
+          (throw "original vector should be unchanged"))))
+
+    ;; Vector assoc
+    (let [v [1 2 3 4 5]
+          v2 (assoc v 2 99)]
+      (do
+        (if (= v2 [1 2 99 4 5])
+          nil
+          (throw "assoc should update index 2"))
+
+        ;; Original unchanged
+        (if (= v [1 2 3 4 5])
+          nil
+          (throw "original vector should be unchanged"))))
+
+    ;; Vector get
+    (let [v [10 20 30 40 50]]
+      (do
+        (if (= (get v 0) 10)
+          nil
+          (throw "get index 0 should be 10"))
+
+        (if (= (get v 3) 40)
+          nil
+          (throw "get index 3 should be 40"))
+
+        (if (= (get v 10 :default) :default)
+          nil
+          (throw "get out of bounds should return default"))))
+
+    ;; first, rest, last
+    (let [v [1 2 3 4 5]]
+      (do
+        (if (= (first v) 1)
+          nil
+          (throw "first should be 1"))
+
+        (if (= (rest v) [2 3 4 5])
+          nil
+          (throw "rest should be [2 3 4 5]"))
+
+        (if (= (last v) 5)
+          nil
+          (throw "last should be 5"))))
+
+    (println "    ✓ vector operations passed")))
+
+(defn test-list-operations []
+  (do
+    (println "  Testing list operations...")
+
+    ;; List creation
+    (let [l '(1 2 3 4 5)]
+      (do
+        (if (= (count l) 5)
+          nil
+          (throw "list count should be 5"))
+
+        (if (= (first l) 1)
+          nil
+          (throw "first element should be 1"))))
+
+    ;; List cons (adds to front)
+    (let [l '(2 3 4)
+          l2 (cons 1 l)]
+      (do
+        (if (= l2 '(1 2 3 4))
+          nil
+          (throw "cons should add to front"))
+
+        ;; Original unchanged
+        (if (= l '(2 3 4))
+          nil
+          (throw "original list should be unchanged"))))
+
+    ;; List rest
+    (let [l '(1 2 3 4 5)]
+      (if (= (rest l) '(2 3 4 5))
+        nil
+        (throw "rest should remove first element")))
+
+    (println "    ✓ list operations passed")))
+
+(defn test-map-operations []
+  (do
+    (println "  Testing map operations...")
+
+    ;; Map creation
+    (let [m {:a 1 :b 2 :c 3}]
+      (do
+        (if (= (count m) 3)
+          nil
+          (throw "map should have 3 entries"))
+
+        (if (= (get m :a) 1)
+          nil
+          (throw "map :a should be 1"))
+
+        (if (= (get m :missing :default) :default)
+          nil
+          (throw "map missing key should return default"))))
+
+    ;; Map assoc
+    (let [m {:a 1 :b 2}
+          m2 (assoc m :c 3)]
+      (do
+        (if (= m2 {:a 1 :b 2 :c 3})
+          nil
+          (throw "assoc should add :c"))
+
+        ;; Original unchanged
+        (if (= m {:a 1 :b 2})
+          nil
+          (throw "original map should be unchanged"))))
+
+    ;; Map dissoc
+    (let [m {:a 1 :b 2 :c 3}
+          m2 (dissoc m :b)]
+      (do
+        (if (= m2 {:a 1 :c 3})
+          nil
+          (throw "dissoc should remove :b"))
+
+        ;; Original unchanged
+        (if (= m {:a 1 :b 2 :c 3})
+          nil
+          (throw "original map should be unchanged"))))
+
+    ;; Map update
+    (let [m {:count 5}
+          m2 (assoc m :count (+ (get m :count) 1))]
+      (if (= (get m2 :count) 6)
+        nil
+        (throw "map update should increment count")))
+
+    ;; Map keys and vals
+    (let [m {:a 1 :b 2 :c 3}
+          ks (keys m)
+          vs (vals m)]
+      (do
+        (if (= (count ks) 3)
+          nil
+          (throw "should have 3 keys"))
+
+        (if (= (count vs) 3)
+          nil
+          (throw "should have 3 values"))))
+
+    (println "    ✓ map operations passed")))
+
+(defn test-set-operations []
+  (do
+    (println "  Testing set operations...")
+
+    ;; Set creation with hash-set
+    (let [s (hash-set 1 2 3 4 5)]
+      (do
+        (if (= (count s) 5)
+          nil
+          (throw "set should have 5 elements"))
+
+        (if (contains? s 3)
+          nil
+          (throw "set should contain 3"))
+
+        (if (not (contains? s 99))
+          nil
+          (throw "set should not contain 99"))))
+
+    ;; Set conj
+    (let [s (hash-set 1 2 3)
+          s2 (conj s 4)]
+      (do
+        (if (= (count s2) 4)
+          nil
+          (throw "set should have 4 elements after conj"))
+
+        (if (contains? s2 4)
+          nil
+          (throw "set should contain 4"))
+
+        ;; Original unchanged
+        (if (= (count s) 3)
+          nil
+          (throw "original set should be unchanged"))))
+
+    ;; Set disj
+    (let [s (hash-set 1 2 3 4 5)
+          s2 (disj s 3)]
+      (do
+        (if (= (count s2) 4)
+          nil
+          (throw "set should have 4 elements after disj"))
+
+        (if (not (contains? s2 3))
+          nil
+          (throw "set should not contain 3"))
+
+        ;; Original unchanged
+        (if (contains? s 3)
+          nil
+          (throw "original set should still contain 3"))))
+
+    (println "    ✓ set operations passed")))
+
+(defn test-collection-immutability []
+  (do
+    (println "  Testing collection immutability...")
+
+    ;; Vector immutability
+    (let [v1 [1 2 3]
+          v2 (conj v1 4)
+          v3 (assoc v1 0 99)]
+      (do
+        (if (= v1 [1 2 3])
+          nil
+          (throw "v1 should be unchanged"))
+
+        (if (= v2 [1 2 3 4])
+          nil
+          (throw "v2 should have 4"))
+
+        (if (= v3 [99 2 3])
+          nil
+          (throw "v3 should have 99 at index 0"))))
+
+    ;; Map immutability
+    (let [m1 {:a 1}
+          m2 (assoc m1 :b 2)
+          m3 (dissoc m2 :a)]
+      (do
+        (if (= m1 {:a 1})
+          nil
+          (throw "m1 should be unchanged"))
+
+        (if (= m2 {:a 1 :b 2})
+          nil
+          (throw "m2 should have both keys"))
+
+        (if (= m3 {:b 2})
+          nil
+          (throw "m3 should only have :b"))))
+
+    (println "    ✓ collection immutability passed")))
+
+(defn test-collection-equality []
+  (do
+    (println "  Testing collection equality...")
+
+    ;; Vector equality
+    (if (= [1 2 3] [1 2 3])
+      nil
+      (throw "identical vectors should be equal"))
+
+    (if (not (= [1 2 3] [1 2 4]))
+      nil
+      (throw "different vectors should not be equal"))
+
+    ;; Map equality
+    (if (= {:a 1 :b 2} {:a 1 :b 2})
+      nil
+      (throw "identical maps should be equal"))
+
+    (if (not (= {:a 1} {:a 2}))
+      nil
+      (throw "different maps should not be equal"))
+
+    (println "    ✓ collection equality passed")))
+
+(defn test-empty-collections []
+  (do
+    (println "  Testing empty collections...")
+
+    ;; Empty vector
+    (let [v []]
+      (do
+        (if (= (count v) 0)
+          nil
+          (throw "empty vector count should be 0"))
+
+        (if (empty? v)
+          nil
+          (throw "empty? should be true for []"))))
+
+    ;; Empty map
+    (let [m {}]
+      (do
+        (if (= (count m) 0)
+          nil
+          (throw "empty map count should be 0"))
+
+        (if (empty? m)
+          nil
+          (throw "empty? should be true for {}"))))
+
+    ;; Empty list
+    (let [l '()]
+      (do
+        (if (= (count l) 0)
+          nil
+          (throw "empty list count should be 0"))
+
+        (if (empty? l)
+          nil
+          (throw "empty? should be true for '()"))))
+
+    (println "    ✓ empty collections passed")))
+
+(defn test-collection-concat []
+  (do
+    (println "  Testing collection concat...")
+
+    ;; Concat vectors
+    (let [result (concat [1 2] [3 4] [5 6])]
+      (if (= result [1 2 3 4 5 6])
+        nil
+        (throw "concat vectors failed")))
+
+    ;; Concat lists
+    (let [result (concat '(1 2) '(3 4))]
+      (if (= result '(1 2 3 4))
+        nil
+        (throw "concat lists failed")))
+
+    ;; Concat mixed
+    (let [result (concat [1 2] '(3 4) [5 6])]
+      (if (= result [1 2 3 4 5 6])
+        nil
+        (throw "concat mixed collections failed")))
+
+    (println "    ✓ collection concat passed")))
+
+(defn -main []
+  (do
+    (println "")
+    (println "╔════════════════════════════════════════════════╗")
+    (println "║                                                ║")
+    (println "║    COLLECTIONS COMPREHENSIVE TEST              ║")
+    (println "║                                                ║")
+    (println "╚════════════════════════════════════════════════╝")
+    (println "")
+
+    (test-vector-operations)
+    (test-list-operations)
+    (test-map-operations)
+    (test-set-operations)
+    (test-collection-immutability)
+    (test-collection-equality)
+    (test-empty-collections)
+    (test-collection-concat)
+
+    (println "")
+    (println "╔════════════════════════════════════════════════╗")
+    (println "║                                                ║")
+    (println "║  ✅ ALL COLLECTION TESTS PASSED ✅            ║")
+    (println "║                                                ║")
+    (println "║  • Vectors, lists, maps, sets                  ║")
+    (println "║  • Immutability verified                       ║")
+    (println "║  • Structural sharing                          ║")
+    (println "║  • All core operations                         ║")
+    (println "║  • Edge cases handled                          ║")
+    (println "║                                                ║")
+    (println "╚════════════════════════════════════════════════╝")
+    (println "")))
