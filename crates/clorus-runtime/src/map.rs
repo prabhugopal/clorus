@@ -39,10 +39,21 @@ impl ClorusHashMap {
     }
 
     /// Get a value by key, returns nil if not found
+    /// IMPORTANT: This function retains the returned value before returning it,
+    /// following the same pattern as PersistentVector::nth().
+    /// The caller is responsible for releasing it when done.
     pub fn get(&self, key: *mut Value) -> *mut Value {
         let hash = hash_value(key);
         match self.entries.get(&hash) {
-            Some((_, val)) => *val,
+            Some((_, val)) => {
+                // Retain the value before returning (same pattern as vector nth)
+                unsafe {
+                    if !val.is_null() {
+                        (**val).header().retain();
+                    }
+                }
+                *val
+            },
             None => Value::nil(),
         }
     }
