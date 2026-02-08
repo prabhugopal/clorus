@@ -1,0 +1,105 @@
+;; Test type predicates: seq?, coll?, fn?
+
+(defn test-seq? []
+  (do
+    (println "Testing seq?...")
+
+    ;; Lists are seqs
+    (if (seq? '(1 2 3))
+      (println "✓ seq? returns true for lists")
+      (throw "seq? should return true for lists"))
+
+    ;; Vectors are NOT seqs (they're sequential but not seq?)
+    (if (not (seq? [1 2 3]))
+      (println "✓ seq? returns false for vectors")
+      (throw "seq? should return false for vectors"))
+
+    ;; Maps are NOT seqs
+    (if (not (seq? {:a 1}))
+      (println "✓ seq? returns false for maps")
+      (throw "seq? should return false for maps"))
+
+    ;; Numbers are NOT seqs
+    (if (not (seq? 42))
+      (println "✓ seq? returns false for numbers")
+      (throw "seq? should return false for numbers"))))
+
+(defn test-coll? []
+  (do
+    (println "Testing coll?...")
+
+    ;; Vectors are collections
+    (if (coll? [1 2 3])
+      (println "✓ coll? returns true for vectors")
+      (throw "coll? should return true for vectors"))
+
+    ;; Lists are collections
+    (if (coll? '(1 2 3))
+      (println "✓ coll? returns true for lists")
+      (throw "coll? should return true for lists"))
+
+    ;; Maps are collections
+    (if (coll? {:a 1 :b 2})
+      (println "✓ coll? returns true for maps")
+      (throw "coll? should return true for maps"))
+
+    ;; Sets are collections
+    (if (coll? #{1 2 3})
+      (println "✓ coll? returns true for sets")
+      (throw "coll? should return true for sets"))
+
+    ;; Numbers are NOT collections
+    (if (not (coll? 42))
+      (println "✓ coll? returns false for numbers")
+      (throw "coll? should return false for numbers"))
+
+    ;; Strings are NOT collections
+    (if (not (coll? "hello"))
+      (println "✓ coll? returns false for strings")
+      (throw "coll? should return false for strings"))))
+
+(defn test-fn? []
+  (do
+    (println "Testing fn?...")
+
+    ;; Anonymous functions are functions
+    (let [f (fn [x] (+ x 1))]
+      (if (fn? f)
+        (println "✓ fn? returns true for anonymous functions")
+        (throw "fn? should return true for anonymous functions")))
+
+    ;; Shorthand functions are functions
+    (let [f #(* % 2)]
+      (if (fn? f)
+        (println "✓ fn? returns true for shorthand functions")
+        (throw "fn? should return true for shorthand functions")))
+
+    ;; Numbers are NOT functions
+    (if (not (fn? 42))
+      (println "✓ fn? returns false for numbers")
+      (throw "fn? should return false for numbers"))
+
+    ;; Vectors are NOT functions
+    (if (not (fn? [1 2 3]))
+      (println "✓ fn? returns false for vectors")
+      (throw "fn? should return false for vectors"))))
+
+(defn -main []
+  (do
+    (println "")
+    (println "╔════════════════════════════════════════╗")
+    (println "║   TYPE PREDICATE TESTS                 ║")
+    (println "╚════════════════════════════════════════╝")
+    (println "")
+
+    (test-seq?)
+    (println "")
+    (test-coll?)
+    (println "")
+    (test-fn?)
+
+    (println "")
+    (println "╔════════════════════════════════════════╗")
+    (println "║   ✅ ALL TYPE PREDICATE TESTS PASSED  ║")
+    (println "╚════════════════════════════════════════╝")
+    (println "")))

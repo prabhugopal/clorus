@@ -597,6 +597,9 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_i32_fn("clorus_is_string");
         self.declare_value_to_i32_fn("clorus_is_vector");
         self.declare_value_to_i32_fn("clorus_is_map");
+        self.declare_value_to_i32_fn("clorus_is_seq");     // seq? predicate
+        self.declare_value_to_i32_fn("clorus_is_coll");    // coll? predicate
+        self.declare_value_to_i32_fn("clorus_is_fn");      // fn? predicate
         self.declare_value2_to_i32_fn("clorus_starts_with");
         self.declare_value2_to_i32_fn("clorus_ends_with");
         self.declare_value2_to_i32_fn("clorus_includes");
@@ -3401,7 +3404,7 @@ impl<'ctx> CodeGen<'ctx> {
                     "replace", "replace-first",
                     "string?", "starts-with?", "ends-with?", "includes?",
                     // Type predicates
-                    "vector?", "map?",
+                    "vector?", "map?", "seq?", "coll?", "fn?",
                     // I/O operations
                     "print", "println"
                 ];
@@ -6352,6 +6355,153 @@ impl<'ctx> CodeGen<'ctx> {
 
                 let i32_result = result.try_as_basic_value().left()
                     .ok_or("is_map_call returned no value")?
+                    .into_int_value();
+
+                // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value
+                let bool_val = self.builder.build_int_compare(
+                    IntPredicate::NE,
+                    i32_result,
+                    self.context.i32_type().const_int(0, false),
+                    "bool_val"
+                ).unwrap();
+
+                let double = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "as_double"
+                ).unwrap();
+
+                let bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    bool_fn,
+                    &[double.into()],
+                    "bool_value"
+                ).unwrap();
+
+                let val = result.try_as_basic_value().left()
+                    .ok_or("bool_value returned no value")?
+                    .into_pointer_value();
+
+                Ok(val)
+            }
+
+            "seq?" => {
+                // seq? takes 1 arg: value
+                if args.len() != 1 {
+                    return Err("seq? requires 1 argument: value".to_string());
+                }
+
+                let val = self.compile_expr(&args[0])?;
+
+                let is_seq_fn = self.module.get_function("clorus_is_seq")
+                    .ok_or("clorus_is_seq not declared")?;
+                let result = self.builder.build_call(
+                    is_seq_fn,
+                    &[val.into()],
+                    "is_seq_call"
+                ).unwrap();
+
+                let i32_result = result.try_as_basic_value().left()
+                    .ok_or("is_seq_call returned no value")?
+                    .into_int_value();
+
+                // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value
+                let bool_val = self.builder.build_int_compare(
+                    IntPredicate::NE,
+                    i32_result,
+                    self.context.i32_type().const_int(0, false),
+                    "bool_val"
+                ).unwrap();
+
+                let double = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "as_double"
+                ).unwrap();
+
+                let bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    bool_fn,
+                    &[double.into()],
+                    "bool_value"
+                ).unwrap();
+
+                let val = result.try_as_basic_value().left()
+                    .ok_or("bool_value returned no value")?
+                    .into_pointer_value();
+
+                Ok(val)
+            }
+
+            "coll?" => {
+                // coll? takes 1 arg: value
+                if args.len() != 1 {
+                    return Err("coll? requires 1 argument: value".to_string());
+                }
+
+                let val = self.compile_expr(&args[0])?;
+
+                let is_coll_fn = self.module.get_function("clorus_is_coll")
+                    .ok_or("clorus_is_coll not declared")?;
+                let result = self.builder.build_call(
+                    is_coll_fn,
+                    &[val.into()],
+                    "is_coll_call"
+                ).unwrap();
+
+                let i32_result = result.try_as_basic_value().left()
+                    .ok_or("is_coll_call returned no value")?
+                    .into_int_value();
+
+                // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value
+                let bool_val = self.builder.build_int_compare(
+                    IntPredicate::NE,
+                    i32_result,
+                    self.context.i32_type().const_int(0, false),
+                    "bool_val"
+                ).unwrap();
+
+                let double = self.builder.build_unsigned_int_to_float(
+                    bool_val,
+                    self.context.f64_type(),
+                    "as_double"
+                ).unwrap();
+
+                let bool_fn = self.module.get_function("clorus_value_boolean")
+                    .ok_or("clorus_value_boolean not declared")?;
+                let result = self.builder.build_call(
+                    bool_fn,
+                    &[double.into()],
+                    "bool_value"
+                ).unwrap();
+
+                let val = result.try_as_basic_value().left()
+                    .ok_or("bool_value returned no value")?
+                    .into_pointer_value();
+
+                Ok(val)
+            }
+
+            "fn?" => {
+                // fn? takes 1 arg: value
+                if args.len() != 1 {
+                    return Err("fn? requires 1 argument: value".to_string());
+                }
+
+                let val = self.compile_expr(&args[0])?;
+
+                let is_fn_fn = self.module.get_function("clorus_is_fn")
+                    .ok_or("clorus_is_fn not declared")?;
+                let result = self.builder.build_call(
+                    is_fn_fn,
+                    &[val.into()],
+                    "is_fn_call"
+                ).unwrap();
+
+                let i32_result = result.try_as_basic_value().left()
+                    .ok_or("is_fn_call returned no value")?
                     .into_int_value();
 
                 // Convert i32 (0 or 1) to bool (0.0 or 1.0) then to Value

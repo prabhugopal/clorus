@@ -39,8 +39,8 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `mod` | ✅ | `lang/arithmetic/modulo.clr` | |
 | `<` | ✅ | `lang/arithmetic/comparison.clr` | |
 | `>` | ✅ | `lang/arithmetic/comparison.clr` | |
-| `<=` | 🔴 | `lang/arithmetic/comparison.clr` | **BROKEN** |
-| `>=` | 🔴 | `lang/arithmetic/comparison.clr` | **BROKEN** |
+| `<=` | ✅ | `lang/arithmetic/comparison.clr` | |
+| `>=` | ✅ | `lang/arithmetic/comparison.clr` | |
 | `=` | ✅ | `lang/arithmetic/comparison.clr` | |
 | Bitwise ops | ✅ | `lang/arithmetic/bitwise.clr` | |
 
@@ -125,7 +125,7 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `conj` | 🟡 | `collections/sets.clr` | |
 | `disj` | 🟡 | `collections/sets.clr` | |
 | `contains?` | 🟡 | `collections/sets.clr` | |
-| Set literals `#{}` | ❌ | - | **NOT IMPLEMENTED** |
+| Set literals `#{}` | ✅ | `collections/test-set-literals.clr` | |
 
 ### Sequence Operations
 | Feature | Status | Test File | Notes |
@@ -134,7 +134,7 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `filter` | ✅ | `stdlib/core/filter.clr` | |
 | `reduce` | ✅ | `stdlib/core/reduce.clr` | |
 | `apply` | ✅ | `stdlib/core/apply.clr` | |
-| `range` | 🔴 | `stdlib/sequences.clr` | **BROKEN** (blocked by `>=`) |
+| `range` | ✅ | `stdlib/sequences.clr` | |
 | `repeat` | ❌ | - | Needs test |
 | `cycle` | ❌ | - | Needs test |
 | `iterate` | ❌ | - | Needs test |
@@ -334,10 +334,11 @@ This document tracks test coverage for all Clorus language features based on Clo
 ## PRIORITY TEST GAPS
 
 ### 🔴 **P0 - Critical (Blocks Features)**
-1. Comparison operators `<=`, `>=` - Currently broken
-2. `range` - Broken due to comparison operators
-3. Set literals `#{}` - Not implemented
-4. Function shorthand `#()` - Not implemented
+✅ **ALL P0 FEATURES IMPLEMENTED!**
+- Comparison operators `<=`, `>=` - ✅ Working
+- `range` - ✅ Working
+- Set literals `#{}` - ✅ Working
+- Function shorthand `#()` - ✅ Working
 
 ### 🟠 **P1 - High (Common Use)**
 1. `case` statement

@@ -723,15 +723,15 @@ pub extern "C" fn clorus_is_bool(val: *mut Value) -> bool {
     }
 }
 
-/// Check if value is a sequence (list or vector)
+/// Check if value is a seq (list only - not vector)
+/// In Clojure, seq? returns true only for lists/seqs, not vectors
 #[no_mangle]
 pub extern "C" fn clorus_is_seq(val: *mut Value) -> bool {
     if val.is_null() {
         return false;
     }
     unsafe {
-        let tag = (*val).header().tag();
-        tag == ValueTag::List || tag == ValueTag::Vector
+        (*val).header().tag() == ValueTag::List
     }
 }
 
@@ -789,6 +789,17 @@ pub extern "C" fn clorus_is_channel(val: *mut Value) -> bool {
     }
     unsafe {
         (*val).header().tag() == ValueTag::Channel
+    }
+}
+
+/// Check if value is a function
+#[no_mangle]
+pub extern "C" fn clorus_is_fn(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Function
     }
 }
 
