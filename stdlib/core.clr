@@ -25,6 +25,10 @@
 ;; identity - Returns its argument unchanged
 (defn identity [x] x)
 
+;; cons - Prepend element to collection (like Clojure cons)
+(defn cons [x coll]
+  (concat [x] coll))
+
 ;; not - Logical negation
 (defn not [x]
   (if x false true))
@@ -352,6 +356,16 @@
   (if (<= n 0)
     []
     (concat coll (cycle (dec n) coll))))
+
+;; iterate - Generate sequence by repeatedly applying function
+;; (iterate 5 inc 0) => [0 1 2 3 4]
+(defn iterate-helper [n f x acc]
+  (if (<= n 0)
+    acc
+    (iterate-helper (dec n) f (f x) (conj acc x))))
+
+(defn iterate [n f x]
+  (iterate-helper n f x []))
 
 ;; ============================================================================
 ;; Map Utilities
