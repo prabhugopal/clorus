@@ -1757,7 +1757,7 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Symbol(name) => {
-                // Variable reference - check globals first, then locals, then functions
+                // Variable reference - check LOCALS first (to allow shadowing), then globals, then functions
                 // Variables now store Value* instead of f64
 
                 // First, try to resolve qualified names (namespace/var or alias/var)
@@ -1784,22 +1784,23 @@ impl<'ctx> CodeGen<'ctx> {
                     name.clone()
                 };
 
-                if let Some(global) = self.globals.get(&resolved_name) {
-                    // Load Value* from global variable
-                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                    let val = self.builder.build_load(
-                        value_ptr_type,
-                        global.as_pointer_value(),
-                        &resolved_name
-                    ).unwrap();
-                    Ok(val.into_pointer_value())
-                } else if let Some(ptr) = self.variables.get(name) {
+                // BUGFIX: Check LOCALS first to allow shadowing of globals
+                if let Some(ptr) = self.variables.get(name) {
                     // Load Value* from local variable
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let val = self.builder.build_load(
                         value_ptr_type,
                         *ptr,
                         name
+                    ).unwrap();
+                    Ok(val.into_pointer_value())
+                } else if let Some(global) = self.globals.get(&resolved_name) {
+                    // Load Value* from global variable
+                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let val = self.builder.build_load(
+                        value_ptr_type,
+                        global.as_pointer_value(),
+                        &resolved_name
                     ).unwrap();
                     Ok(val.into_pointer_value())
                 } else {
