@@ -53,6 +53,8 @@ pub struct ReplEngine<'ctx> {
     symbol_registry: HashMap<String, HashSet<String>>,
     /// Stdlib loaded flag - stdlib is loaded once and never recompiled
     stdlib_loaded: bool,
+    /// Parsed stdlib expressions to include in every evaluation
+    stdlib_exprs: Vec<Expr>,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -68,6 +70,7 @@ impl<'ctx> ReplEngine<'ctx> {
             rust_libraries: Vec::new(),
             symbol_registry: HashMap::new(),
             stdlib_loaded: false,
+            stdlib_exprs: Vec::new(),
         };
 
         // Note: Stdlib is now loaded separately in lib.rs to avoid O(n²) recompilation
@@ -88,95 +91,34 @@ impl<'ctx> ReplEngine<'ctx> {
             return Ok(0);
         }
 
+        // Store stdlib expressions - they'll be included in every evaluation
+        self.stdlib_exprs = exprs.clone();
+
         // Track namespace for symbol registration
-        let mut current_ns = "user".to_string();
+        // Register symbols in clorus.core namespace so AUTO_IMPORT_NAMESPACES works
+        let mut current_ns = "clorus.core".to_string();
         let mut symbols_registered = 0;
 
-        // Create a fresh CodeGen for stdlib compilation
-        let mut codegen = CodeGen::new(self.context, "stdlib_session");
-
-        // Register all Rust FFI libraries
-        for lib in &self.rust_libraries {
-            codegen.register_rust_library(lib.clone());
-        }
-
-        // Process all expressions
-        let mut def_fn_names = Vec::new();
-        let mut expr_idx = 0;
-
+        // Register all symbols from stdlib
         for expr in &exprs {
             let expanded_expr = expand_macros(expr);
 
             // Handle namespace declarations
-            if let Expr::Ns { name, requires, rust_imports: _ } = &expanded_expr {
+            if let Expr::Ns { name, .. } = &expanded_expr {
                 current_ns = name.clone();
-                self.set_namespace(name);
-
-                // Process requires
-                for req_spec in requires {
-                    self.process_require(req_spec);
-                }
-
-                // Update codegen namespace
-                let codegen_ns = clorus_codegen::NamespaceContext {
-                    current: self.namespace.current.clone(),
-                    aliases: self.namespace.aliases.clone(),
-                    imports: HashMap::new(),
-                };
-                codegen.set_namespace(codegen_ns);
-
                 continue;
             }
 
-            // Handle declare - it's a compile-time directive, no runtime value needed
-            // Just process it and skip to next form
-            if let Expr::Declare { names } = &expanded_expr {
-                // Process declare directly in codegen (adds forward declarations)
-                for name in names {
-                    codegen.add_forward_declaration(name);
-                }
-                continue;
-            }
-
-            // Check if this is def or defn
-            let is_def_or_defn = matches!(expanded_expr, Expr::Def { .. } | Expr::Defn { .. });
-
-            // Extract symbol name for registration
+            // Register def/defn symbols
             let symbol_name = match &expanded_expr {
                 Expr::Def { name, .. } => Some(name.clone()),
                 Expr::Defn { name, .. } => Some(name.clone()),
                 _ => None,
             };
 
-            // Compile the expression
-            let fn_name = format!("stdlib_{}", expr_idx);
-            codegen.wrap_in_function(&expanded_expr, &fn_name)?;
-            expr_idx += 1;
-
-            // Track def/defn for execution
-            if is_def_or_defn {
-                def_fn_names.push(fn_name);
-
-                // Register symbol
-                if let Some(name) = symbol_name {
-                    self.register_symbol(&current_ns, &name);
-                    symbols_registered += 1;
-                }
-            }
-        }
-
-        // Create JIT engine
-        let engine = codegen.get_module()
-            .create_jit_execution_engine(OptimizationLevel::None)
-            .map_err(|e| format!("JIT error: {}", e))?;
-
-        // Execute all def/defn to initialize globals
-        for fn_name in &def_fn_names {
-            unsafe {
-                type EvalFunc = unsafe extern "C" fn() -> *mut u8;
-                if let Ok(jit_fn) = engine.get_function::<EvalFunc>(fn_name) {
-                    jit_fn.call(); // Initialize the global/function
-                }
+            if let Some(name) = symbol_name {
+                self.register_symbol(&current_ns, &name);
+                symbols_registered += 1;
             }
         }
 
@@ -412,6 +354,43 @@ impl<'ctx> ReplEngine<'ctx> {
             imports: HashMap::new(), // Simplified for now
         };
         codegen.set_namespace(codegen_ns);
+
+        // IMPORTANT: Compile stdlib FIRST (in every evaluation so functions are available)
+        // Use "user" namespace for stdlib compilation (no mangling)
+        let stdlib_codegen_ns = clorus_codegen::NamespaceContext {
+            current: "user".to_string(),
+            aliases: HashMap::new(),
+            imports: HashMap::new(),
+        };
+        codegen.set_namespace(stdlib_codegen_ns);
+
+        for (stdlib_idx, stdlib_expr) in self.stdlib_exprs.iter().enumerate() {
+            let expanded = expand_macros(stdlib_expr);
+
+            // Skip namespace declarations
+            if matches!(expanded, Expr::Ns { .. }) {
+                continue;
+            }
+
+            // Skip declare statements
+            if let Expr::Declare { names } = &expanded {
+                for name in names {
+                    codegen.add_forward_declaration(name);
+                }
+                continue;
+            }
+
+            let fn_name = format!("stdlib_{}", stdlib_idx);
+            codegen.wrap_in_function(&expanded, &fn_name)?;
+        }
+
+        // Restore user's namespace for subsequent compilation
+        let user_codegen_ns = clorus_codegen::NamespaceContext {
+            current: self.namespace.current.clone(),
+            aliases: self.namespace.aliases.clone(),
+            imports: HashMap::new(),
+        };
+        codegen.set_namespace(user_codegen_ns);
 
         // Re-declare all loaded modules in this fresh CodeGen
         // This ensures functions like slurp/spit are available
