@@ -3317,6 +3317,12 @@ impl<'ctx> CodeGen<'ctx> {
                                 arg_values.push(self.compile_expr(arg)?.into());
                             }
 
+                            // All Clorus functions take an environment parameter as the last argument
+                            // For direct calls, pass NULL (no captured environment)
+                            let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                            let null_env = i8_ptr_type.const_null();
+                            arg_values.push(null_env.into());
+
                             let call_result = self.builder
                                 .build_call(function, &arg_values, "call")
                                 .unwrap();
@@ -3503,7 +3509,13 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 };
 
-                let (function, arg_values) = function;
+                let (function, mut arg_values) = function;
+
+                // All Clorus functions take an environment parameter as the last argument
+                // For direct calls, pass NULL (no captured environment)
+                let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let null_env = i8_ptr_type.const_null();
+                arg_values.push(null_env.into());
 
                 // Build call (function now returns Value*)
                 let call_result = self.builder
