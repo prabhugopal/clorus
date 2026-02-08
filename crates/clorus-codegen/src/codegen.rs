@@ -2272,9 +2272,12 @@ impl<'ctx> CodeGen<'ctx> {
                     let arity_name = format!("{}_arity_{}", base_name, arity.params.len());
 
                     // Create parameter types for this arity
-                    let param_types: Vec<_> = arity.params.iter()
+                    let mut param_types: Vec<_> = arity.params.iter()
                         .map(|_| value_ptr_type.into())
                         .collect();
+
+                    // Add environment parameter as the LAST parameter (for consistency with runtime)
+                    param_types.push(value_ptr_type.into());
 
                     let is_variadic = arity.rest_param.is_some();
                     let fn_type = value_ptr_type.fn_type(&param_types, is_variadic);
@@ -2561,9 +2564,12 @@ impl<'ctx> CodeGen<'ctx> {
                     let arity_name = format!("{}_arity_{}", base_lambda_name, arity.params.len());
 
                     // Create parameter types for this arity
-                    let param_types: Vec<_> = arity.params.iter()
+                    let mut param_types: Vec<_> = arity.params.iter()
                         .map(|_| value_ptr_type.into())
                         .collect();
+
+                    // Add environment parameter as the LAST parameter (for consistency with runtime)
+                    param_types.push(value_ptr_type.into());
 
                     let is_variadic = arity.rest_param.is_some();
                     let fn_type = value_ptr_type.fn_type(&param_types, is_variadic);
