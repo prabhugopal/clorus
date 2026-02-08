@@ -1803,6 +1803,15 @@ impl<'ctx> CodeGen<'ctx> {
                         &resolved_name
                     ).unwrap();
                     Ok(val.into_pointer_value())
+                } else if let Some(ptr) = self.variables.get(name) {
+                    // Load Value* from local variable
+                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let val = self.builder.build_load(
+                        value_ptr_type,
+                        *ptr,
+                        name
+                    ).unwrap();
+                    Ok(val.into_pointer_value())
                 } else {
                     // Try to find function - check both unmangled and mangled names
                     // Also handle qualified names (namespace/function or alias/function)

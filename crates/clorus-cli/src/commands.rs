@@ -197,6 +197,7 @@ pub fn build() -> Result<(), String> {
         let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
             .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
 
+        println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
         all_exprs.extend(stdlib_exprs);
     } else {
         // Try relative to compiler location
@@ -258,6 +259,8 @@ pub fn build() -> Result<(), String> {
 
     // Add entry file expressions (after dependencies)
     all_exprs.extend(entry_exprs);
+
+    println!("   [DEBUG] Total expressions to compile: {}", all_exprs.len());
 
     if all_exprs.is_empty() {
         return Err("No expressions to compile".to_string());
@@ -752,6 +755,26 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
+    // Load and parse stdlib/core.clr first (provides inc, dec, range, for, doseq, etc.)
+    let stdlib_path = Path::new("stdlib/core.clr");
+    let mut all_exprs = Vec::new();
+
+    if stdlib_path.exists() {
+        let stdlib_source = fs::read_to_string(stdlib_path)
+            .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+
+        let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
+            .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+
+        if debug {
+            println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
+        }
+        all_exprs.extend(stdlib_exprs);
+    } else if debug {
+        println!("   [DEBUG] stdlib/core.clr not found, stdlib functions unavailable");
+    }
+
+    // Load entry file
     let source = fs::read_to_string(entry_path)
         .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
 
@@ -759,7 +782,10 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let exprs = clorus::parse_and_expand(&source)
         .map_err(|e| format!("Parse error: {}", e))?;
 
-    if exprs.is_empty() {
+    // Add entry exprs to all_exprs
+    all_exprs.extend(exprs);
+
+    if all_exprs.is_empty() {
         return Err("No expressions to execute".to_string());
     }
 
@@ -888,7 +914,7 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let project_root = std::env::current_dir()
         .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
-    let required_modules = extract_required_modules(&exprs);
+    let required_modules = extract_required_modules(&all_exprs);
     let mut loaded_modules = HashSet::new();
 
     if !required_modules.is_empty() {
@@ -897,7 +923,7 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
 
     // Update namespace context for entry file
     use clorus_codegen::namespace_context::NamespaceContext;
-    for expr in &exprs {
+    for expr in &all_exprs {
         if let Expr::Ns { name, requires, rust_imports } = expr {
             // Validate that namespace matches entry file path (like Clojure)
             // Calculate expected namespace from file path
@@ -963,7 +989,7 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let mut function_names = Vec::new();
 
     // Compile all expressions
-    for (i, expr) in exprs.iter().enumerate() {
+    for (i, expr) in all_exprs.iter().enumerate() {
         let fn_name = format!("expr_{}", i);
         codegen.wrap_in_function(expr, &fn_name)
             .map_err(|e| format!("Compile error: {}", e))?;
@@ -997,7 +1023,7 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let mut main_fn_name = "-main".to_string();
 
     // If there's a namespace in the first expression, construct qualified name
-    for expr in &exprs {
+    for expr in &all_exprs {
         if let Expr::Ns { name, .. } = expr {
             if name != "user" {
                 // Construct mangled name matching codegen.rs

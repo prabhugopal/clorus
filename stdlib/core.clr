@@ -442,17 +442,20 @@
   ;; TODO: Needs runtime support for type checking
   false)
 
-;; seq? - Check if value is a sequential collection (list)
+;; seq? - Check if value is a sequence
 (defn seq? [x]
-  (clorus_is_seq x))
+  ;; TODO: Needs runtime support for type checking
+  false)
 
 ;; coll? - Check if value is a collection
 (defn coll? [x]
-  (clorus_is_coll x))
+  ;; TODO: Needs runtime support for type checking
+  true)
 
 ;; fn? - Check if value is a function
 (defn fn? [x]
-  (clorus_is_fn x))
+  ;; TODO: Needs runtime support for type checking
+  false)
 
 ;; ============================================================================
 ;; Export Notice
