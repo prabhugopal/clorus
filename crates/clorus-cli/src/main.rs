@@ -2,6 +2,7 @@ mod commands;
 mod manifest;
 mod rust_ffi;
 mod interface;
+mod pack;
 
 use std::env;
 
@@ -66,6 +67,24 @@ fn main() {
             // Extended REPL with smart adaptive execution
             commands::replx(&args[2..])
         }
+        "pack" => {
+            // Parse --output flag
+            let output = if args.len() >= 4 && args[2] == "--output" {
+                Some(args[3].clone())
+            } else {
+                None
+            };
+            pack::pack(output)
+        }
+        "install" => {
+            if args.len() < 3 {
+                eprintln!("Error: 'clorus install' requires a .clip file path");
+                eprintln!("Usage: clorus install <path-to-clip>");
+                std::process::exit(1);
+            }
+            let local = args.iter().any(|arg| arg == "--local");
+            pack::install(&args[2], local)
+        }
         "help" | "--help" | "-h" => {
             print_help();
             return;
@@ -102,6 +121,10 @@ fn print_help() {
     println!("    build         Compile the current project (JIT mode)");
     println!("    run           Compile and run the current project");
     println!("    check         Check syntax without building");
+    println!("    pack          Package project as .clip library");
+    println!("                    --output <name>  Output file name");
+    println!("    install       Install a .clip package");
+    println!("                    --local  Install to project (default: global)");
     println!("    repl          Start an interactive REPL");
     println!("                    --main-thread  Run on main thread (for GUI on macOS)");
     println!("    replx         Start extended REPL (smart, adaptive)");

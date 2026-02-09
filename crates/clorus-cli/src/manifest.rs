@@ -12,6 +12,8 @@ pub struct Manifest {
     #[serde(rename = "rust-dependencies", default)]
     pub rust_dependencies: HashMap<String, RustDependency>,
     #[serde(default)]
+    pub dependencies: HashMap<String, ClorusDependency>,
+    #[serde(default)]
     pub link: Link,
 }
 
@@ -23,6 +25,22 @@ pub struct Link {
     /// System libraries to link against (e.g., ["pthread", "m"])
     #[serde(default)]
     pub libraries: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+pub enum ClorusDependency {
+    Path { path: String },
+    Simple(String),
+}
+
+impl ClorusDependency {
+    pub fn get_path(&self) -> &str {
+        match self {
+            ClorusDependency::Path { path } => path,
+            ClorusDependency::Simple(path) => path,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -100,18 +118,24 @@ pub struct Package {
     pub version: String,
     #[serde(default)]
     pub authors: Vec<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Build {
     #[serde(default = "default_entry")]
     pub entry: String,
+    /// Multiple source directories (like deps.edn src = ["src" "resources"])
+    #[serde(default)]
+    pub src: Vec<String>,
 }
 
 impl Default for Build {
     fn default() -> Self {
         Build {
             entry: default_entry(),
+            src: Vec::new(),
         }
     }
 }
@@ -127,6 +151,10 @@ impl Manifest {
 
         toml::from_str(&content)
             .map_err(|e| format!("Failed to parse Clorus.toml: {}", e))
+    }
+
+    pub fn load(filename: &str) -> Result<Self, String> {
+        Self::from_file(Path::new(filename))
     }
 
     pub fn find_in_current_dir() -> Result<Self, String> {

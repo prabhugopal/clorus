@@ -2,6 +2,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::collections::HashSet;
+use std::io::{Write, Read};
 use crate::manifest::Manifest;
 use clorus_syntax::Expr;
 
