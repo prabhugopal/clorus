@@ -2,6 +2,266 @@
 
 This document tracks potential improvements and enhancements to the Clorus language and toolchain.
 
+---
+
+## P1 - Critical (High Priority)
+
+### 1. Repository Cleanup and Organization
+**Status:** Not started
+**Effort:** Medium (2-3 hours)
+
+The repository root is cluttered with 73+ files including scattered docs, tests, and scripts.
+
+**Current Mess:**
+```bash
+$ ls | wc -l
+73  # Way too many files in root!
+
+Root directory contains:
+- 21 markdown files (should be in docs/)
+- 32 test files (should be in tests/)
+- 7 shell scripts (should be in scripts/)
+- Various temporary files
+```
+
+**Files to Organize:**
+
+1. **Documentation → docs/**
+   ```bash
+   # Move to docs/
+   IMPROVEMENTS.md
+   CLIP_SPECIFICATION.md
+   CLIP_USER_GUIDE.md
+   FFI_MIGRATION_GUIDE.md
+   LIBRARY_DISTRIBUTION_DESIGN.md
+   TEST_INFRASTRUCTURE.md
+   TEST_ORGANIZATION.md
+   TEST_QUALITY.md
+
+   # Move to docs/archive/ (completed sessions)
+   BUGS_FIXED.md
+   SESSION_COMPLETE.md
+   SESSION_DESTRUCTURING.md
+   DESTRUCTURING_COMPLETE.md
+   FFI_IMPLEMENTATION_COMPLETE.md
+   FFI_FINAL_STATUS.md
+
+   # Move to docs/issues/
+   KNOWN_ISSUES.md
+   KNOWN_LIMITATIONS.md
+   LANGUAGE_ISSUES.md
+   FIX_PLAN.md
+
+   # Move to docs/comparisons/
+   CLORUS_VS_JANK.md
+   ```
+
+2. **Test Files → tests/**
+   ```bash
+   # Move to tests/unit/
+   test-numeric.clr
+   test-keyword-equality.clr
+   test-comparisons.clr
+   test-vectors.clr
+   test-functions-in-data.clr
+   test-arithmetic.clr
+   ... (all test-*.clr files)
+
+   # Move to tests/stdlib/
+   test-stdlib-simple.clr
+   test-loop-fix.clr
+   test-loop-recur.clr
+
+   # Move to tests/integration/
+   test-keyboard-sim.clr
+   test-repl-*.clr (if exist)
+   ```
+
+3. **Scripts → scripts/**
+   ```bash
+   # Move to scripts/
+   install.sh
+   cleanup-and-organize.sh
+   cleanup-repo.sh
+   test_metrics.sh
+   test-agent-minimal.sh
+   test-repl-formats.sh
+   test-repl-output.sh
+   ```
+
+4. **Examples → examples/**
+   ```bash
+   # Check if any demo/example files in root
+   # Move to examples/
+   ```
+
+**Target Structure:**
+```
+clorus/
+├── README.md                 ← Keep in root
+├── BUILD.md                  ← Keep in root
+├── Cargo.toml               ← Keep in root
+├── .gitignore               ← Keep in root
+│
+├── docs/                     ← All documentation
+│   ├── README.md
+│   ├── improvements/
+│   │   └── IMPROVEMENTS.md
+│   ├── guides/
+│   │   ├── CLIP_USER_GUIDE.md
+│   │   ├── CLIP_SPECIFICATION.md
+│   │   └── FFI_MIGRATION_GUIDE.md
+│   ├── design/
+│   │   └── LIBRARY_DISTRIBUTION_DESIGN.md
+│   ├── issues/
+│   │   ├── KNOWN_ISSUES.md
+│   │   ├── KNOWN_LIMITATIONS.md
+│   │   └── LANGUAGE_ISSUES.md
+│   ├── archive/              ← Completed sessions
+│   │   ├── BUGS_FIXED.md
+│   │   ├── SESSION_*.md
+│   │   └── *_COMPLETE.md
+│   └── comparisons/
+│       └── CLORUS_VS_JANK.md
+│
+├── tests/                    ← All test files
+│   ├── README.md
+│   ├── unit/
+│   │   ├── test-numeric.clr
+│   │   ├── test-vectors.clr
+│   │   └── ... (all unit tests)
+│   ├── stdlib/
+│   │   ├── test-stdlib-simple.clr
+│   │   └── test-loop-*.clr
+│   ├── integration/
+│   │   └── test-keyboard-sim.clr
+│   └── compiler/             ← Already exists
+│
+├── scripts/                  ← All automation
+│   ├── README.md
+│   ├── build/
+│   │   ├── build-all.sh
+│   │   └── build-compiler.sh
+│   ├── test/
+│   │   ├── test_metrics.sh
+│   │   ├── test-repl-*.sh
+│   │   └── run_all_tests.sh
+│   └── install/
+│       └── install.sh
+│
+├── examples/                 ← Example projects
+│   ├── factorial-demo/
+│   └── json-lib/
+│
+├── crates/                   ← Rust source (keep as-is)
+│   ├── clorus-cli/
+│   ├── clorus-runtime/
+│   └── ...
+│
+├── stdlib/                   ← Standard library (keep as-is)
+│   ├── core.clr
+│   └── transducers.clr
+│
+└── target/                   ← Build artifacts
+```
+
+**Implementation Script:**
+
+```bash
+#!/bin/bash
+# scripts/organize-repo.sh
+
+# Create directory structure
+mkdir -p docs/{guides,design,issues,archive,comparisons,improvements}
+mkdir -p tests/{unit,stdlib,integration}
+mkdir -p scripts/{build,test,install}
+
+# Move documentation
+mv IMPROVEMENTS.md docs/improvements/
+mv CLIP_*.md docs/guides/
+mv FFI_MIGRATION_GUIDE.md LIBRARY_DISTRIBUTION_DESIGN.md docs/guides/
+mv TEST_*.md docs/guides/
+mv *_COMPLETE.md SESSION_*.md BUGS_FIXED.md docs/archive/
+mv KNOWN_*.md LANGUAGE_ISSUES.md FIX_PLAN.md docs/issues/
+mv CLORUS_VS_JANK.md docs/comparisons/
+
+# Move test files
+mv test-numeric.clr test-keyword*.clr test-comparisons.clr tests/unit/
+mv test-vectors.clr test-functions*.clr test-arithmetic.clr tests/unit/
+mv test-stdlib*.clr test-loop*.clr tests/stdlib/
+mv test-keyboard*.clr test-repl*.clr tests/integration/ 2>/dev/null || true
+
+# Move scripts
+mv cleanup*.sh test_metrics.sh test-*.sh scripts/test/
+mv install.sh scripts/install/
+mv build*.sh scripts/build/ 2>/dev/null || true
+
+# Create README files
+cat > docs/README.md <<EOF
+# Clorus Documentation
+
+## Structure
+- guides/ - User guides and tutorials
+- design/ - Design documents and specs
+- issues/ - Known issues and limitations
+- archive/ - Completed session notes
+- comparisons/ - Language comparisons
+
+## Main Docs
+- [User Guide](guides/CLIP_USER_GUIDE.md)
+- [Improvements Roadmap](improvements/IMPROVEMENTS.md)
+- [Known Issues](issues/KNOWN_ISSUES.md)
+EOF
+
+cat > tests/README.md <<EOF
+# Clorus Test Suite
+
+## Structure
+- unit/ - Unit tests for language features
+- stdlib/ - Standard library tests
+- integration/ - Integration and system tests
+- compiler/ - Compiler-specific tests
+
+## Running Tests
+\`\`\`bash
+# All tests
+../scripts/test/run_all_tests.sh
+
+# Specific category
+clorus build && ./target/test-name
+\`\`\`
+EOF
+
+cat > scripts/README.md <<EOF
+# Clorus Scripts
+
+## Structure
+- build/ - Build and compilation scripts
+- test/ - Testing and validation scripts
+- install/ - Installation scripts
+
+## Usage
+See individual script files for details.
+EOF
+
+echo "✅ Repository organized!"
+```
+
+**Benefits:**
+- Clean root directory (only essential files)
+- Easy to find docs, tests, scripts
+- Professional repo structure
+- Follows Cargo/Rust conventions
+- Better for contributors
+- Easier maintenance
+
+**Backward Compatibility:**
+- Update CI/CD paths if needed
+- Update internal doc links
+- Add redirects in root README if needed
+
+---
+
 ## P2 - Important (Not Urgent)
 
 ### 1. API Exports Extraction
