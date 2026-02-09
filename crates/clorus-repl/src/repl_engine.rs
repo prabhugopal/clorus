@@ -48,6 +48,8 @@ pub struct ReplEngine<'ctx> {
     module_loader: ModuleLoader,
     /// Rust FFI libraries registered with the REPL
     rust_libraries: Vec<RustLibrary>,
+    /// .clip namespaces registered with the REPL (from loaded .clip packages)
+    clip_namespaces: HashSet<String>,
     /// Symbol registry: namespace -> set of defined symbols
     /// Tracks what symbols (functions, vars) exist in each namespace
     symbol_registry: HashMap<String, HashSet<String>>,
@@ -68,6 +70,7 @@ impl<'ctx> ReplEngine<'ctx> {
             namespace: NamespaceContext::new("user"),
             module_loader: ModuleLoader::new(),
             rust_libraries: Vec::new(),
+            clip_namespaces: HashSet::new(),
             symbol_registry: HashMap::new(),
             stdlib_loaded: false,
             stdlib_exprs: Vec::new(),
@@ -194,6 +197,12 @@ impl<'ctx> ReplEngine<'ctx> {
     /// This makes the library's functions available for all future evaluations
     pub fn register_rust_library(&mut self, lib: RustLibrary) {
         self.rust_libraries.push(lib);
+    }
+
+    /// Register a .clip namespace with the REPL
+    /// This tells the compiler that functions from this namespace will be available at runtime
+    pub fn register_clip_namespace(&mut self, namespace: &str) {
+        self.clip_namespaces.insert(namespace.to_string());
     }
 
     /// Switch to a new namespace
@@ -344,6 +353,11 @@ impl<'ctx> ReplEngine<'ctx> {
             codegen.register_rust_library(lib.clone());
             // Declare FFI functions in LLVM module
             codegen.declare_rust_library_functions(lib)?;
+        }
+
+        // Register all .clip namespaces (from loaded .clip packages)
+        for namespace in &self.clip_namespaces {
+            codegen.register_clip_namespace(namespace);
         }
 
         // Set the current namespace context

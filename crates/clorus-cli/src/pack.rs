@@ -19,6 +19,109 @@ pub struct ClipPackage {
     pub bitcode_path: Option<PathBuf>,
     pub object_path: Option<PathBuf>,
     pub exports: Value,
+    pub dylib_cache_path: Option<PathBuf>,  // Cached .dylib for REPL
+}
+
+/// Build a dynamic library from .clip package for REPL use
+/// Returns path to the created .dylib file
+pub fn build_dylib_for_repl(package: &ClipPackage) -> Result<PathBuf, String> {
+    // Determine cache directory (.repl/ in current directory)
+    let cache_dir = PathBuf::from(".repl").join(&package.name);
+    fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create .repl cache directory: {}", e))?;
+
+    // Determine dynamic library name based on platform
+    #[cfg(target_os = "macos")]
+    let dylib_name = format!("lib{}.dylib", package.name.replace('-', "_"));
+
+    #[cfg(target_os = "linux")]
+    let dylib_name = format!("lib{}.so", package.name.replace('-', "_"));
+
+    #[cfg(target_os = "windows")]
+    let dylib_name = format!("{}.dll", package.name.replace('-', "_"));
+
+    let dylib_path = cache_dir.join(&dylib_name);
+
+    // Check if already cached and fresh
+    if dylib_path.exists() {
+        // TODO: Check timestamp against source
+        return Ok(dylib_path);
+    }
+
+    // Get object file from package
+    let object_path = package.object_path.as_ref()
+        .ok_or_else(|| format!("No object file in .clip package: {}", package.name))?;
+
+    if !object_path.exists() {
+        return Err(format!("Object file not found: {}", object_path.display()));
+    }
+
+    println!("      Building {} for REPL...", package.name);
+
+    // Find runtime library
+    let runtime_lib = find_runtime_library()?;
+
+    // Link as dynamic library
+    let mut link_cmd = std::process::Command::new("cc");
+    link_cmd
+        .arg("-shared")                    // Create dynamic library
+        .arg(object_path)                  // Input object file
+        .arg(runtime_lib)                  // Runtime library
+        .arg("-o").arg(&dylib_path);       // Output dynamic library
+
+    // Add C++ standard library (for LLVM runtime)
+    link_cmd.arg("-lc++");
+
+    // Platform-specific flags
+    #[cfg(target_os = "macos")]
+    {
+        link_cmd.arg("-dynamiclib");
+        link_cmd.arg("-framework").arg("CoreFoundation");
+        link_cmd.arg("-framework").arg("Security");
+    }
+
+    let status = link_cmd
+        .status()
+        .map_err(|e| format!("Failed to run linker: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("Failed to link dynamic library for {}", package.name));
+    }
+
+    println!("         ✓ Cached at {}", dylib_path.display());
+
+    Ok(dylib_path)
+}
+
+/// Find runtime library for linking
+fn find_runtime_library() -> Result<String, String> {
+    // Search for libclorus_runtime.a
+    let search_paths = vec![
+        "target/release/libclorus_runtime.a",
+        "target/debug/libclorus_runtime.a",
+        "../target/release/libclorus_runtime.a",
+        "../target/debug/libclorus_runtime.a",
+        "../../target/release/libclorus_runtime.a",
+        "../../target/debug/libclorus_runtime.a",
+    ];
+
+    for path in search_paths {
+        if Path::new(path).exists() {
+            return Ok(path.to_string());
+        }
+    }
+
+    // Try relative to clorus executable
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let runtime_path = exe_dir.join("../lib/libclorus_runtime.a");
+            if runtime_path.exists() {
+                return Ok(runtime_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    Err("Runtime library not found. Run: cargo build -p clorus-runtime --release".to_string())
 }
 
 /// Extract and parse a .clip package to a temporary directory
@@ -122,6 +225,7 @@ pub fn extract_clip(clip_path: &str) -> Result<ClipPackage, String> {
         bitcode_path,
         object_path,
         exports,
+        dylib_cache_path: None,  // Will be set when built for REPL
     })
 }
 

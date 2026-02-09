@@ -190,14 +190,18 @@ pub fn check() -> Result<(), String> {
 }
 
 pub fn build() -> Result<(), String> {
-    build_internal(false)
+    build_internal(false, false)
+}
+
+pub fn build_with_debug(debug: bool) -> Result<(), String> {
+    build_internal(false, debug)
 }
 
 pub fn build_lib() -> Result<(), String> {
-    build_internal(true)
+    build_internal(true, false)
 }
 
-fn build_internal(lib_mode: bool) -> Result<(), String> {
+fn build_internal(lib_mode: bool, debug: bool) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
     let entry_path = Path::new(&manifest.build.entry);
 
@@ -232,7 +236,9 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
         let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
             .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
 
-        println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
+        if debug {
+            println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
+        }
         all_exprs.extend(stdlib_exprs);
     } else {
         // Try relative to compiler location
@@ -263,7 +269,9 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
         let transducers_exprs = clorus::parse_and_expand(&transducers_source)
             .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
 
-        println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+        if debug {
+            println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+        }
         all_exprs.extend(transducers_exprs);
     } else {
         // Try relative to compiler location
@@ -352,7 +360,9 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
     // Add entry file expressions (after dependencies)
     all_exprs.extend(entry_exprs);
 
-    println!("   [DEBUG] Total expressions to compile: {}", all_exprs.len());
+    if debug {
+        println!("   [DEBUG] Total expressions to compile: {}", all_exprs.len());
+    }
 
     if all_exprs.is_empty() {
         return Err("No expressions to compile".to_string());
@@ -369,7 +379,9 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
 
     // Register .clip library exports with CodeGen (Phase 4)
     for package in &clip_packages {
-        println!("   [DEBUG] Registering .clip package: {} v{}", package.name, package.version);
+        if debug {
+            println!("   [DEBUG] Registering .clip package: {} v{}", package.name, package.version);
+        }
 
         // Mark this namespace as coming from a .clip package
         // This prevents the compiler from looking for source files
@@ -432,22 +444,7 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
     // Create format strings for printing
     let float_format = builder.build_global_string_ptr("=> %g\n", "float_fmt").unwrap();
 
-    // Call each compiled expression (defines functions, globals, etc.)
-    let mut last_result: Option<inkwell::values::PointerValue> = None;
-    for (i, fn_name) in function_names.iter().enumerate() {
-        // Get the function from the module
-        if let Some(func) = codegen.get_module().get_function(fn_name) {
-            let result = builder.build_call(func, &[], "call").unwrap();
-            let result_ptr = result.try_as_basic_value().left().unwrap().into_pointer_value();
-
-            // Store last result in case -main doesn't exist
-            if i == function_names.len() - 1 {
-                last_result = Some(result_ptr);
-            }
-        }
-    }
-
-    // Look for -main function and call it if present (like clorus run does)
+    // Look for -main function first to determine how to handle expressions
     // Construct the expected mangled name based on namespace
     let mut main_fn_name = "-main".to_string();
 
@@ -465,11 +462,24 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
         }
     }
 
-    // Try to call -main if it exists
     let i8_ptr_type = context.i8_type().ptr_type(inkwell::AddressSpace::default());
-    // All Clorus functions now have an environment parameter as the last argument
     let main_fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
 
+    // Call each compiled expression (defines functions, globals, etc.)
+    let mut last_result: Option<inkwell::values::PointerValue> = None;
+
+    for (i, fn_name) in function_names.iter().enumerate() {
+        // Get the function from the module
+        if let Some(func) = codegen.get_module().get_function(fn_name) {
+            let result = builder.build_call(func, &[], "call").unwrap();
+            let result_ptr = result.try_as_basic_value().left().unwrap().into_pointer_value();
+
+            // Store last result in case we don't call -main
+            last_result = Some(result_ptr);
+        }
+    }
+
+    // Call -main if it exists (overrides last_result)
     if let Some(user_main_fn) = codegen.get_module().get_function(&main_fn_name) {
         // Call -main with empty args vector (like clorus run does)
         // We need to call clorus_vector_empty() at runtime to get an empty vector
@@ -546,8 +556,11 @@ fn build_internal(lib_mode: bool) -> Result<(), String> {
 
     println!("    Generated object file: {}", obj_path.display());
 
-    // Skip linking for library mode - just return the object file
+    // For library mode, also generate LLVM bitcode for JIT compatibility
     if lib_mode {
+        let bc_path = target_dir.join(format!("{}.bc", manifest.package.name));
+        codegen.get_module().write_bitcode_to_path(&bc_path);
+        println!("    Generated bitcode file: {}", bc_path.display());
         println!("    Finished lib build in 0.00s");
         return Ok(());
     }
@@ -857,7 +870,51 @@ fn load_and_compile_modules<'ctx>(
 }
 
 
-pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
+pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), String> {
+    if use_jit {
+        // Use JIT mode (faster but doesn't work with .clip dependencies)
+        if debug {
+            println!("   Mode: JIT compilation (--jit flag)");
+            println!();
+        }
+        run_jit_internal(debug, extra_args)
+    } else {
+        // Default: compile + run (like cargo run)
+        // Works with .clip dependencies and all features
+        if debug {
+            println!("   Mode: Compile and run (like cargo run)");
+            println!("   Tip: Use --jit for faster iteration on small projects");
+            println!();
+        }
+
+        // Build the project first
+        build_with_debug(debug)?;
+
+        // Get the manifest to know the executable name
+        let manifest = Manifest::find_in_current_dir()?;
+        let exe_path = format!("./target/{}", manifest.package.name);
+
+        println!();
+        println!("     Running `{}`", exe_path);
+        println!();
+
+        // Execute the binary with any extra arguments
+        let status = std::process::Command::new(&exe_path)
+            .args(&extra_args)
+            .status()
+            .map_err(|e| format!("Failed to execute {}: {}", exe_path, e))?;
+
+        if !status.success() {
+            return Err(format!("Process exited with status: {}", status));
+        }
+
+        Ok(())
+    }
+}
+
+/// JIT compilation mode - fast but limited
+/// Doesn't work with .clip dependencies due to LLVM bitcode compatibility
+fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
     let entry_path = Path::new(&manifest.build.entry);
 
@@ -1038,15 +1095,86 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let context = Context::create();
     let mut codegen = CodeGen::new(&context, &manifest.package.name);
 
-    // Register .clip library exports with CodeGen (Phase 4)
+    // Load and link .clip library bitcode FIRST (Phase 4 JIT support)
+    // This must happen before compiling user code so symbols are available
+    let mut successfully_loaded_clip = Vec::new();
+    let mut failed_clip = Vec::new();
+
     for package in &clip_packages {
         if debug {
-            println!("   [DEBUG] Registering .clip package: {} v{}", package.name, package.version);
+            println!("   [DEBUG] Loading .clip package: {} v{}", package.name, package.version);
         }
 
         // Mark this namespace as coming from a .clip package
         // This prevents the compiler from looking for source files
         codegen.register_clip_namespace(&package.name);
+
+        // Load bitcode if available (for JIT execution)
+        if let Some(ref bc_path) = package.bitcode_path {
+            if debug {
+                println!("   [DEBUG] Loading bitcode from {}", bc_path.display());
+            }
+
+            // Read bitcode file
+            match fs::read(bc_path) {
+                Ok(bc_data) => {
+                    // Create memory buffer from bitcode data
+                    let mem_buf = inkwell::memory_buffer::MemoryBuffer::create_from_memory_range(&bc_data, "clip_bitcode");
+
+                    // Parse bitcode module
+                    match inkwell::module::Module::parse_bitcode_from_buffer(&mem_buf, &context) {
+                        Ok(bc_module) => {
+                            // Link into main module
+                            match codegen.get_module().link_in_module(bc_module) {
+                                Ok(_) => {
+                                    if debug {
+                                        println!("   [DEBUG] Successfully linked {} bitcode", package.name);
+                                    }
+                                    successfully_loaded_clip.push(package.name.clone());
+                                }
+                                Err(e) => {
+                                    if debug {
+                                        println!("   [DEBUG] Failed to link bitcode: {}", e);
+                                    }
+                                    failed_clip.push(package.name.clone());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            if debug {
+                                println!("   [DEBUG] Failed to parse bitcode: {}", e);
+                            }
+                            failed_clip.push(package.name.clone());
+                        }
+                    }
+                }
+                Err(e) => {
+                    if debug {
+                        println!("   [DEBUG] Failed to read bitcode file: {}", e);
+                    }
+                    failed_clip.push(package.name.clone());
+                }
+            }
+        } else {
+            failed_clip.push(package.name.clone());
+        }
+    }
+
+    // If any .clip packages failed to load, we can't run in JIT mode
+    if !failed_clip.is_empty() {
+        eprintln!();
+        eprintln!("⚠️  JIT execution limitation:");
+        eprintln!("   Could not load the following .clip packages: {}", failed_clip.join(", "));
+        eprintln!();
+        eprintln!("   'clorus run' uses JIT compilation and has limitations with .clip dependencies.");
+        eprintln!("   The bitcode format may be incompatible or unavailable.");
+        eprintln!();
+        eprintln!("   Solution:");
+        eprintln!("   • Use 'clorus build' to create an executable");
+        eprintln!("   • Run the compiled binary: ./target/{}", manifest.package.name);
+        eprintln!();
+        eprintln!("   (Compiled binaries work perfectly with .clip dependencies!)");
+        return Err(format!("Cannot load .clip packages in JIT mode: {}", failed_clip.join(", ")));
     }
 
     // Register Rust FFI libraries with CodeGen

@@ -1843,12 +1843,13 @@ impl<'ctx> CodeGen<'ctx> {
         // Increment expression counter for progress tracking
         self.expr_count += 1;
 
-        // Show progress every 100 expressions
-        if self.expr_count % 100 == 0 {
-            let elapsed = self.compile_start.elapsed();
-            eprintln!("   [PROGRESS] Compiled {} expressions ({:.1}s elapsed)",
-                     self.expr_count, elapsed.as_secs_f32());
-        }
+        // Show progress every 100 expressions (disabled for cleaner output)
+        // Uncomment for debugging large compilations
+        // if self.expr_count % 100 == 0 {
+        //     let elapsed = self.compile_start.elapsed();
+        //     eprintln!("   [PROGRESS] Compiled {} expressions ({:.1}s elapsed)",
+        //              self.expr_count, elapsed.as_secs_f32());
+        // }
 
         match expr {
             Expr::Long(n) => {
@@ -3889,8 +3890,9 @@ impl<'ctx> CodeGen<'ctx> {
                                 let fn_type = i8_ptr_type.fn_type(&param_types, false);
                                 self.module.add_function(&mangled_name, fn_type, None);
 
-                                eprintln!("   [DEBUG] Auto-declared .clip function: {} -> {}",
-                                    func, mangled_name);
+                                // Debug: Auto-declared .clip function
+                                // eprintln!("   [DEBUG] Auto-declared .clip function: {} -> {}",
+                                //     func, mangled_name);
                             }
 
                             // Now call it like a normal Clorus function

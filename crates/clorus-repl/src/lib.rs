@@ -480,6 +480,34 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         }
     }
 
+    // Load .clip dependencies if in a project directory
+    let mut _clip_libs = Vec::new();  // Keep loaded .dylibs alive
+    if let Some(ref proj_config) = project {
+        // Try to load Clorus.toml manifest for dependencies
+        if std::path::Path::new("Clorus.toml").exists() {
+            // Load manifest using clorus-cli's manifest loader
+            match load_clip_dependencies_for_repl() {
+                Ok((libs, packages)) => {
+                    if !packages.is_empty() {
+                        println!("📦 Loaded {} .clip package(s) for REPL", packages.len());
+                        for pkg in &packages {
+                            println!("   ✓ {} v{}", pkg.name, pkg.version);
+                            // Register the namespace with the REPL engine
+                            repl_engine.register_clip_namespace(&pkg.name);
+                        }
+                        println!();
+                        _clip_libs = libs;  // Keep libraries loaded
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠ Warning: Could not load .clip dependencies: {}", e);
+                    eprintln!("  REPL will continue but .clip functions may not be available.");
+                    println!();
+                }
+            }
+        }
+    }
+
     // Load project entry file if in a project directory (unless no_auto_load is set)
     if !config.no_auto_load {
         if let Some(ref proj_config) = project {
@@ -1356,4 +1384,249 @@ fn parse_fn_form(s: &str) -> Result<Option<clorus::codegen::RustFunction>, Strin
         params,
         return_type,
     }))
+}
+
+// Simplified ClipPackage struct for REPL
+struct ClipPackage {
+    name: String,
+    version: String,
+    object_path: Option<std::path::PathBuf>,
+}
+
+/// Load .clip dependencies for REPL
+/// Returns (Vec<libloading::Library>, Vec<ClipPackage>) to keep libraries loaded
+fn load_clip_dependencies_for_repl() -> Result<(Vec<libloading::Library>, Vec<ClipPackage>), String> {
+    use std::fs;
+
+    // Read and parse Clorus.toml
+    let manifest_content = fs::read_to_string("Clorus.toml")
+        .map_err(|e| format!("Failed to read Clorus.toml: {}", e))?;
+
+    let manifest: toml::Value = toml::from_str(&manifest_content)
+        .map_err(|e| format!("Failed to parse Clorus.toml: {}", e))?;
+
+    let mut packages = Vec::new();
+    let mut loaded_libs = Vec::new();
+
+    // Extract dependencies
+    if let Some(deps) = manifest.get("dependencies").and_then(|d| d.as_table()) {
+        for (_name, dep_value) in deps.iter() {
+            // Check if it's a path dependency pointing to .clip file
+            let clip_path = if let Some(path_table) = dep_value.as_table() {
+                if let Some(path) = path_table.get("path").and_then(|p| p.as_str()) {
+                    if path.ends_with(".clip") {
+                        Some(path.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(clip_path) = clip_path {
+                // Extract .clip package
+                let package = extract_clip_package(&clip_path)?;
+
+                // Build as dynamic library for REPL
+                match build_dylib_for_package(&package) {
+                    Ok(dylib_path) => {
+                        // Load the dynamic library
+                        match load_dynamic_library(&dylib_path) {
+                            Ok(lib) => {
+                                loaded_libs.push(lib);
+                                packages.push(package);
+                            }
+                            Err(e) => {
+                                eprintln!("   ⚠ Failed to load {}: {}", package.name, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("   ⚠ Failed to build {} for REPL: {}", package.name, e);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok((loaded_libs, packages))
+}
+
+fn extract_clip_package(clip_path: &str) -> Result<ClipPackage, String> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let clip_path_buf = PathBuf::from(clip_path);
+    if !clip_path_buf.exists() {
+        return Err(format!(".clip file not found: {}", clip_path));
+    }
+
+    // Create temp directory for extraction
+    let temp_dir = std::env::temp_dir().join(format!(
+        "clorus-clip-{}",
+        clip_path_buf.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+    ));
+
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to clean temp dir: {}", e))?;
+    }
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    // Extract ZIP archive
+    let file = fs::File::open(&clip_path_buf)
+        .map_err(|e| format!("Failed to open .clip file: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read .clip archive: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)
+            .map_err(|e| format!("Failed to read archive entry: {}", e))?;
+        let outpath = temp_dir.join(file.name());
+
+        if file.name().ends_with('/') {
+            fs::create_dir_all(&outpath)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create parent dir: {}", e))?;
+            }
+            let mut outfile = fs::File::create(&outpath)
+                .map_err(|e| format!("Failed to create file: {}", e))?;
+            std::io::copy(&mut file, &mut outfile)
+                .map_err(|e| format!("Failed to extract file: {}", e))?;
+        }
+    }
+
+    // Read clip.toml
+    let clip_toml_path = temp_dir.join("clip.toml");
+    let clip_toml_content = fs::read_to_string(&clip_toml_path)
+        .map_err(|e| format!("Failed to read clip.toml: {}", e))?;
+    let clip_manifest: toml::Value = toml::from_str(&clip_toml_content)
+        .map_err(|e| format!("Failed to parse clip.toml: {}", e))?;
+
+    let name = clip_manifest.get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+        .ok_or("Missing package name in clip.toml")?
+        .to_string();
+
+    let version = clip_manifest.get("package")
+        .and_then(|p| p.get("version"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing package version in clip.toml")?
+        .to_string();
+
+    // Find object file
+    let lib_dir = temp_dir.join("lib");
+    let mut object_path = None;
+
+    if lib_dir.exists() {
+        for entry_result in fs::read_dir(&lib_dir)
+            .map_err(|e| format!("Failed to read lib directory: {}", e))? {
+            let entry = entry_result.map_err(|e| format!("Failed to read entry: {}", e))?;
+            let path = entry.path();
+
+            if let Some(ext) = path.extension() {
+                if ext == "o" {
+                    object_path = Some(path);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(ClipPackage {
+        name,
+        version,
+        object_path,
+    })
+}
+
+fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, String> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    // Determine cache directory (.repl/ in current directory)
+    let cache_dir = PathBuf::from(".repl").join(&package.name);
+    fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("Failed to create .repl cache directory: {}", e))?;
+
+    // Determine dynamic library name based on platform
+    #[cfg(target_os = "macos")]
+    let dylib_name = format!("lib{}.dylib", package.name.replace('-', "_"));
+
+    #[cfg(target_os = "linux")]
+    let dylib_name = format!("lib{}.so", package.name.replace('-', "_"));
+
+    #[cfg(target_os = "windows")]
+    let dylib_name = format!("{}.dll", package.name.replace('-', "_"));
+
+    let dylib_path = cache_dir.join(&dylib_name);
+
+    // Check if already cached
+    if dylib_path.exists() {
+        return Ok(dylib_path);
+    }
+
+    // Get object file from package
+    let object_path = package.object_path.as_ref()
+        .ok_or_else(|| format!("No object file in .clip package: {}", package.name))?;
+
+    println!("   Building {} for REPL...", package.name);
+
+    // Find runtime library
+    let runtime_lib = find_runtime_lib()?;
+
+    // Link as dynamic library
+    let mut link_cmd = std::process::Command::new("cc");
+    link_cmd
+        .arg("-shared")
+        .arg(object_path)
+        .arg(runtime_lib)
+        .arg("-o").arg(&dylib_path)
+        .arg("-lc++");
+
+    #[cfg(target_os = "macos")]
+    {
+        link_cmd.arg("-dynamiclib");
+        link_cmd.arg("-framework").arg("CoreFoundation");
+        link_cmd.arg("-framework").arg("Security");
+    }
+
+    let status = link_cmd
+        .status()
+        .map_err(|e| format!("Failed to run linker: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("Failed to link dynamic library for {}", package.name));
+    }
+
+    Ok(dylib_path)
+}
+
+fn find_runtime_lib() -> Result<String, String> {
+    let search_paths = vec![
+        "target/release/libclorus_runtime.a",
+        "target/debug/libclorus_runtime.a",
+        "../target/release/libclorus_runtime.a",
+        "../target/debug/libclorus_runtime.a",
+        "../../target/release/libclorus_runtime.a",
+        "../../target/debug/libclorus_runtime.a",
+    ];
+
+    for path in search_paths {
+        if std::path::Path::new(path).exists() {
+            return Ok(path.to_string());
+        }
+    }
+
+    Err("Runtime library not found".to_string())
 }

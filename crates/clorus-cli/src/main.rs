@@ -45,17 +45,18 @@ fn main() {
         }
         "build" => commands::build(),
         "run" => {
-            // Check for --debug flag and collect extra args
+            // Check for flags
             let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
+            let use_jit = args.iter().any(|arg| arg == "--jit");
 
-            // Collect arguments after "run" (excluding --debug flags)
+            // Collect arguments after "run" (excluding flags)
             let extra_args: Vec<String> = args[2..]
                 .iter()
-                .filter(|arg| *arg != "--debug" && *arg != "-d")
+                .filter(|arg| *arg != "--debug" && *arg != "-d" && *arg != "--jit")
                 .map(|s| s.clone())
                 .collect();
 
-            commands::run(debug, extra_args)
+            commands::run(debug, use_jit, extra_args)
         }
         "check" => commands::check(),
         "repl" => {
@@ -118,8 +119,9 @@ fn print_help() {
     println!();
     println!("COMMANDS:");
     println!("    new <name>    Create a new Clorus project");
-    println!("    build         Compile the current project (JIT mode)");
-    println!("    run           Compile and run the current project");
+    println!("    build         Compile the current project");
+    println!("    run           Compile and run the current project (like cargo run)");
+    println!("                    --jit       Use JIT mode (faster, but no .clip support)");
     println!("    check         Check syntax without building");
     println!("    pack          Package project as .clip library");
     println!("                    --output <name>  Output file name");
@@ -142,9 +144,11 @@ fn print_help() {
     println!();
     println!("EXAMPLES:");
     println!("    clorus new my-project       Create a new project");
-    println!("    clorus run                  Run the current project");
+    println!("    clorus run                  Compile and run the project");
+    println!("    clorus run --jit            Run with JIT (faster, no .clip dependencies)");
     println!("    clorus run arg1 arg2        Run with arguments passed to -main");
     println!("    clorus run --debug          Run with memory tracking");
+    println!("    clorus pack                 Package as a .clip library");
     println!("    clorus check                Check for syntax errors");
     println!();
     println!("See https://github.com/yourusername/clorus for more information");
