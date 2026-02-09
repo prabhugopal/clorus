@@ -104,7 +104,49 @@ The multi-arity function compilation needs to:
 - ✅ Added stdlib loading for transducers.clr
 - ✅ Fixed ::none keyword syntax
 - ✅ Identified limitation with multi-arity closures
-- ❌ Transducers still not working due to closure limitation
+- ✅ **MAJOR**: Implemented multi-arity closure capture for FnMulti
+- ✅ **MAJOR**: Fixed DefnMulti self-recursion (functions can call themselves)
+- ⚠️ **PARTIAL**: Simple closures work, nested closures still fail
+- ❌ Transducers still not fully working due to nested closure limitation
+
+### What Works Now
+
+✅ **Multi-arity functions can call themselves recursively:**
+```clojure
+(defn transduce
+  ([xform f coll] (transduce xform f (f) coll))  ; ✅ Works!
+  ([xform f init coll] ...))
+```
+
+✅ **Top-level multi-arity closures with captured variables:**
+```clojure
+;; This would work if we could call it:
+(def make-multi
+  (let [n 5]
+    (fn
+      ([x] (+ x n))      ; ✅ Captures n
+      ([x y] (+ x y n))))) ; ✅ Captures n
+```
+
+### What Still Fails
+
+❌ **Nested closures (FnMulti inside DefnMulti parameters):**
+```clojure
+(defn completing
+  ([f]
+   (fn                           ; ❌ Inner FnMulti
+     ([result] result)
+     ([result input] (f result input))))  ; ❌ Can't capture f from defn parameter
+  ([f cf]
+   (fn
+     ([result] (cf result))      ; ❌ Can't capture cf
+     ([result input] (f result input)))))  ; ❌ Can't capture f
+
+;; Error: Undefined function: f
+```
+
+The issue is that when compiling the inner FnMulti, the defn's parameters (f, cf)
+are not visible in self.variables, so they can't be captured.
 
 ### Testing
 
