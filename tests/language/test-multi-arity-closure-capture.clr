@@ -1,0 +1,36 @@
+;; Test multi-arity closure capture
+(ns test-multi-arity-closure)
+
+;; Test: Simple multi-arity closure with one capture
+(defn make-adder [n]
+  (fn
+    ([x] (+ x n))
+    ([x y] (+ x y n))))
+
+;; Global test instances
+(def adder5 (make-adder 5))
+(def adder10 (make-adder 10))
+
+(defn -main []
+  (do
+    (println "Testing multi-arity closure capture...")
+
+    ;; Test 1-arity
+    (println "Test 1: adder5 with 1 arg (should be 15):")
+    (println (adder5 10))
+
+    ;; Test 2-arity
+    (println "Test 2: adder5 with 2 args (should be 35):")
+    (println (adder5 10 20))
+
+    ;; Test with different capture value
+    (println "Test 3: adder10 with 1 arg (should be 20):")
+    (println (adder10 10))
+
+    (println "Test 4: adder10 with 2 args (should be 40):")
+    (println (adder10 10 20))
+
+    (println "All tests complete!")
+    0))
+
+(-main)
