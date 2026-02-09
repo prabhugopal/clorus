@@ -508,6 +508,55 @@ pub extern "C" fn clorus_includes(s: *mut Value, substr: *mut Value) -> bool {
     }
 }
 
+/// Get character at index
+///
+/// (char-at "hello" 1) => "e"
+/// (char-at "hello" 10) => nil (out of bounds)
+#[no_mangle]
+pub extern "C" fn clorus_char_at(s: *mut Value, index: i64) -> *mut Value {
+    unsafe {
+        let string = match get_string_value(s) {
+            Some(s) => s,
+            None => return Value::nil(),
+        };
+
+        if index < 0 || index as usize >= string.len() {
+            return Value::nil();
+        }
+
+        // Get character at byte index
+        // Note: This is byte-based indexing, not Unicode scalar index
+        match string.chars().nth(index as usize) {
+            Some(ch) => rust_string_to_value(ch.to_string()),
+            None => Value::nil(),
+        }
+    }
+}
+
+/// Find index of substring
+///
+/// (index-of "hello world" "world") => 6
+/// (index-of "hello" "x") => nil
+#[no_mangle]
+pub extern "C" fn clorus_index_of(s: *mut Value, substr: *mut Value) -> *mut Value {
+    unsafe {
+        let string = match get_string_value(s) {
+            Some(s) => s,
+            None => return Value::nil(),
+        };
+
+        let substring = match get_string_value(substr) {
+            Some(p) => p,
+            None => return Value::nil(),
+        };
+
+        match string.find(&substring) {
+            Some(idx) => Value::long(idx as i64),
+            None => Value::nil(),
+        }
+    }
+}
+
 // ============================================================================
 // String Comparison
 // ============================================================================

@@ -611,6 +611,10 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value2_to_i32_fn("clorus_includes");
         self.declare_value2_to_i64_fn("clorus_compare_strings");
 
+        // String utility functions
+        self.declare_value_and_i64_to_value_fn("clorus_char_at");
+        self.declare_value2_to_value_fn("clorus_index_of");
+
         // ===== Arithmetic Operations =====
         self.declare_value_fn("clorus_add", 2);
         self.declare_value_fn("clorus_sub", 2);
@@ -1012,6 +1016,24 @@ impl<'ctx> CodeGen<'ctx> {
             &[i8_ptr_type.into(), i8_ptr_type.into()],
             false
         );
+        self.module.add_function(name, fn_type, None);
+    }
+
+    /// Declare a function that takes 2 Value* args and returns Value*
+    fn declare_value2_to_value_fn(&mut self, name: &str) {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let fn_type = i8_ptr_type.fn_type(
+            &[i8_ptr_type.into(), i8_ptr_type.into()],
+            false
+        );
+        self.module.add_function(name, fn_type, None);
+    }
+
+    /// Declare a function that takes Value* and i64, returns Value*
+    fn declare_value_and_i64_to_value_fn(&mut self, name: &str) {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let i64_type = self.context.i64_type();
+        let fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i64_type.into()], false);
         self.module.add_function(name, fn_type, None);
     }
 
