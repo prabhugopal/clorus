@@ -8,9 +8,17 @@
 /// - `spit` instead of `fs/write`
 
 pub mod io;
+pub mod string_utils;
 
 // Re-export main functions
 pub use io::{clorus_slurp, clorus_spit};
+pub use string_utils::{
+    clorus_string_count_newlines,
+    clorus_string_find_nth_newline,
+    clorus_string_get_line,
+    clorus_string_split_lines,
+    clorus_string_is_newline_at,
+};
 
 // Re-export runtime functions for linking
 pub use clorus_runtime::map::{
