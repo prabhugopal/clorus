@@ -9,6 +9,7 @@ use inkwell::basic_block::BasicBlock;
 use inkwell::{FloatPredicate, IntPredicate};
 use inkwell::AddressSpace;
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 // Import namespace context
 use crate::namespace_context::NamespaceContext;
@@ -66,6 +67,12 @@ pub struct CodeGen<'ctx> {
     loop_context: Option<LoopContext<'ctx>>,
     /// Forward declared functions (from declare form) - allows mutual recursion
     forward_declarations: HashSet<String>,
+    /// Compilation start time for timeout detection
+    compile_start: Instant,
+    /// Compilation timeout duration
+    compile_timeout: Duration,
+    /// Number of expressions compiled (for progress tracking)
+    expr_count: usize,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -85,6 +92,9 @@ impl<'ctx> CodeGen<'ctx> {
             lambda_counter: 0,
             loop_context: None,
             forward_declarations: HashSet::new(),
+            compile_start: Instant::now(),
+            compile_timeout: Duration::from_secs(60), // 60 second default timeout
+            expr_count: 0,
         };
 
         // Declare runtime functions
@@ -109,6 +119,34 @@ impl<'ctx> CodeGen<'ctx> {
     /// Get mutable namespace context
     pub fn get_namespace_mut(&mut self) -> &mut NamespaceContext {
         &mut self.namespace
+    }
+
+    /// Set compilation timeout duration
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.compile_timeout = timeout;
+    }
+
+    /// Reset compilation timer (call when starting a new compilation unit)
+    pub fn reset_timer(&mut self) {
+        self.compile_start = Instant::now();
+        self.expr_count = 0;
+    }
+
+    /// Check if compilation has exceeded timeout
+    /// Returns error if timeout exceeded
+    fn check_timeout(&self) -> Result<(), String> {
+        let elapsed = self.compile_start.elapsed();
+        if elapsed > self.compile_timeout {
+            return Err(format!(
+                "Compilation timeout after {} seconds.\n\
+                 Compiled {} expressions before timeout.\n\
+                 Possible infinite loop during compilation or overly complex code.\n\
+                 Hint: Check for infinite recursion or simplify complex expressions.",
+                elapsed.as_secs(),
+                self.expr_count
+            ));
+        }
+        Ok(())
     }
 
     /// Register a Rust FFI library so its functions can be used
@@ -1784,6 +1822,19 @@ impl<'ctx> CodeGen<'ctx> {
     /// Compile an expression to a Value*
     /// All expressions now return boxed values
     pub fn compile_expr(&mut self, expr: &Expr) -> Result<PointerValue<'ctx>, String> {
+        // Check for compilation timeout
+        self.check_timeout()?;
+
+        // Increment expression counter for progress tracking
+        self.expr_count += 1;
+
+        // Show progress every 100 expressions
+        if self.expr_count % 100 == 0 {
+            let elapsed = self.compile_start.elapsed();
+            eprintln!("   [PROGRESS] Compiled {} expressions ({:.1}s elapsed)",
+                     self.expr_count, elapsed.as_secs_f32());
+        }
+
         match expr {
             Expr::Long(n) => {
                 // Box long integer into Value* using clorus_value_long
