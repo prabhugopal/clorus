@@ -6,6 +6,33 @@
 
 ## 🔥 Priority 1: Critical Parser/Compiler Fixes
 
+### 0. Multi-Arity Closures Don't Capture Variables (BLOCKING TRANSDUCERS!)
+**Current:** Multi-arity anonymous functions can't capture outer variables
+```clojure
+;; ✅ WORKS (single-arity)
+(defn make-adder [n]
+  (fn [x] (+ x n)))
+
+;; ❌ FAILS (multi-arity)
+(defn completing [f]
+  (fn
+    ([result] result)              ; Error: Undefined variable: f
+    ([result input] (f result input))))
+```
+
+**Impact:**
+- Blocks stdlib/transducers.clr (385 lines, fully implemented!)
+- Blocks advanced functional patterns
+- Critical for Clojure compatibility
+
+**Fix:** Update codegen to capture variables in multi-arity closures
+- Location: `crates/clorus-codegen/src/codegen.rs`
+- Extend closure capture mechanism from single-arity to multi-arity
+- Pass closure environment to each arity's LLVM function
+- Estimated: 4-8 hours
+
+**Benefit:** Enables entire transducers feature (composable, efficient transformations)
+
 ### 1. defn Should Allow Multiple Expressions Without do
 **Current:** Must wrap multiple expressions in `do`
 ```clojure
@@ -171,7 +198,8 @@
 
 ## 🎯 Implementation Order
 
-**Week 1: Critical Fixes**
+**Week 1: Critical Fixes (Highest Impact)**
+0. Multi-arity closure capture (CRITICAL - unlocks transducers!)
 1. defn implicit do (High impact, low risk)
 2. Better error messages (Huge QoL improvement)
 3. Docstring support (matches Clojure)
