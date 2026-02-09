@@ -9,8 +9,137 @@
 use std::fs::{self, File};
 use std::io::{Write, Read};
 use std::path::{Path, PathBuf};
-use crate::manifest::Manifest;
-use serde_json::json;
+use crate::manifest::{Manifest, ClorusDependency};
+use serde_json::{json, Value};
+
+/// Data extracted from a .clip package
+pub struct ClipPackage {
+    pub name: String,
+    pub version: String,
+    pub bitcode_path: Option<PathBuf>,
+    pub object_path: Option<PathBuf>,
+    pub exports: Value,
+}
+
+/// Extract and parse a .clip package to a temporary directory
+pub fn extract_clip(clip_path: &str) -> Result<ClipPackage, String> {
+    let clip_path = Path::new(clip_path);
+    if !clip_path.exists() {
+        return Err(format!(".clip file not found: {}", clip_path.display()));
+    }
+
+    // Create temp directory for extraction
+    let temp_dir = std::env::temp_dir().join(format!(
+        "clorus-clip-{}",
+        clip_path.file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+    ));
+
+    if temp_dir.exists() {
+        fs::remove_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to clean temp dir: {}", e))?;
+    }
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    // Extract ZIP archive
+    let file = File::open(clip_path)
+        .map_err(|e| format!("Failed to open .clip file: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("Failed to read .clip archive: {}", e))?;
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)
+            .map_err(|e| format!("Failed to read archive entry: {}", e))?;
+        let outpath = temp_dir.join(file.name());
+
+        if file.name().ends_with('/') {
+            fs::create_dir_all(&outpath)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        } else {
+            if let Some(parent) = outpath.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create parent dir: {}", e))?;
+            }
+            let mut outfile = File::create(&outpath)
+                .map_err(|e| format!("Failed to create file: {}", e))?;
+            std::io::copy(&mut file, &mut outfile)
+                .map_err(|e| format!("Failed to extract file: {}", e))?;
+        }
+    }
+
+    // Read clip.toml
+    let clip_toml_path = temp_dir.join("clip.toml");
+    let clip_toml_content = fs::read_to_string(&clip_toml_path)
+        .map_err(|e| format!("Failed to read clip.toml: {}", e))?;
+    let clip_manifest: toml::Value = toml::from_str(&clip_toml_content)
+        .map_err(|e| format!("Failed to parse clip.toml: {}", e))?;
+
+    let name = clip_manifest.get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+        .ok_or("Missing package name in clip.toml")?
+        .to_string();
+
+    let version = clip_manifest.get("package")
+        .and_then(|p| p.get("version"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing package version in clip.toml")?
+        .to_string();
+
+    // Read api/exports.json
+    let exports_path = temp_dir.join("api/exports.json");
+    let exports_content = fs::read_to_string(&exports_path)
+        .map_err(|e| format!("Failed to read exports.json: {}", e))?;
+    let exports: Value = serde_json::from_str(&exports_content)
+        .map_err(|e| format!("Failed to parse exports.json: {}", e))?;
+
+    // Find bitcode and object files
+    let lib_dir = temp_dir.join("lib");
+    let mut bitcode_path = None;
+    let mut object_path = None;
+
+    if lib_dir.exists() {
+        for entry in fs::read_dir(&lib_dir)
+            .map_err(|e| format!("Failed to read lib directory: {}", e))? {
+            let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+            let path = entry.path();
+
+            if let Some(ext) = path.extension() {
+                if ext == "bc" {
+                    bitcode_path = Some(path);
+                } else if ext == "o" {
+                    object_path = Some(path);
+                }
+            }
+        }
+    }
+
+    Ok(ClipPackage {
+        name,
+        version,
+        bitcode_path,
+        object_path,
+        exports,
+    })
+}
+
+/// Load all .clip dependencies from manifest
+pub fn load_clip_dependencies(manifest: &Manifest) -> Result<Vec<ClipPackage>, String> {
+    let mut packages = Vec::new();
+
+    for (name, dep) in &manifest.dependencies {
+        let path = dep.get_path();
+        if path.ends_with(".clip") {
+            println!("   📦 Loading dependency: {} from {}", name, path);
+            let package = extract_clip(path)?;
+            packages.push(package);
+        }
+    }
+
+    Ok(packages)
+}
 
 /// Create a .clip package from the current project
 pub fn pack(output: Option<String>) -> Result<(), String> {

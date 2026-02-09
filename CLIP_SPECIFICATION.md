@@ -127,11 +127,57 @@ mylib = { path = "./libs/mylib.clip" }
 
 ### Linking Process
 
+When you run `clorus build` or `clorus run` with .clip dependencies:
+
 1. Compiler reads `Clorus.toml` dependencies
-2. Locates `.clip` files (global or local)
-3. Extracts `.bc` or `.o` files
-4. Links them with LLVM linker
-5. Resolves symbols using `api/exports.json`
+2. For each .clip dependency:
+   - Extracts .clip ZIP to temp directory
+   - Reads `api/exports.json` to discover available functions
+   - Registers external function declarations in CodeGen
+3. Compiles your source code
+   - When code calls `(my-library.core/add 1 2)`
+   - Compiler knows function exists (from exports.json)
+   - Generates LLVM call to mangled symbol: `clorus_my_library_core_add_2`
+4. LLVM linking phase:
+   - Links your compiled bitcode
+   - WITH library bitcode from .clip packages
+   - LLVM linker resolves all symbols automatically
+5. Generates final executable
+
+**Example:**
+
+```toml
+# Your app's Clorus.toml
+[package]
+name = "my-app"
+version = "1.0.0"
+
+[dependencies]
+json-parser = { path = "./libs/json-parser-0.5.0.clip" }
+http-client = { path = "./libs/http-client-1.2.0.clip" }
+
+[build]
+entry = "src/main.clrs"
+```
+
+```clojure
+;; Your app code (src/main.clrs)
+(ns my-app.main
+  (:require [json-parser.core :as json]
+            [http-client.request :as http]))
+
+(defn -main []
+  (let [response (http/get "https://api.example.com/data")
+        data (json/parse (:body response))]
+    (println "Received:" data)))
+```
+
+When you run `clorus build`, the compiler:
+1. Extracts json-parser-0.5.0.clip and http-client-1.2.0.clip
+2. Registers `json-parser.core/parse` and `http-client.request/get` as external functions
+3. Compiles your main.clrs
+4. Links everything together automatically
+5. You get a working executable with zero manual linking!
 
 ## Distribution
 
