@@ -185,6 +185,17 @@ pub fn build() -> Result<(), String> {
     // Process Rust dependencies (auto-generate FFI and compile)
     let rust_ffi = crate::rust_ffi::RustFfiProcessor::process_dependencies(&manifest, true)?;
 
+    // Load .clip dependencies automatically (Phase 3)
+    println!("   Resolving dependencies...");
+    let clip_packages = crate::pack::load_clip_dependencies(&manifest)?;
+
+    if !clip_packages.is_empty() {
+        println!("   Loaded {} .clip package(s)", clip_packages.len());
+        for package in &clip_packages {
+            println!("      ✓ {} v{}", package.name, package.version);
+        }
+    }
+
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
     // Load and parse stdlib/core.clr first (provides inc, dec, range, for, doseq, etc.)
@@ -585,6 +596,17 @@ pub fn build() -> Result<(), String> {
         link_cmd.arg(lib_path);
     }
 
+    // Add .clip library object files (Phase 3: automatic linking)
+    for package in &clip_packages {
+        if let Some(ref object_path) = package.object_path {
+            println!("      Linking {} v{}", package.name, package.version);
+            link_cmd.arg(object_path);
+        } else if let Some(ref bitcode_path) = package.bitcode_path {
+            println!("      Linking {} v{} (bitcode)", package.name, package.version);
+            link_cmd.arg(bitcode_path);
+        }
+    }
+
     // Add output path
     link_cmd.arg("-o").arg(&exe_path);
 
@@ -783,6 +805,19 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
         println!("   Note: Memory tracking requires runtime Value* types");
         println!("   Currently using f64 - full tracking coming soon!");
         println!();
+    }
+
+    // Load .clip dependencies automatically (Phase 3)
+    if debug {
+        println!("   Resolving dependencies...");
+    }
+    let clip_packages = crate::pack::load_clip_dependencies(&manifest)?;
+
+    if !clip_packages.is_empty() && debug {
+        println!("   Loaded {} .clip package(s)", clip_packages.len());
+        for package in &clip_packages {
+            println!("      ✓ {} v{}", package.name, package.version);
+        }
     }
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);

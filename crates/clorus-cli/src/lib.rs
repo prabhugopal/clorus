@@ -6,3 +6,4 @@ pub mod rust_ffi;
 pub mod modern_ffi;
 pub mod commands;
 pub mod interface;
+pub mod pack;
