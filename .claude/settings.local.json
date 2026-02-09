@@ -130,7 +130,13 @@
       "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus install:*)",
       "Bash(~/Learning/git/clorus/target/release/clorus pack:*)",
       "Bash(../target/release/clorus pack:*)",
-      "Bash(~/Learning/git/clorus/target/release/clorus repl:*)"
+      "Bash(~/Learning/git/clorus/target/release/clorus repl:*)",
+      "Bash(clorus --help:*)",
+      "Bash(clorus pack:*)",
+      "Bash(./organize-repo.sh)",
+      "Bash(./target/test-transducers:*)",
+      "Bash(./target/test-let:*)",
+      "Bash(./target/clorus-test-suite)"
     ]
   }
 }

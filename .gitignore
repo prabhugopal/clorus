@@ -24,3 +24,9 @@ test-*.clr.out
 .vscode/
 .idea/
 
+
+# Organized structure - ignore build artifacts
+organize-repo.sh
+
+# Test metrics output
+target/test-metrics/

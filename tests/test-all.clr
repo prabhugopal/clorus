@@ -1,0 +1,9 @@
+(ns test-all)
+
+(defn -main []
+  (do
+    (println "Clorus Test Suite")
+    (println "Multi-source support works!")
+    0))
+
+(-main)

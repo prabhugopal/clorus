@@ -772,6 +772,7 @@ fn load_and_compile_modules<'ctx>(
     codegen: &mut clorus::CodeGen<'ctx>,
     loaded: &mut HashSet<String>,
     project_root: &Path,
+    source_dirs: &[String],
 ) -> Result<(), String> {
     use clorus_codegen::namespace_context::NamespaceContext;
 
@@ -780,14 +781,43 @@ fn load_and_compile_modules<'ctx>(
             continue; // Already loaded
         }
 
-        // Convert module name to file path: math -> src/math.clrs
-        // We preserve hyphens in the file path (e.g., text-field.core -> src/text-field/core.clrs)
+        // Convert module name to file path: math -> math.clrs/math.clr, text-field.core -> text-field/core.clrs
+        // We preserve hyphens in the file path (e.g., text-field.core -> text-field/core.clrs)
         let module_path = module_name.replace('.', "/");
-        let module_file = project_root.join("src").join(format!("{}.clrs", module_path));
 
-        if !module_file.exists() {
-            return Err(format!("Module file not found: {}", module_file.display()));
+        // Try each source directory in order, checking both .clrs and .clr extensions
+        let mut module_file = None;
+        for src_dir in source_dirs {
+            // Try .clrs first (source files)
+            let candidate_clrs = project_root
+                .join(src_dir)
+                .join(format!("{}.clrs", module_path));
+            if candidate_clrs.exists() {
+                module_file = Some(candidate_clrs);
+                break;
+            }
+
+            // Fall back to .clr (library/stdlib files)
+            let candidate_clr = project_root
+                .join(src_dir)
+                .join(format!("{}.clr", module_path));
+            if candidate_clr.exists() {
+                module_file = Some(candidate_clr);
+                break;
+            }
         }
+
+        let module_file = module_file.ok_or_else(|| {
+            format!(
+                "Module '{}' not found. Searched in: {}",
+                module_name,
+                source_dirs
+                    .iter()
+                    .map(|d| format!("{}/{}.clrs or {}/{}.clr", d, module_path, d, module_path))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
 
         // Read and parse the module
         let source = fs::read_to_string(&module_file)
@@ -799,7 +829,7 @@ fn load_and_compile_modules<'ctx>(
         // Extract and load transitive dependencies first
         let sub_modules = extract_required_modules(&exprs);
         if !sub_modules.is_empty() {
-            load_and_compile_modules(&sub_modules, codegen, loaded, project_root)?;
+            load_and_compile_modules(&sub_modules, codegen, loaded, project_root, source_dirs)?;
         }
 
         // Compile this module's expressions
@@ -1307,8 +1337,15 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     let mut loaded_modules = HashSet::new();
 
+    // Get source directories from manifest, default to ["src"] if not specified
+    let source_dirs: Vec<String> = if manifest.build.src.is_empty() {
+        vec!["src".to_string()]
+    } else {
+        manifest.build.src.clone()
+    };
+
     if !source_modules.is_empty() {
-        load_and_compile_modules(&source_modules, &mut codegen, &mut loaded_modules, &project_root)?;
+        load_and_compile_modules(&source_modules, &mut codegen, &mut loaded_modules, &project_root, &source_dirs)?;
     }
 
     // Update namespace context for entry file

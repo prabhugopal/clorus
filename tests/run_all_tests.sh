@@ -1,7 +1,11 @@
 #!/bin/bash
 # Clorus Comprehensive Test Suite Runner
 # Run this before any build to ensure all features work
-# Updated for feature-based test organization
+# Updated for reorganized test structure:
+#   - tests/language/ - Language feature tests (conditionals, loops, functions)
+#   - tests/stdlib/ - Standard library tests
+#   - tests/compiler/ - Compiler-specific tests
+#   - tests/integration/ - Integration and system tests
 
 set -e  # Exit on first failure
 
@@ -104,24 +108,18 @@ run_category() {
 # Clear previous failure log
 rm -f test_failures.log
 
-# Run tests by category - Feature-based organization
-echo -e "${BLUE}1. LANGUAGE FEATURES${NC}"
+# Run tests by category - Updated for new structure
+echo -e "${BLUE}1. LANGUAGE FEATURE TESTS${NC}"
+run_category "language"
 
-# Iterate through all feature directories
-if [ -d "$TEST_DIR/features" ]; then
-    for feature_dir in "$TEST_DIR/features"/*; do
-        if [ -d "$feature_dir" ]; then
-            feature_name=$(basename "$feature_dir")
-            run_category "features/$feature_name"
-        fi
-    done
-fi
-
-echo -e "\n${BLUE}2. INTEGRATION TESTS${NC}"
-run_category "integration"
+echo -e "\n${BLUE}2. STANDARD LIBRARY TESTS${NC}"
+run_category "stdlib"
 
 echo -e "\n${BLUE}3. COMPILER TESTS${NC}"
 run_category "compiler"
+
+echo -e "\n${BLUE}4. INTEGRATION TESTS${NC}"
+run_category "integration"
 
 # Summary
 echo ""

@@ -1,6 +1,7 @@
 [package]
-name = "test-transducers"
+name = "clorus-test-suite"
 version = "0.1.0"
 
 [build]
-entry = "test-string-bug-fix.clr"
+entry = "tests/test-all.clr"
+src = ["tests", "stdlib", "src"]  # Search tests/ first, then stdlib/, then src/
