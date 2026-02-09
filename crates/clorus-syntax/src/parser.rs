@@ -196,6 +196,7 @@ impl Parser {
                 "require" => return self.parse_require(),
                 "declare" => return self.parse_declare(),
                 "let" => return self.parse_let(),
+                "letfn" => return self.parse_letfn(),
                 "def" => return self.parse_def(),
                 "defn" => return self.parse_defn(),
                 "defmacro" => return self.parse_defmacro(),
@@ -994,6 +995,132 @@ impl Parser {
         };
 
         Ok(Expr::Let { bindings, body })
+    }
+
+    /// Parse letfn: (letfn [(f [x] ...) (g [y] ...)] body)
+    /// Creates local function bindings with mutual recursion support
+    fn parse_letfn(&mut self) -> Result<Expr, String> {
+        // Already saw 'letfn', consume it
+        if let Token::Symbol(s, _) = self.current_token() {
+            if s == "letfn" {
+                self.advance();
+            }
+        }
+
+        // Expect binding vector: [(f [x] ...) (g [y] ...)]
+        if !matches!(self.current_token(), Token::LBracket(_)) {
+            return Err("letfn requires a binding vector [...]".to_string());
+        }
+        self.advance(); // consume [
+
+        // Parse function bindings
+        let mut bindings = Vec::new();
+        while !matches!(self.current_token(), Token::RBracket(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed binding vector in letfn".to_string());
+            }
+
+            // Each binding should be a list: (name [params] body)
+            if !matches!(self.current_token(), Token::LParen(_)) {
+                return Err("letfn binding must be a list (name [params] body)".to_string());
+            }
+            self.advance(); // consume (
+
+            // Parse function name
+            let name = match self.current_token() {
+                Token::Symbol(s, _) => s.clone(),
+                _ => return Err("letfn binding must start with function name".to_string()),
+            };
+            self.advance();
+
+            // Parse parameter vector
+            if !matches!(self.current_token(), Token::LBracket(_)) {
+                return Err(format!("letfn function '{}' requires parameter vector", name));
+            }
+            self.advance(); // consume [
+
+            let mut params = Vec::new();
+            let mut rest_param = None;
+
+            while !matches!(self.current_token(), Token::RBracket(_)) {
+                if self.current_token() == &self.eof_token {
+                    return Err(format!("Unclosed parameter vector for function '{}'", name));
+                }
+
+                // Check for & (rest parameter)
+                if let Token::Symbol(s, _) = self.current_token() {
+                    if s == "&" {
+                        self.advance(); // consume &
+                        // Next should be rest parameter name
+                        match self.current_token() {
+                            Token::Symbol(rest_name, _) => {
+                                rest_param = Some(rest_name.clone());
+                                self.advance();
+                                break; // & must be last
+                            }
+                            _ => return Err(format!("Expected rest parameter name after & in function '{}'", name)),
+                        }
+                    }
+                }
+
+                // Parse parameter pattern
+                params.push(self.parse_pattern()?);
+            }
+
+            self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+
+            // Parse function body (rest of expressions until closing paren)
+            let mut body_exprs = Vec::new();
+            while !matches!(self.current_token(), Token::RParen(_)) {
+                if self.current_token() == &self.eof_token {
+                    return Err(format!("Unclosed function body for '{}'", name));
+                }
+                body_exprs.push(self.parse_expr()?);
+            }
+
+            self.expect(Token::RParen(Span::dummy()))?; // consume )
+
+            // Function body is the last expression (or implicit nil if empty)
+            let body = if body_exprs.is_empty() {
+                Box::new(Expr::Nil)
+            } else if body_exprs.len() == 1 {
+                Box::new(body_exprs.into_iter().next().unwrap())
+            } else {
+                // Multiple expressions in body - wrap in an implicit do
+                Box::new(Expr::Do {
+                    exprs: body_exprs
+                })
+            };
+
+            bindings.push((name, params, rest_param, body));
+        }
+
+        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+
+        // Parse letfn body (rest of expressions until closing paren)
+        let mut body_exprs = Vec::new();
+        while !matches!(self.current_token(), Token::RParen(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed letfn form".to_string());
+            }
+            body_exprs.push(self.parse_expr()?);
+        }
+
+        self.expect(Token::RParen(Span::dummy()))?;
+
+        // Body is the last expression (or implicit nil if empty)
+        let body = if body_exprs.is_empty() {
+            Box::new(Expr::Nil)
+        } else if body_exprs.len() == 1 {
+            Box::new(body_exprs.into_iter().next().unwrap())
+        } else {
+            // Multiple expressions in body - wrap in an implicit do
+            Box::new(Expr::Do {
+                exprs: body_exprs
+            })
+        };
+
+        Ok(Expr::Letfn { bindings, body })
     }
 
     /// Parse a destructuring pattern
@@ -1914,7 +2041,7 @@ impl Parser {
             // Atoms don't contain parameters
             Expr::Long(_) | Expr::Double(_) | Expr::String(_) | Expr::Keyword(_)
             | Expr::Bool(_) | Expr::Nil | Expr::Ns { .. }
-            | Expr::Require { .. } | Expr::Use { .. } => {}
+            | Expr::Require { .. } | Expr::Use { .. } | Expr::Letfn { .. } => {}
         }
 
         Ok(params)

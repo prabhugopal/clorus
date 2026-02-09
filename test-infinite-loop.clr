@@ -1,0 +1,13 @@
+;; Test for potential infinite loop during compilation
+
+(ns test-infinite-loop)
+
+;; This should work fine - loop/recur with proper termination
+(defn countdown [n]
+  (loop [x n]
+    (if (<= x 0)
+      "done"
+      (recur (- x 1)))))
+
+(defn -main []
+  (println (countdown 5)))

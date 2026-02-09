@@ -44,6 +44,15 @@ pub enum Expr {
         body: Box<Expr>,
     },
 
+    /// Letfn expression: (letfn [(f [x] ...) (g [y] ...)] body)
+    /// Defines local functions with mutual recursion support
+    /// All functions can reference each other in their bodies
+    /// bindings are tuples of (name, params, rest_param, body)
+    Letfn {
+        bindings: Vec<(String, Vec<Pattern>, Option<String>, Box<Expr>)>,
+        body: Box<Expr>,
+    },
+
     /// Global definition: (def x 10) or (def ^:dynamic *x* 10)
     /// Supports metadata: ^:dynamic, ^:private, ^{:doc "..."}, etc.
     Def {

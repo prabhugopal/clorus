@@ -513,6 +513,20 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
             }
         }
 
+        Expr::Letfn { bindings, body } => {
+            let expanded_bindings: Vec<_> = bindings
+                .iter()
+                .map(|(name, params, rest_param, fn_body)| {
+                    (name.clone(), params.clone(), rest_param.clone(),
+                     Box::new(expand_macros_with_registry(fn_body, registry)))
+                })
+                .collect();
+            Expr::Letfn {
+                bindings: expanded_bindings,
+                body: Box::new(expand_macros_with_registry(body, registry)),
+            }
+        }
+
         Expr::Def { name, value, metadata } => Expr::Def {
             name: name.clone(),
             value: Box::new(expand_macros_with_registry(value, registry)),
@@ -871,6 +885,16 @@ fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr
             Expr::Let {
                 bindings: bindings.iter().map(|(name, value)| {
                     (name.clone(), Box::new(substitute_params(value, substitutions)))
+                }).collect(),
+                body: Box::new(substitute_params(body, substitutions))
+            }
+        }
+
+        Expr::Letfn { bindings, body } => {
+            Expr::Letfn {
+                bindings: bindings.iter().map(|(name, params, rest_param, fn_body)| {
+                    (name.clone(), params.clone(), rest_param.clone(),
+                     Box::new(substitute_params(fn_body, substitutions)))
                 }).collect(),
                 body: Box::new(substitute_params(body, substitutions))
             }

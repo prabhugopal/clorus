@@ -1,6 +1,6 @@
 [package]
-name = "test-set"
+name = "letfn-test"
 version = "0.1.0"
 
 [build]
-entry = "test-set.clr"
+entry = "tests/features/control-flow/letfn-test.clr"

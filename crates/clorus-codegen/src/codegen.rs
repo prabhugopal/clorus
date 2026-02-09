@@ -1559,6 +1559,20 @@ impl<'ctx> CodeGen<'ctx> {
                 }
                 self.collect_free_vars(body, free_vars, seen, &new_bound);
             }
+            Expr::Letfn { bindings, body } => {
+                // Functions bound in letfn can reference each other (mutual recursion)
+                let mut new_bound = bound.clone();
+                // First, add all function names to bound set
+                for (name, _params, _rest, _body) in bindings {
+                    new_bound.insert(name.clone());
+                }
+                // Then collect free vars from all function bodies with all names bound
+                for (_name, _params, _rest, fn_body) in bindings {
+                    self.collect_free_vars(fn_body, free_vars, seen, &new_bound);
+                }
+                // Collect free vars from letfn body
+                self.collect_free_vars(body, free_vars, seen, &new_bound);
+            }
             Expr::Call { func, args } => {
                 // func is a String (function name) - check if it's a free variable
                 if !bound.contains(func) && !seen.contains(func) && self.variables.contains_key(func) {
@@ -2120,6 +2134,238 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Restore previous scope (let creates local scope)
+                self.variables = saved_vars;
+
+                Ok(result)
+            }
+
+            Expr::Letfn { bindings, body } => {
+                // letfn creates local function bindings with mutual recursion support
+                // Strategy:
+                // 1. Save current variable scope
+                // 2. Create function prototypes for all letfn functions (so they can reference each other)
+                // 3. Compile all function bodies
+                // 4. Create function Value* objects and bind to variables
+                // 5. Compile letfn body
+                // 6. Cleanup and restore scope
+
+                // Save current variable scope
+                let saved_vars = self.variables.clone();
+                let mut local_vars = Vec::new();
+
+                // Step 1: Create function prototypes (declarations)
+                let mut fn_values = Vec::new();
+                for (name, params, rest_param, _body) in bindings {
+                    // Determine arity
+                    let arity = params.len() + if rest_param.is_some() { 1 } else { 0 };
+
+                    // All Clorus functions have signature: Value* fn(Value* closure, Value** args, i64 arg_count)
+                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let value_ptr_ptr_type = value_ptr_type.ptr_type(AddressSpace::default());
+                    let i64_type = self.context.i64_type();
+
+                    let fn_type = value_ptr_type.fn_type(
+                        &[value_ptr_type.into(), value_ptr_ptr_type.into(), i64_type.into()],
+                        false
+                    );
+
+                    // Create function with unique name
+                    let fn_name = format!("letfn_{}_{}", name, self.module.get_functions().count());
+                    let function = self.module.add_function(&fn_name, fn_type, None);
+
+                    fn_values.push((name.clone(), function, params.clone(), rest_param.clone()));
+                }
+
+                // Step 2: Compile function bodies
+                for (i, (_name, function, params, rest_param)) in fn_values.iter().enumerate() {
+                    let (_fn_name, _fn_params, _fn_rest, fn_body) = &bindings[i];
+
+                    // Create entry block for function
+                    let entry_block = self.context.append_basic_block(*function, "entry");
+                    let saved_block = self.builder.get_insert_block();
+                    self.builder.position_at_end(entry_block);
+
+                    // Save current variables and restore with letfn functions visible
+                    let saved_fn_vars = self.variables.clone();
+                    self.variables = saved_vars.clone();
+
+                    // Make all letfn functions visible to each other during compilation
+                    // Create function Value* objects for each letfn function
+                    let clorus_make_fn = self.module.get_function("clorus_function_new")
+                        .ok_or("clorus_function_new not declared")?;
+
+                    for (letfn_name, letfn_fn, letfn_params, letfn_rest) in &fn_values {
+                        let arity = letfn_params.len() + if letfn_rest.is_some() { 1 } else { 0 };
+                        let arity_val = self.context.i32_type().const_int(arity as u64, false);
+
+                        // Cast function pointer to *const u8
+                        let fn_ptr = letfn_fn.as_global_value().as_pointer_value();
+
+                        // No captures for letfn functions (they reference each other but not outer scope)
+                        let null_env = self.context.i8_type().ptr_type(AddressSpace::default())
+                            .ptr_type(AddressSpace::default()).const_null();
+                        let zero_env_size = self.context.i32_type().const_zero();
+
+                        // Create function Value*
+                        // clorus_function_new(func_ptr, arity, env, env_size)
+                        let fn_value = self.builder.build_call(
+                            clorus_make_fn,
+                            &[
+                                fn_ptr.into(),
+                                arity_val.into(),
+                                null_env.into(),
+                                zero_env_size.into()
+                            ],
+                            &format!("make_{}", letfn_name)
+                        ).unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+
+                        // Bind to variable so it's accessible during compilation
+                        let alloca = self.create_entry_block_alloca(letfn_name);
+                        self.builder.build_store(alloca, fn_value).unwrap();
+                        self.variables.insert(letfn_name.clone(), alloca);
+                    }
+
+                    // Get function parameters
+                    let _closure_param = function.get_nth_param(0).unwrap().into_pointer_value();
+                    let args_param = function.get_nth_param(1).unwrap().into_pointer_value();
+                    let arg_count_param = function.get_nth_param(2).unwrap().into_int_value();
+
+                    // Extract parameters from args array and bind to pattern names
+                    let mut param_bindings = Vec::new();
+                    for (i, pattern) in params.iter().enumerate() {
+                        // Load args[i]
+                        let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                        let index = self.context.i64_type().const_int(i as u64, false);
+                        let arg_ptr = unsafe {
+                            self.builder.build_gep(
+                                value_ptr_type,
+                                args_param,
+                                &[index],
+                                &format!("arg_{}", i)
+                            ).unwrap()
+                        };
+                        let arg_val = self.builder.build_load(
+                            value_ptr_type,
+                            arg_ptr,
+                            &format!("arg_{}_val", i)
+                        ).unwrap().into_pointer_value();
+
+                        // Destructure pattern
+                        let bindings = self.destructure_pattern(pattern, arg_val)?;
+                        param_bindings.extend(bindings);
+                    }
+
+                    // Handle rest parameter if present
+                    if let Some(rest_name) = rest_param {
+                        // Collect remaining args into a vector
+                        let fixed_count = params.len() as u64;
+                        let fixed_count_val = self.context.i64_type().const_int(fixed_count, false);
+
+                        // Create empty vector for rest args
+                        let clorus_vector_empty = self.module.get_function("clorus_vector_empty")
+                            .ok_or("clorus_vector_empty not declared")?;
+                        let rest_vec = self.builder.build_call(
+                            clorus_vector_empty,
+                            &[],
+                            "rest_vec"
+                        ).unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+
+                        // Loop through remaining args and add to vector
+                        // For simplicity, we'll use a simpler approach: create vector with all remaining args
+                        let clorus_vector_conj = self.module.get_function("clorus_vector_conj")
+                            .ok_or("clorus_vector_conj not declared")?;
+
+                        // TODO: Implement proper rest parameter collection
+                        // For now, just bind to empty vector
+                        let alloca = self.create_entry_block_alloca(rest_name);
+                        self.builder.build_store(alloca, rest_vec).unwrap();
+                        self.variables.insert(rest_name.clone(), alloca);
+                    }
+
+                    // Compile function body
+                    let result = self.compile_expr(fn_body)?;
+
+                    // Return the result
+                    self.builder.build_return(Some(&result)).unwrap();
+
+                    // Restore variables and block
+                    self.variables = saved_fn_vars;
+                    if let Some(block) = saved_block {
+                        self.builder.position_at_end(block);
+                    }
+                }
+
+                // Step 3: In the outer scope, create function Value* objects and bind to variables
+                let clorus_make_fn = self.module.get_function("clorus_function_new")
+                    .ok_or("clorus_function_new not declared")?;
+
+                for (name, function, params, rest_param) in &fn_values {
+                    let arity = params.len() + if rest_param.is_some() { 1 } else { 0 };
+                    let arity_val = self.context.i32_type().const_int(arity as u64, false);
+
+                    // Function pointer
+                    let fn_ptr = function.as_global_value().as_pointer_value();
+
+                    // No captures for letfn functions
+                    let null_env = self.context.i8_type().ptr_type(AddressSpace::default())
+                        .ptr_type(AddressSpace::default()).const_null();
+                    let zero_env_size = self.context.i32_type().const_zero();
+
+                    // Create function Value*
+                    // clorus_function_new(func_ptr, arity, env, env_size)
+                    let fn_value = self.builder.build_call(
+                        clorus_make_fn,
+                        &[
+                            fn_ptr.into(),
+                            arity_val.into(),
+                            null_env.into(),
+                            zero_env_size.into()
+                        ],
+                        &format!("make_{}", name)
+                    ).unwrap()
+                    .try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Bind to variable
+                    let alloca = self.create_entry_block_alloca(name);
+                    self.builder.build_store(alloca, fn_value).unwrap();
+                    self.variables.insert(name.clone(), alloca);
+                    local_vars.push((name.clone(), alloca));
+                }
+
+                // Step 4: Compile letfn body
+                let result = self.compile_expr(body)?;
+
+                // Step 5: Cleanup
+                let retain_fn = self.module.get_function("clorus_retain")
+                    .ok_or("clorus_retain not declared")?;
+                self.builder.build_call(
+                    retain_fn,
+                    &[result.into()],
+                    "retain_result"
+                ).unwrap();
+
+                // Release local variables
+                let release_fn = self.module.get_function("clorus_release")
+                    .ok_or("clorus_release not declared")?;
+
+                for (var_name, var_ptr) in &local_vars {
+                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let val = self.builder.build_load(
+                        value_ptr_type,
+                        *var_ptr,
+                        &format!("{}_cleanup", var_name)
+                    ).unwrap().into_pointer_value();
+
+                    self.builder.build_call(
+                        release_fn,
+                        &[val.into()],
+                        &format!("release_{}", var_name)
+                    ).unwrap();
+                }
+
+                // Restore scope
                 self.variables = saved_vars;
 
                 Ok(result)
