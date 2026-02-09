@@ -1,0 +1,28 @@
+;; Test case for string use-after-free bug
+;; This should NOT crash after the fix
+
+(defn test-multiple-atoms []
+  (let [a1 (atom "")
+        a2 (atom "")
+        a3 (atom "")]
+    (loop [i 0]
+      (if (>= i 100)
+        (do
+          (println (str "a1 count: " (count @a1)))
+          (println (str "a2 count: " (count @a2)))
+          (println (str "a3 count: " (count @a3)))
+          (and (= (count @a1) 100)
+               (= (count @a2) 100)
+               (= (count @a3) 100)))
+        (do
+          (reset! a1 (str @a1 "x"))
+          (reset! a2 (str @a2 "y"))
+          (reset! a3 (str @a3 "z"))
+          (recur (+ i 1)))))))
+
+(defn -main []
+  (do
+    (println "Testing string use-after-free fix...")
+    (if (test-multiple-atoms)
+      (println "✅ String bug FIXED!")
+      (println "❌ String bug still present"))))

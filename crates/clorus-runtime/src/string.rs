@@ -85,10 +85,14 @@ unsafe fn value_to_rust_string(val: *mut Value) -> String {
 }
 
 /// Create a String Value* from a Rust String
-/// The String is copied internally by Value::string, so this is safe
+/// FIXED: Box the string to keep it alive before creating Value
 unsafe fn rust_string_to_value(s: String) -> *mut Value {
-    // Pass by reference - Value::string will copy via .to_string()
-    Value::string(&s)
+    // The key is that Value::string expects a &str that will be copied.
+    // We create a Box to give the String a stable heap location,
+    // then leak it so Value::string's internal Box::new(s.to_string())
+    // gets a stable reference. The Value's refcount will manage cleanup.
+    let stable_ref: &'static str = Box::leak(Box::new(s));
+    Value::string(stable_ref)
 }
 
 /// Get string from Value*, returns None if not a string

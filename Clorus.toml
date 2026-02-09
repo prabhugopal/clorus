@@ -3,4 +3,4 @@ name = "test-transducers"
 version = "0.1.0"
 
 [build]
-entry = "test-one-arity.clr"
+entry = "test-string-bug-fix.clr"
