@@ -1,0 +1,12 @@
+;; Test with ONE arity only
+
+(defn completing-one
+  ([f]
+   (fn
+     ([result] result)
+     ([result input] (f result input)))))
+
+(defn -main []
+  (do
+    (println "Testing one-arity completing...")
+    (println "Done!")))

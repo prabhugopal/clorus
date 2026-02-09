@@ -1,0 +1,12 @@
+;; Test JUST the problematic pattern from transducers
+
+(defn completing
+  ([f]
+   (fn
+     ([result] result)
+     ([result input] (f result input)))))
+
+(defn -main []
+  (do
+    (println "Testing completing...")
+    (println "Done!")))

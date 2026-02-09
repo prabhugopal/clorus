@@ -1,0 +1,12 @@
+;; Minimal test for nested multi-arity closure
+
+(defn test-nested
+  ([f]
+   (f 10)))
+
+(defn -main []
+  (do
+    (println "Testing nested call...")
+    (def result (test-nested (fn [x] (+ x 5))))
+    (println (str "Result: " result))
+    (println "Done!")))
