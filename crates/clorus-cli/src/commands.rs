@@ -73,6 +73,7 @@ fn load_module_recursive(
     namespace: &str,
     loaded_modules: &mut HashSet<String>,
     base_path: &Path,
+    clip_namespaces: &HashSet<String>,
 ) -> Result<Vec<Expr>, String> {
     // Skip if already loaded
     if loaded_modules.contains(namespace) {
@@ -103,7 +104,14 @@ fn load_module_recursive(
         // Check top-level Expr::Require
         if let Expr::Require { specs } = expr {
             for spec in specs {
-                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path)?;
+                // Skip if from .clip package
+                let is_clip = clip_namespaces.iter().any(|prefix| {
+                    spec.module.starts_with(prefix)
+                });
+                if is_clip {
+                    continue;
+                }
+                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces)?;
                 all_exprs.extend(dep_exprs);
             }
         }
@@ -111,7 +119,14 @@ fn load_module_recursive(
         // Check Expr::Ns for embedded :require clauses
         if let Expr::Ns { requires, .. } = expr {
             for spec in requires {
-                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path)?;
+                // Skip if from .clip package
+                let is_clip = clip_namespaces.iter().any(|prefix| {
+                    spec.module.starts_with(prefix)
+                });
+                if is_clip {
+                    continue;
+                }
+                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces)?;
                 all_exprs.extend(dep_exprs);
             }
         }
@@ -175,6 +190,14 @@ pub fn check() -> Result<(), String> {
 }
 
 pub fn build() -> Result<(), String> {
+    build_internal(false)
+}
+
+pub fn build_lib() -> Result<(), String> {
+    build_internal(true)
+}
+
+fn build_internal(lib_mode: bool) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
     let entry_path = Path::new(&manifest.build.entry);
 
@@ -270,19 +293,35 @@ pub fn build() -> Result<(), String> {
     let entry_exprs = clorus::parse_and_expand(&source)
         .map_err(|e| format!("Parse error in {}: {}", manifest.build.entry, e))?;
 
-    // Load all required modules recursively
+    // Load all required modules recursively (skip .clip namespaces)
     let base_path = std::env::current_dir()
         .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
     let mut loaded_modules = HashSet::new();
     let mut module_exprs = Vec::new();
 
+    // Build set of .clip namespace prefixes for fast lookup
+    let mut clip_namespace_prefixes: HashSet<String> = HashSet::new();
+    for package in &clip_packages {
+        clip_namespace_prefixes.insert(package.name.clone());
+    }
+
     for expr in &entry_exprs {
         // Check top-level Expr::Require
         if let Expr::Require { specs } = expr {
             for spec in specs {
+                // Check if this module is from a .clip package
+                let is_clip = clip_namespace_prefixes.iter().any(|prefix| {
+                    spec.module.starts_with(prefix)
+                });
+
+                if is_clip {
+                    println!("   Skipping module (from .clip): {}", spec.module);
+                    continue;
+                }
+
                 println!("   Loading module: {}", spec.module);
-                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path)?;
+                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes)?;
                 module_exprs.extend(dep_exprs);
             }
         }
@@ -290,8 +329,18 @@ pub fn build() -> Result<(), String> {
         // Check Expr::Ns for embedded :require clauses
         if let Expr::Ns { requires, .. } = expr {
             for spec in requires {
+                // Check if this module is from a .clip package
+                let is_clip = clip_namespace_prefixes.iter().any(|prefix| {
+                    spec.module.starts_with(prefix)
+                });
+
+                if is_clip {
+                    println!("   Skipping module (from .clip): {}", spec.module);
+                    continue;
+                }
+
                 println!("   Loading module: {}", spec.module);
-                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path)?;
+                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes)?;
                 module_exprs.extend(dep_exprs);
             }
         }
@@ -318,6 +367,18 @@ pub fn build() -> Result<(), String> {
     let context = Context::create();
     let mut codegen = CodeGen::new(&context, &manifest.package.name);
 
+    // Register .clip library exports with CodeGen (Phase 4)
+    for package in &clip_packages {
+        println!("   [DEBUG] Registering .clip package: {} v{}", package.name, package.version);
+
+        // Mark this namespace as coming from a .clip package
+        // This prevents the compiler from looking for source files
+        codegen.register_clip_namespace(&package.name);
+
+        // TODO: Parse exports from package.exports and register symbols
+        // For now, we just mark the namespace as external
+    }
+
     // Register Rust FFI libraries with CodeGen
     for lib in &rust_ffi.libraries {
         use clorus::codegen::{RustLibrary, RustFunction, RustParam};
@@ -342,15 +403,22 @@ pub fn build() -> Result<(), String> {
     // Compile each expression into a function
     let mut function_names = Vec::new();
     for (i, expr) in all_exprs.iter().enumerate() {
-        let fn_name = format!("expr_{}", i);
+        // For libraries, prefix expr_ names with package name to avoid conflicts
+        let fn_name = if lib_mode {
+            format!("{}__expr_{}", manifest.package.name.replace('-', "_"), i)
+        } else {
+            format!("expr_{}", i)
+        };
         codegen.wrap_in_function(expr, &fn_name)
             .map_err(|e| format!("Compile error: {}", e))?;
         function_names.push(fn_name);
     }
 
-    // Create a C-compatible main function that calls our expressions
-    let main_fn_type = context.i32_type().fn_type(&[], false);
-    let main_fn = codegen.get_module().add_function("main", main_fn_type, None);
+    // Only create main() for executables, not for libraries
+    if !lib_mode {
+        // Create a C-compatible main function that calls our expressions
+        let main_fn_type = context.i32_type().fn_type(&[], false);
+        let main_fn = codegen.get_module().add_function("main", main_fn_type, None);
 
     let entry_block = context.append_basic_block(main_fn, "entry");
     let builder = codegen.get_builder();
@@ -442,6 +510,7 @@ pub fn build() -> Result<(), String> {
     // Return 0 (success)
     let zero = context.i32_type().const_int(0, false);
     builder.build_return(Some(&zero)).unwrap();
+    } // end if !lib_mode
 
     // Create target directory if it doesn't exist
     let target_dir = Path::new("target");
@@ -476,6 +545,12 @@ pub fn build() -> Result<(), String> {
         .map_err(|e| format!("Failed to write object file: {}", e))?;
 
     println!("    Generated object file: {}", obj_path.display());
+
+    // Skip linking for library mode - just return the object file
+    if lib_mode {
+        println!("    Finished lib build in 0.00s");
+        return Ok(());
+    }
 
     // Link the object file into an executable
     let exe_path = target_dir.join(&manifest.package.name);

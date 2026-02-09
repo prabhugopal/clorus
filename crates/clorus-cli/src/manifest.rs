@@ -30,17 +30,73 @@ pub struct Link {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
 pub enum ClorusDependency {
-    Path { path: String },
+    /// Git repository with optional branch/tag/rev
+    Git {
+        git: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tag: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rev: Option<String>,
+    },
+    /// Local path (file system or relative path)
+    Path {
+        path: String,
+    },
+    /// Simple version string (from registry)
     Simple(String),
 }
 
 impl ClorusDependency {
-    pub fn get_path(&self) -> &str {
+    /// Get the local path if this is a path dependency
+    pub fn get_path(&self) -> Option<&str> {
         match self {
-            ClorusDependency::Path { path } => path,
-            ClorusDependency::Simple(path) => path,
+            ClorusDependency::Path { path } => Some(path),
+            _ => None,
         }
     }
+
+    /// Get the git URL if this is a git dependency
+    pub fn get_git(&self) -> Option<&str> {
+        match self {
+            ClorusDependency::Git { git, .. } => Some(git),
+            _ => None,
+        }
+    }
+
+    /// Get the version string if this is a registry dependency
+    pub fn get_version(&self) -> Option<&str> {
+        match self {
+            ClorusDependency::Simple(version) => Some(version),
+            _ => None,
+        }
+    }
+
+    /// Get git reference (branch, tag, or rev)
+    pub fn get_git_ref(&self) -> Option<GitRef> {
+        match self {
+            ClorusDependency::Git { branch, tag, rev, .. } => {
+                if let Some(b) = branch {
+                    Some(GitRef::Branch(b.clone()))
+                } else if let Some(t) = tag {
+                    Some(GitRef::Tag(t.clone()))
+                } else if let Some(r) = rev {
+                    Some(GitRef::Rev(r.clone()))
+                } else {
+                    Some(GitRef::Branch("main".to_string()))
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum GitRef {
+    Branch(String),
+    Tag(String),
+    Rev(String),
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

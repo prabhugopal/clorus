@@ -67,6 +67,8 @@ pub struct CodeGen<'ctx> {
     loop_context: Option<LoopContext<'ctx>>,
     /// Forward declared functions (from declare form) - allows mutual recursion
     forward_declarations: HashSet<String>,
+    /// Namespaces provided by .clip packages (Phase 4)
+    clip_namespaces: HashSet<String>,
     /// Compilation start time for timeout detection
     compile_start: Instant,
     /// Compilation timeout duration
@@ -92,6 +94,7 @@ impl<'ctx> CodeGen<'ctx> {
             lambda_counter: 0,
             loop_context: None,
             forward_declarations: HashSet::new(),
+            clip_namespaces: HashSet::new(),
             compile_start: Instant::now(),
             compile_timeout: Duration::from_secs(60), // 60 second default timeout
             expr_count: 0,
@@ -152,6 +155,18 @@ impl<'ctx> CodeGen<'ctx> {
     /// Register a Rust FFI library so its functions can be used
     pub fn register_rust_library(&mut self, lib: RustLibrary) {
         self.rust_libraries.insert(lib.name.clone(), lib);
+    }
+
+    /// Register a namespace as coming from a .clip package (Phase 4)
+    /// This prevents the compiler from looking for source files for this namespace
+    pub fn register_clip_namespace(&mut self, namespace: &str) {
+        self.clip_namespaces.insert(namespace.to_string());
+    }
+
+    /// Check if a namespace is provided by a .clip package
+    pub fn is_clip_namespace(&self, namespace: &str) -> bool {
+        // Check if namespace starts with any registered .clip package name
+        self.clip_namespaces.iter().any(|clip_ns| namespace.starts_with(clip_ns))
     }
 
     /// Declare all functions from a Rust FFI library based on metadata
@@ -3834,6 +3849,72 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                     if func.starts_with("async-demo/") {
                         return self.compile_async_demo_call(func, args);
+                    }
+
+                    // Check if this function is from a .clip package (Phase 4)
+                    if let Some(namespace_or_alias) = func.split('/').next() {
+                        let func_name = func.split('/').nth(1);
+
+                        // Resolve alias to actual namespace
+                        let resolved_namespace = self.namespace.aliases.get(namespace_or_alias)
+                            .map(|s| s.as_str())
+                            .unwrap_or(namespace_or_alias);
+
+                        // Check if this namespace is from a .clip package
+                        if self.is_clip_namespace(resolved_namespace) {
+                            let i8_ptr_type = self.context.i8_type().ptr_type(inkwell::AddressSpace::default());
+
+                            // Auto-declare function from .clip package
+                            // Use FULL resolved namespace for mangling
+                            let full_func_name = if let Some(fname) = func_name {
+                                format!("{}/{}", resolved_namespace, fname)
+                            } else {
+                                func.to_string()
+                            };
+
+                            let mangled_name = format!("clorus_{}",
+                                full_func_name.replace('/', "_")
+                                    .replace('.', "_")
+                                    .replace('-', "_"));
+
+                            // Declare if not already declared
+                            if self.module.get_function(&mangled_name).is_none() {
+                                // All Clorus functions: (Value*, ..., Value*) -> Value*
+                                // Plus environment parameter as last arg
+                                let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> =
+                                    std::iter::repeat(i8_ptr_type.into())
+                                        .take(args.len() + 1) // +1 for environment
+                                        .collect();
+
+                                let fn_type = i8_ptr_type.fn_type(&param_types, false);
+                                self.module.add_function(&mangled_name, fn_type, None);
+
+                                eprintln!("   [DEBUG] Auto-declared .clip function: {} -> {}",
+                                    func, mangled_name);
+                            }
+
+                            // Now call it like a normal Clorus function
+                            if let Some(function) = self.module.get_function(&mangled_name) {
+                                let mut arg_values: Vec<inkwell::values::BasicMetadataValueEnum> = Vec::new();
+                                for arg in args {
+                                    let val = self.compile_expr(arg)?;
+                                    arg_values.push(val.into());
+                                }
+
+                                // Add NULL environment (no captured variables for .clip functions)
+                                let null_env = i8_ptr_type.const_null();
+                                arg_values.push(null_env.into());
+
+                                let call_result = self.builder
+                                    .build_call(function, &arg_values, "call")
+                                    .unwrap();
+
+                                return Ok(call_result.try_as_basic_value()
+                                    .left()
+                                    .unwrap()
+                                    .into_pointer_value());
+                            }
+                        }
                     }
 
                     return Err(format!("Unknown function: {}. Did you (use rust.{})?", func, func.split('/').next().unwrap()));

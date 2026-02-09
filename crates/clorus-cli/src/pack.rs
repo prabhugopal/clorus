@@ -130,12 +130,14 @@ pub fn load_clip_dependencies(manifest: &Manifest) -> Result<Vec<ClipPackage>, S
     let mut packages = Vec::new();
 
     for (name, dep) in &manifest.dependencies {
-        let path = dep.get_path();
-        if path.ends_with(".clip") {
-            println!("   📦 Loading dependency: {} from {}", name, path);
-            let package = extract_clip(path)?;
-            packages.push(package);
+        if let Some(path) = dep.get_path() {
+            if path.ends_with(".clip") {
+                println!("   📦 Loading dependency: {} from {}", name, path);
+                let package = extract_clip(path)?;
+                packages.push(package);
+            }
         }
+        // TODO: Handle Git and Simple (registry) dependencies
     }
 
     Ok(packages)
@@ -160,9 +162,9 @@ pub fn pack(output: Option<String>) -> Result<(), String> {
     println!("   📝 Package: {} v{}", package_name, package_version);
     println!("   📄 Output: {}", output_filename);
 
-    // 3. Build the project first to get compiled artifacts
+    // 3. Build the project first to get compiled artifacts (in library mode)
     println!("   🔨 Building project...");
-    crate::commands::build()?;
+    crate::commands::build_lib()?;
 
     // 4. Create temporary directory for .clip contents
     let temp_dir = PathBuf::from(format!(".clip-build-{}", package_name));
@@ -234,21 +236,37 @@ entry = "{}"
 
 /// Copy compiled artifacts (.o and .bc files) to temp directory
 fn copy_artifacts(package_name: &str, temp_dir: &Path) -> Result<(), String> {
-    // Look for compiled .o file in output directory
+    // Look for compiled .o file in target directory
+    let target_output_path = PathBuf::from("target").join(format!("{}.o", package_name));
     let output_path = Path::new("output.o");
 
-    if output_path.exists() {
-        let dest_path = temp_dir.join("lib").join(format!("{}.o", package_name));
-        fs::copy(output_path, &dest_path)
-            .map_err(|e| format!("Failed to copy .o file: {}", e))?;
-        println!("      ✓ Packaged {}.o", package_name);
+    let source_path = if target_output_path.exists() {
+        target_output_path
+    } else if output_path.exists() {
+        output_path.to_path_buf()
     } else {
-        return Err("No compiled output.o file found. Run 'clorus build' first.".to_string());
-    }
+        return Err(format!(
+            "No compiled object file found. Expected {} or output.o\n\
+             Run 'clorus build' first.",
+            target_output_path.display()
+        ));
+    };
+
+    let dest_path = temp_dir.join("lib").join(format!("{}.o", package_name));
+    fs::copy(&source_path, &dest_path)
+        .map_err(|e| format!("Failed to copy .o file: {}", e))?;
+    println!("      ✓ Packaged {}.o", package_name);
 
     // Look for .bc (bitcode) file if it exists
+    let target_bc_path = PathBuf::from("target").join(format!("{}.bc", package_name));
     let bc_path = Path::new("output.bc");
-    if bc_path.exists() {
+
+    if target_bc_path.exists() {
+        let dest_path = temp_dir.join("lib").join(format!("{}.bc", package_name));
+        fs::copy(&target_bc_path, &dest_path)
+            .map_err(|e| format!("Failed to copy .bc file: {}", e))?;
+        println!("      ✓ Packaged {}.bc (portable bitcode)", package_name);
+    } else if bc_path.exists() {
         let dest_path = temp_dir.join("lib").join(format!("{}.bc", package_name));
         fs::copy(bc_path, &dest_path)
             .map_err(|e| format!("Failed to copy .bc file: {}", e))?;
