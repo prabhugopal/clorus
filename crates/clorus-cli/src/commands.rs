@@ -910,7 +910,61 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
         codegen.register_rust_library(rust_lib);
     }
 
-    // Load and compile required modules first
+    // Compile stdlib expressions FIRST so they're available to modules
+    // We need to track how many stdlib expressions there are so modules can use them
+    let stdlib_expr_count = if stdlib_path.exists() {
+        if let Ok(stdlib_source) = fs::read_to_string(stdlib_path) {
+            if let Ok(stdlib_exprs) = clorus::parse_and_expand(&stdlib_source) {
+                stdlib_exprs.len()
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    if debug {
+        println!("   [DEBUG] Compiling {} stdlib expressions before modules", stdlib_expr_count);
+    }
+
+    // Compile stdlib expressions into CodeGen so modules can use them
+    // Use "user" namespace for stdlib (no mangling)
+    use clorus_codegen::namespace_context::NamespaceContext;
+    use std::collections::HashMap;
+    let stdlib_ns = NamespaceContext {
+        current: "user".to_string(),
+        aliases: HashMap::new(),
+        imports: HashMap::new(),
+    };
+    codegen.set_namespace(stdlib_ns);
+
+    for (i, expr) in all_exprs.iter().take(stdlib_expr_count).enumerate() {
+        // Skip namespace declarations
+        if matches!(expr, Expr::Ns { .. }) {
+            continue;
+        }
+
+        // Skip declare statements
+        if let Expr::Declare { names } = expr {
+            for name in names {
+                codegen.add_forward_declaration(name);
+            }
+            continue;
+        }
+
+        let fn_name = format!("stdlib_init_{}", i);
+        codegen.wrap_in_function(expr, &fn_name)
+            .map_err(|e| format!("Compile error in stdlib: {}", e))?;
+    }
+
+    if debug {
+        println!("   [DEBUG] Stdlib expressions compiled successfully");
+    }
+
+    // Load and compile required modules (they can now use stdlib functions)
     let project_root = std::env::current_dir()
         .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
@@ -922,7 +976,6 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     }
 
     // Update namespace context for entry file
-    use clorus_codegen::namespace_context::NamespaceContext;
     for expr in &all_exprs {
         if let Expr::Ns { name, requires, rust_imports } = expr {
             // Validate that namespace matches entry file path (like Clojure)

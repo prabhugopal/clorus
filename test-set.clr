@@ -1,0 +1,36 @@
+;; Comprehensive test for clorus.set
+
+(ns test-set
+  (:require [clorus.set :as s]))
+
+(defn -main []
+  (do
+    ;; Test union
+    (println "Testing union...")
+    (def a #{1 2 3})
+    (def b #{3 4 5})
+    (def u (s/union a b))
+    (println u)
+
+    ;; Test intersection
+    (println "Testing intersection...")
+    (def i (s/intersection a b))
+    (println i)
+
+    ;; Test difference
+    (println "Testing difference...")
+    (def d (s/difference a b))
+    (println d)
+
+    ;; Test subset?
+    (println "Testing subset?...")
+    (def c #{1 2})
+    (println (s/subset? c a))
+    (println (s/subset? a c))
+
+    ;; Test superset?
+    (println "Testing superset?...")
+    (println (s/superset? a c))
+    (println (s/superset? c a))
+
+    (println "All tests completed!")))

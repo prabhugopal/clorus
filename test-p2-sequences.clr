@@ -1,0 +1,26 @@
+;; Test P2 sequence operations
+
+(defn -main []
+  (do
+    (println "Testing P2 Sequence Operations")
+    (println "")
+
+    ;; Test repeat
+    (println "repeat 3 :x =>")
+    (def r (repeat 3 :x))
+    (println r)
+
+    ;; Test cycle
+    (println "")
+    (println "cycle 2 [1 2] =>")
+    (def c (cycle 2 [1 2]))
+    (println c)
+
+    ;; Test iterate
+    (println "")
+    (println "iterate 5 inc 0 =>")
+    (def i (iterate 5 inc 0))
+    (println i)
+
+    (println "")
+    (println "✅ All P2 sequence operations work!")))

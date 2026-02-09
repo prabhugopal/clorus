@@ -1,0 +1,39 @@
+;; Clorus Set Operations
+;; Following Clojure's clojure.set namespace
+
+(ns clorus.set)
+
+;; union - Combine sets (all unique elements from both)
+(defn union [s1 s2]
+  (reduce (fn [acc x] (conj acc x)) s1 s2))
+
+;; intersection - Common elements between sets
+(defn intersection [s1 s2]
+  (reduce (fn [acc x]
+            (if (contains? s2 x)
+              (conj acc x)
+              acc))
+          #{}
+          s1))
+
+;; difference - Elements in s1 but not in s2
+(defn difference [s1 s2]
+  (reduce (fn [acc x]
+            (if (contains? s2 x)
+              acc
+              (conj acc x)))
+          #{}
+          s1))
+
+;; subset? - Is s1 a subset of s2?
+(defn subset? [s1 s2]
+  (reduce (fn [acc x]
+            (if acc
+              (contains? s2 x)
+              false))
+          true
+          s1))
+
+;; superset? - Is s1 a superset of s2?
+(defn superset? [s1 s2]
+  (subset? s2 s1))

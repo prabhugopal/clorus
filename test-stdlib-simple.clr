@@ -1,0 +1,6 @@
+;; Test stdlib functions work
+
+(defn -main []
+  (do
+    (def x (inc 5))
+    (println x)))

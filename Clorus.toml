@@ -1,6 +1,6 @@
 [package]
-name = "test-code-samples"
+name = "test-set"
 version = "0.1.0"
 
 [build]
-entry = "test-code-samples.clr"
+entry = "test-set.clr"

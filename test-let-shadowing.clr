@@ -1,0 +1,14 @@
+;; Test variable shadowing fix (let locals shadow globals)
+
+(defn test-shadowing []
+  (do
+    (def x 100)
+    (def y 200)
+    (let [x 5
+          y 10]
+      (if (and (= x 5) (= y 10))
+        (println "✓ Let shadowing works!")
+        (throw "FAIL: Let didn't shadow globals")))))
+
+(defn -main []
+  (test-shadowing))
