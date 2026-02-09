@@ -628,6 +628,12 @@ impl<'ctx> CodeGen<'ctx> {
 
         // ===== I/O Operations =====
         self.declare_value_fn("clorus_print_value", 1);
+
+        // ===== Transducer Support =====
+        self.declare_value_fn("clorus_reduced", 1);           // Wrap value as reduced
+        self.declare_value_to_i32_fn("clorus_is_reduced");    // Check if value is reduced
+        self.declare_value_fn("clorus_deref_reduced", 1);     // Extract value from reduced
+        self.declare_value_fn("clorus_ensure_reduced", 1);    // Ensure value is reduced
     }
 
     /// Declare rust.fs module functions

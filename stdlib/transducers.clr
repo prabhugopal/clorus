@@ -44,13 +44,16 @@
 
 (defn completing
   "Adds a completion arity to a reducing function.
-  
+
   1-arity: Uses identity as completion function
   2-arity: Uses cf as completion function
-  
+
   Returns a reducing function with both step and completion arities."
   ([f]
-   (completing f identity))
+   ;; Inline the 2-arity logic without recursion
+   (fn
+     ([result] result)  ; identity for completion
+     ([result input] (f result input))))
   ([f cf]
    (fn
      ([result] (cf result))
@@ -298,7 +301,7 @@
   1-arity: Eager dedupe over collection"
   ([]
    (fn [rf]
-     (let [prev (atom ::none)]
+     (let [prev (atom :clorus-transducers-none)]
        (fn
          ([result] (rf result))
          ([result input]
@@ -310,7 +313,7 @@
   ([coll]
    (loop [result []
           remaining coll
-          prev ::none]
+          prev :clorus-transducers-none]
      (if (empty? remaining)
        result
        (let [current (first remaining)]
@@ -327,7 +330,7 @@
   2-arity: Eager partition-by over collection"
   ([f]
    (fn [rf]
-     (let [prev (atom ::none)
+     (let [prev (atom :clorus-transducers-none)
            chunk (atom [])]
        (fn
          ([result]
@@ -340,7 +343,7 @@
          ([result input]
           (let [pval (f input)
                 p @prev]
-            (if (= p ::none)
+            (if (= p :clorus-transducers-none)
               (do
                 (reset! prev pval)
                 (swap! chunk conj input)
@@ -356,7 +359,7 @@
   ([f coll]
    (loop [result []
           remaining coll
-          prev ::none
+          prev :clorus-transducers-none
           chunk []]
      (if (empty? remaining)
        (if (empty? chunk)
@@ -364,7 +367,7 @@
          (conj result chunk))
        (let [current (first remaining)
              pval (f current)]
-         (if (= prev ::none)
+         (if (= prev :clorus-transducers-none)
            (recur result
                   (rest remaining)
                   pval

@@ -1,6 +1,6 @@
 [package]
-name = "letfn-test"
+name = "test-transducers"
 version = "0.1.0"
 
 [build]
-entry = "tests/features/control-flow/letfn-test.clr"
+entry = "test-closure.clr"

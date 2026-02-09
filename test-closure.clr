@@ -1,0 +1,14 @@
+;; Test if multi-arity closures work
+
+(defn make-adder [n]
+  (fn
+    ([x] (+ x n))
+    ([x y] (+ x y n))))
+
+(defn -main []
+  (do
+    (println "Testing multi-arity closures...")
+    (def add5 (make-adder 5))
+    (println "1-arity:" (add5 10))
+    (println "2-arity:" (add5 10 20))
+    (println "Done!")))

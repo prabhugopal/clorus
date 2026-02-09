@@ -219,6 +219,37 @@ pub fn build() -> Result<(), String> {
         }
     }
 
+    // Load and parse stdlib/transducers.clr (provides transducer support)
+    let transducers_path = Path::new("stdlib/transducers.clr");
+    if transducers_path.exists() {
+        let transducers_source = fs::read_to_string(transducers_path)
+            .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+
+        let transducers_exprs = clorus::parse_and_expand(&transducers_source)
+            .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+
+        println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+        all_exprs.extend(transducers_exprs);
+    } else {
+        // Try relative to compiler location
+        let compiler_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
+
+        if let Some(compiler_dir) = compiler_dir {
+            let alt_transducers = compiler_dir.join("stdlib/transducers.clr");
+            if alt_transducers.exists() {
+                let transducers_source = fs::read_to_string(&alt_transducers)
+                    .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+
+                let transducers_exprs = clorus::parse_and_expand(&transducers_source)
+                    .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+
+                all_exprs.extend(transducers_exprs);
+            }
+        }
+    }
+
     // Load and parse the user's entry file with module resolution
     let source = fs::read_to_string(entry_path)
         .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
@@ -774,6 +805,23 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
         println!("   [DEBUG] stdlib/core.clr not found, stdlib functions unavailable");
     }
 
+    // Load and parse stdlib/transducers.clr (provides transducer support)
+    let transducers_path = Path::new("stdlib/transducers.clr");
+    if transducers_path.exists() {
+        let transducers_source = fs::read_to_string(transducers_path)
+            .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+
+        let transducers_exprs = clorus::parse_and_expand(&transducers_source)
+            .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+
+        if debug {
+            println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+        }
+        all_exprs.extend(transducers_exprs);
+    } else if debug {
+        println!("   [DEBUG] stdlib/transducers.clr not found, transducers unavailable");
+    }
+
     // Load entry file
     let source = fs::read_to_string(entry_path)
         .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
@@ -912,10 +960,25 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
 
     // Compile stdlib expressions FIRST so they're available to modules
     // We need to track how many stdlib expressions there are so modules can use them
-    let stdlib_expr_count = if stdlib_path.exists() {
+    let mut stdlib_expr_count = if stdlib_path.exists() {
         if let Ok(stdlib_source) = fs::read_to_string(stdlib_path) {
             if let Ok(stdlib_exprs) = clorus::parse_and_expand(&stdlib_source) {
                 stdlib_exprs.len()
+            } else {
+                0
+            }
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+
+    // Add transducers expressions to count
+    stdlib_expr_count += if transducers_path.exists() {
+        if let Ok(transducers_source) = fs::read_to_string(transducers_path) {
+            if let Ok(transducers_exprs) = clorus::parse_and_expand(&transducers_source) {
+                transducers_exprs.len()
             } else {
                 0
             }

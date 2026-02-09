@@ -80,3 +80,15 @@ pub extern "C" fn clorus_deref_reduced(val: *mut Value) -> *mut Value {
     // Get and return the value
     crate::map::clorus_map_get(val, value_kw)
 }
+
+/// Ensure a value is reduced
+/// If already reduced, returns it unchanged
+/// Otherwise wraps it with clorus_reduced
+#[no_mangle]
+pub extern "C" fn clorus_ensure_reduced(val: *mut Value) -> *mut Value {
+    if clorus_is_reduced(val) {
+        val
+    } else {
+        clorus_reduced(val)
+    }
+}
