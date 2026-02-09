@@ -1038,6 +1038,17 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let context = Context::create();
     let mut codegen = CodeGen::new(&context, &manifest.package.name);
 
+    // Register .clip library exports with CodeGen (Phase 4)
+    for package in &clip_packages {
+        if debug {
+            println!("   [DEBUG] Registering .clip package: {} v{}", package.name, package.version);
+        }
+
+        // Mark this namespace as coming from a .clip package
+        // This prevents the compiler from looking for source files
+        codegen.register_clip_namespace(&package.name);
+    }
+
     // Register Rust FFI libraries with CodeGen
     for lib in &rust_ffi.libraries {
         use clorus::codegen::{RustLibrary, RustFunction, RustParam};
@@ -1138,15 +1149,38 @@ pub fn run(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
         println!("   [DEBUG] Stdlib expressions compiled successfully");
     }
 
+    // Build set of .clip namespace prefixes for fast lookup
+    let mut clip_namespace_prefixes: HashSet<String> = HashSet::new();
+    for package in &clip_packages {
+        clip_namespace_prefixes.insert(package.name.clone());
+    }
+
     // Load and compile required modules (they can now use stdlib functions)
     let project_root = std::env::current_dir()
         .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
     let required_modules = extract_required_modules(&all_exprs);
+
+    // Filter out .clip namespaces (they're already compiled in .clip packages)
+    let source_modules: Vec<String> = required_modules.into_iter()
+        .filter(|module_name| {
+            // Check if this module is from a .clip package
+            let is_clip = clip_namespace_prefixes.iter().any(|prefix| {
+                module_name.starts_with(prefix)
+            });
+
+            if is_clip && debug {
+                println!("   [DEBUG] Skipping module (from .clip): {}", module_name);
+            }
+
+            !is_clip
+        })
+        .collect();
+
     let mut loaded_modules = HashSet::new();
 
-    if !required_modules.is_empty() {
-        load_and_compile_modules(&required_modules, &mut codegen, &mut loaded_modules, &project_root)?;
+    if !source_modules.is_empty() {
+        load_and_compile_modules(&source_modules, &mut codegen, &mut loaded_modules, &project_root)?;
     }
 
     // Update namespace context for entry file
