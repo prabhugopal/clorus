@@ -425,6 +425,12 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_void_fn("clorus_retain", 1);
         self.declare_void_fn("clorus_release", 1);
 
+        // malloc for closure environments
+        let i64_type = self.context.i64_type();
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let malloc_type = i8_ptr_type.fn_type(&[i64_type.into()], false);
+        self.module.add_function("malloc", malloc_type, None);
+
         // ===== Vector Functions =====
         self.declare_no_arg_value_fn("clorus_vector_empty");
         self.declare_value_fn("clorus_vector_conj", 2);
@@ -2532,8 +2538,9 @@ impl<'ctx> CodeGen<'ctx> {
 
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
 
-                // Generate a function for each arity
-                for (arity_index, arity) in arities.iter().enumerate() {
+                // STEP 1: Create all LLVM function declarations first (for mutual/self recursion)
+                let mut arity_functions = Vec::new();
+                for arity in arities.iter() {
                     let arity_name = format!("{}_arity_{}", base_name, arity.params.len());
 
                     // Create parameter types for this arity
@@ -2547,6 +2554,21 @@ impl<'ctx> CodeGen<'ctx> {
                     let is_variadic = arity.rest_param.is_some();
                     let fn_type = value_ptr_type.fn_type(&param_types, is_variadic);
                     let function = self.module.add_function(&arity_name, fn_type, None);
+
+                    arity_functions.push((arity_name.clone(), function));
+
+                    // Register this arity function immediately so bodies can reference it
+                    self.functions.insert(arity_name, function);
+                }
+
+                // Register the last arity under the base name for backward compatibility
+                if let Some((_, last_fn)) = arity_functions.last() {
+                    self.functions.insert(base_name.clone(), *last_fn);
+                }
+
+                // STEP 2: Now compile all function bodies (they can call any arity including themselves)
+                for (arity_index, arity) in arities.iter().enumerate() {
+                    let function = arity_functions[arity_index].1;
 
                     // Save current state
                     let saved_vars = self.variables.clone();
@@ -2591,15 +2613,6 @@ impl<'ctx> CodeGen<'ctx> {
                     self.variables = saved_vars.clone();
                     if let Some(block) = saved_block {
                         self.builder.position_at_end(block);
-                    }
-
-                    // Register this arity function under its arity-specific name
-                    // This allows the function call code to find it via arity dispatch
-                    self.functions.insert(arity_name.clone(), function);
-
-                    // Also register the last arity under the base name for backward compatibility
-                    if arity_index == arities.len() - 1 {
-                        self.functions.insert(base_name.clone(), function);
                     }
                 }
 
@@ -2821,6 +2834,28 @@ impl<'ctx> CodeGen<'ctx> {
                 let base_lambda_name = format!("_lambda_{}", self.lambda_counter);
                 self.lambda_counter += 1;
 
+                // Find free variables captured from outer scope (shared across all arities)
+                // Build bound set from ALL arities' parameters
+                let mut all_bound = HashSet::new();
+                for arity in arities {
+                    for param in &arity.params {
+                        match param {
+                            Pattern::Symbol(name) => { all_bound.insert(name.clone()); }
+                            _ => {}
+                        }
+                    }
+                    if let Some(rest_name) = &arity.rest_param {
+                        all_bound.insert(rest_name.clone());
+                    }
+                }
+
+                // Collect free variables from ALL arities
+                let mut free_vars = Vec::new();
+                let mut seen = HashSet::new();
+                for arity in arities {
+                    self.collect_free_vars(&arity.body, &mut free_vars, &mut seen, &all_bound);
+                }
+
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                 let mut last_function = None;
 
@@ -2833,7 +2868,7 @@ impl<'ctx> CodeGen<'ctx> {
                         .map(|_| value_ptr_type.into())
                         .collect();
 
-                    // Add environment parameter as the LAST parameter (for consistency with runtime)
+                    // Add environment parameter as the LAST parameter (for captured variables)
                     param_types.push(value_ptr_type.into());
 
                     let is_variadic = arity.rest_param.is_some();
@@ -2875,6 +2910,39 @@ impl<'ctx> CodeGen<'ctx> {
                         self.variables.insert(rest_name.clone(), rest_alloca);
                     }
 
+                    // Unpack captured variables from environment (LAST parameter)
+                    if !free_vars.is_empty() {
+                        let env_param = function.get_nth_param(arity.params.len() as u32)
+                            .unwrap()
+                            .into_pointer_value();
+
+                        for (i, var_name) in free_vars.iter().enumerate() {
+                            // Each captured variable is a *mut Value in the environment
+                            // Environment is passed as a *mut Value pointing to the first element
+                            let offset = self.context.i64_type().const_int(i as u64, false);
+                            let var_ptr = unsafe {
+                                self.builder.build_gep(
+                                    value_ptr_type,
+                                    env_param,
+                                    &[offset],
+                                    &format!("env_{}", var_name)
+                                ).unwrap()
+                            };
+
+                            // Load the captured value
+                            let captured_val = self.builder.build_load(
+                                value_ptr_type,
+                                var_ptr,
+                                &format!("load_{}", var_name)
+                            ).unwrap().into_pointer_value();
+
+                            // Create alloca and store the captured value
+                            let alloca = self.create_entry_block_alloca(var_name);
+                            self.builder.build_store(alloca, captured_val).unwrap();
+                            self.variables.insert(var_name.clone(), alloca);
+                        }
+                    }
+
                     // Compile body
                     let result = self.compile_expr(&arity.body)?;
                     self.builder.build_return(Some(&result)).unwrap();
@@ -2889,22 +2957,72 @@ impl<'ctx> CodeGen<'ctx> {
                     last_function = Some(function);
                 }
 
-                // Return the last arity function as a boxed pointer (temporary solution)
-                // TODO: Implement proper multi-arity dispatch for anonymous functions
+                // Now create the closure value with captured environment
                 if let Some(function) = last_function {
+                    // Build environment array with captured values (similar to single-arity Fn)
+                    let env_ptr = if !free_vars.is_empty() {
+                        // Allocate array for environment: [*mut Value; free_vars.len()]
+                        let env_array_type = value_ptr_type.array_type(free_vars.len() as u32);
+                        let env_array = self.builder.build_alloca(env_array_type, "env_array").unwrap();
+
+                        for (i, var_name) in free_vars.iter().enumerate() {
+                            // Get the value from current scope
+                            let var_value = if let Some(var_ptr) = self.variables.get(var_name) {
+                                self.builder.build_load(value_ptr_type, *var_ptr, var_name)
+                                    .unwrap()
+                                    .into_pointer_value()
+                            } else if let Some(global) = self.globals.get(var_name) {
+                                self.builder.build_load(value_ptr_type, global.as_pointer_value(), var_name)
+                                    .unwrap()
+                                    .into_pointer_value()
+                            } else {
+                                return Err(format!("Captured variable not found: {}", var_name));
+                            };
+
+                            // Store in environment array
+                            let elem_ptr = unsafe {
+                                self.builder.build_gep(
+                                    env_array_type,
+                                    env_array,
+                                    &[
+                                        self.context.i32_type().const_zero(),
+                                        self.context.i32_type().const_int(i as u64, false)
+                                    ],
+                                    &format!("env_elem_{}", i)
+                                ).unwrap()
+                            };
+                            self.builder.build_store(elem_ptr, var_value).unwrap();
+                        }
+
+                        // Cast to *const *mut Value
+                        self.builder.build_pointer_cast(
+                            env_array,
+                            value_ptr_type.ptr_type(AddressSpace::default()),
+                            "env_ptr"
+                        ).unwrap()
+                    } else {
+                        // No captures - pass null
+                        value_ptr_type.ptr_type(AddressSpace::default()).const_null()
+                    };
+
+                    // Create a proper Function value using clorus_function_new
+                    // For multi-arity, use the last arity function as a temporary solution
+                    // TODO: Implement proper multi-arity dispatch
+                    let function_new_fn = self.module.get_function("clorus_function_new")
+                        .ok_or("clorus_function_new not declared")?;
+
                     let fn_ptr = function.as_global_value().as_pointer_value();
-                    let fn_ptr_as_int = self.builder.build_ptr_to_int(
-                        fn_ptr,
-                        self.context.i64_type(),
-                        "fn_ptr_to_int"
-                    ).unwrap();
-                    let fn_ptr_as_float = self.builder.build_unsigned_int_to_float(
-                        fn_ptr_as_int,
-                        self.context.f64_type(),
-                        "fn_ptr_to_float"
+                    // Use -1 as arity to indicate multi-arity function (runtime will need to handle this)
+                    let arity = self.context.i32_type().const_int((-1i64) as u64, false);
+                    let env_size = self.context.i32_type().const_int(free_vars.len() as u64, false);
+
+                    let func_val = self.builder.build_call(
+                        function_new_fn,
+                        &[fn_ptr.into(), arity.into(), env_ptr.into(), env_size.into()],
+                        "new_multi_function"
                     ).unwrap();
 
-                    Ok(self.box_number(fn_ptr_as_float))
+                    Ok(func_val.try_as_basic_value().left().unwrap().into_pointer_value())
                 } else {
                     Err("Multi-arity fn must have at least one arity".to_string())
                 }

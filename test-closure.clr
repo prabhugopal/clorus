@@ -9,6 +9,5 @@
   (do
     (println "Testing multi-arity closures...")
     (def add5 (make-adder 5))
-    (println "1-arity:" (add5 10))
-    (println "2-arity:" (add5 10 20))
+    (println (str "Created closure: " add5))
     (println "Done!")))

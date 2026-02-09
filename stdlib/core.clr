@@ -149,6 +149,12 @@
 ;; Collection Utilities
 ;; ============================================================================
 
+;; conj - Add element to collection (at end for vectors)
+;; Simple implementation that works with vectors
+;; Example: (conj [1 2 3] 4) ; => [1 2 3 4]
+(defn conj [coll x]
+  (concat coll [x]))
+
 ;; zipmap - Create map from keys and values vectors
 ;; Example: (zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
 (defn zipmap [keys vals]
