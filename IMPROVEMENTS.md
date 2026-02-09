@@ -212,11 +212,255 @@ for rust_lib in package.rust_libs {
 - Fall back to building if platform mismatch
 - Best of both worlds
 
+**Configuration Option:**
+
+Add `bundle` field to control Rust dependency packaging:
+
+```toml
+[rust-dependencies]
+# Option 1: Bundle in .clip (default for libraries)
+serde_json = { version = "1.0", bundle = true }
+
+# Option 2: Transitive (user rebuilds, smaller .clip)
+sha2 = { version = "0.10", bundle = false }
+
+# Option 3: Auto-detect based on package type
+tokio = "1.0"  # bundle = true for lib, false for bin
+```
+
+Implementation:
+```rust
+// In pack.rs
+if rust_dep.bundle.unwrap_or(true) {  // Default to bundling
+    copy_rust_static_lib(&rust_dep, &temp_dir)?;
+} else {
+    // Just store metadata, user rebuilds
+    store_rust_dep_metadata(&rust_dep, clip_toml)?;
+}
+```
+
+Benefits:
+- Library authors choose bundling strategy
+- Large deps (17MB) can be transitive
+- Small critical deps can be bundled
+- Flexibility for different use cases
+
+---
+
+### 7. Multi-Module and Workspace Support
+**Status:** Not started
+**Effort:** Large (1-2 weeks)
+
+Currently, .clip packages only support single-entry compilation. Need support for multi-module libraries and workspace projects.
+
+**Problem 1: Multi-Module Libraries**
+
+Today, only the entry file is compiled:
+```toml
+[build]
+entry = "src/core.clrs"  # Only this file
+
+# src/utils.clrs is ignored!
+# src/parser.clrs is ignored!
+```
+
+**Problem 2: Monorepos / Workspaces**
+
+No support for multi-package projects:
+```
+my-project/
+├── lib-a/
+│   └── Clorus.toml
+├── lib-b/
+│   └── Clorus.toml
+└── app/
+    └── Clorus.toml
+
+# Must cd to each directory and pack individually
+```
+
+**Solution 1: Multi-Module Libraries**
+
+```toml
+[build]
+# Option A: Explicit list
+modules = [
+    "src/json/core.clrs",
+    "src/json/parser.clrs",
+    "src/json/encoder.clrs",
+]
+
+# Option B: Glob pattern (simpler)
+src = ["src/**/*.clrs"]
+exclude = ["src/tests/**"]
+```
+
+Result:
+```
+json-lib.clip → Contains:
+  - json.core
+  - json.parser
+  - json.encoder
+  (All namespaces in one package)
+```
+
+**Solution 2: Workspace Support (Like Cargo)**
+
+```toml
+# Workspace.toml (at repo root)
+[workspace]
+members = [
+    "coral-gfx",
+    "coral-ui",
+    "coral-layout",
+]
+
+[workspace.dependencies]
+# Shared dependencies across workspace
+serde = "1.0"
+```
+
+Commands:
+```bash
+# Pack all workspace members
+$ clorus pack --workspace
+   Packaging coral-gfx v1.0.0
+   Packaging coral-ui v2.0.0
+   Packaging coral-layout v1.5.0
+   Created 3 packages in target/package/
+
+# Build workspace member
+$ cd coral-ui
+$ clorus build
+   Using workspace dependencies...
+```
+
+**Benefits:**
+
+Multi-Module:
+- Package entire libraries (all namespaces)
+- No need to list every file
+- Automatic dependency ordering
+- Better modularization
+
+Workspace:
+- Manage multiple packages in one repo
+- Shared dependency versions
+- Single command to pack all
+- Consistent tooling (like Cargo, Lerna)
+
+**Implementation:**
+
+1. **Multi-Module:**
+   - Extend Manifest to support `modules` or `src` fields
+   - Walk directory tree and collect .clrs files
+   - Detect namespaces and dependencies
+   - Compile in dependency order
+   - Package all .o files in one .clip
+
+2. **Workspace:**
+   - New `Workspace.toml` format
+   - `clorus pack --workspace` command
+   - Resolve inter-package dependencies
+   - Build in topological order
+   - Shared target/package/ directory
+
+**Example Use Cases:**
+
+Multi-Module:
+```
+coral-gfx.clip → 35 functions across 3 namespaces
+  - coral-gfx.core     (window, drawing)
+  - coral-gfx.events   (mouse, keyboard)
+  - coral-gfx.utils    (string helpers)
+```
+
+Workspace:
+```
+coral-workspace/
+├── target/package/
+│   ├── coral-gfx-1.0.0.clip
+│   ├── coral-ui-2.0.0.clip      (depends on coral-gfx)
+│   └── coral-layout-1.5.0.clip  (depends on coral-ui)
+└── Workspace.toml
+
+$ clorus pack --workspace
+  → Packages all 3 in correct order
+  → Shared dependency resolution
+```
+
+**Workspace REPL Behavior:**
+
+```bash
+# Option 1: Run REPL from workspace root
+$ clorus repl
+   Error: Must specify workspace member
+   Available members: coral-gfx, coral-ui, coral-layout
+
+   Usage:
+     clorus repl -p coral-ui
+     clorus repl --package coral-gfx
+
+# Option 2: Run REPL from member directory
+$ cd coral-ui
+$ clorus repl
+   Loading workspace dependencies...
+      ✓ coral-gfx v1.0.0 (workspace member)
+
+   Clorus REPL v0.1.0
+   coral-ui λ> (require '[coral-gfx.core :as gfx])
+   coral-ui λ> (require '[coral-layout.flex :as layout])
+   coral-ui λ> (gfx/create-window "Test" 800 600)
+   => #<Window 0x...>
+
+# Option 3: Multi-member REPL (advanced)
+$ clorus repl --workspace
+   Loading all workspace members...
+      ✓ coral-gfx v1.0.0
+      ✓ coral-ui v2.0.0
+      ✓ coral-layout v1.5.0
+
+   workspace λ> (require '[coral-ui.button :as btn])
+   workspace λ> (require '[coral-gfx.core :as gfx])
+   # All workspace namespaces available!
+```
+
+**REPL Hot Reload with Workspace:**
+
+```bash
+# Terminal 1: Edit coral-gfx source
+$ cd coral-gfx
+$ # Edit src/core.clrs
+
+# Terminal 2: REPL running coral-ui
+coral-ui λ> (reload-workspace-member 'coral-gfx)
+   Rebuilding coral-gfx v1.0.0...
+   ✓ Recompiled
+   Reloading dependent namespaces...
+     ✓ coral-ui.window
+     ✓ coral-ui.button
+   ✅ Hot reload complete
+
+coral-ui λ> (gfx/create-window "Test" 800 600)
+   # Now uses updated coral-gfx code!
+```
+
+This enables:
+- Interactive development across multiple packages
+- Test workspace member integration in REPL
+- Hot reload workspace dependencies
+- Explore workspace APIs interactively
+
+Similar to:
+- Cargo: `cargo run -p member-name`
+- Lerna: `lerna run --scope package-name`
+- Nx: `nx serve app-name`
+
 ---
 
 ## P3 - Nice to Have
 
-### 7. Output .clip Packages to target/ Directory
+### 8. Output .clip Packages to target/ Directory
 **Status:** Not started
 **Effort:** Trivial (15-30 minutes)
 
@@ -271,7 +515,7 @@ let output_filename = output.unwrap_or_else(|| {
 
 ---
 
-### 8. Better Progress Indicators
+### 9. Better Progress Indicators
 **Status:** Not started
 **Effort:** Small (1-2 hours)
 
@@ -288,7 +532,7 @@ Replace `[PROGRESS]` logs with better UX.
 
 ---
 
-### 9. Package Registry Support (clorus install)
+### 10. Package Registry Support (clorus install)
 **Status:** Not started
 **Effort:** Large (2-3 weeks)
 
@@ -309,7 +553,7 @@ Support centralized package registry like crates.io.
 
 ---
 
-### 10. Dev Workflow Commands
+### 11. Dev Workflow Commands
 **Status:** Not started
 **Effort:** Medium (1-2 weeks)
 
@@ -361,7 +605,7 @@ $ clorus clean
 
 ---
 
-### 11. REPL Enhancements
+### 12. REPL Enhancements
 **Status:** Not started
 **Effort:** Medium (1 week)
 
@@ -404,7 +648,7 @@ json/json-object-3
 
 ---
 
-### 12. Performance Optimizations
+### 13. Performance Optimizations
 **Status:** Not started
 **Effort:** Large (2-3 weeks)
 
