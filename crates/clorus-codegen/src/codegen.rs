@@ -69,6 +69,8 @@ pub struct CodeGen<'ctx> {
     forward_declarations: HashSet<String>,
     /// Namespaces provided by .clip packages (Phase 4)
     clip_namespaces: HashSet<String>,
+    /// Parameter context for nested closures to capture defn parameters
+    parameter_context: HashMap<String, PointerValue<'ctx>>,
     /// Compilation start time for timeout detection
     compile_start: Instant,
     /// Compilation timeout duration
@@ -95,6 +97,7 @@ impl<'ctx> CodeGen<'ctx> {
             loop_context: None,
             forward_declarations: HashSet::new(),
             clip_namespaces: HashSet::new(),
+            parameter_context: HashMap::new(),
             compile_start: Instant::now(),
             compile_timeout: Duration::from_secs(60), // 60 second default timeout
             expr_count: 0,
@@ -1628,7 +1631,9 @@ impl<'ctx> CodeGen<'ctx> {
         match expr {
             Expr::Symbol(name) => {
                 // If it's not bound locally and not already collected, it's free
-                if !bound.contains(name) && !seen.contains(name) && self.variables.contains_key(name) {
+                // Check both local variables and parameter context (for nested closures)
+                if !bound.contains(name) && !seen.contains(name) &&
+                   (self.variables.contains_key(name) || self.parameter_context.contains_key(name)) {
                     free_vars.push(name.clone());
                     seen.insert(name.clone());
                 }
@@ -1662,7 +1667,9 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::Call { func, args } => {
                 // func is a String (function name) - check if it's a free variable
-                if !bound.contains(func) && !seen.contains(func) && self.variables.contains_key(func) {
+                // Check both local variables and parameter context (for nested closures)
+                if !bound.contains(func) && !seen.contains(func) &&
+                   (self.variables.contains_key(func) || self.parameter_context.contains_key(func)) {
                     free_vars.push(func.clone());
                     seen.insert(func.clone());
                 }
@@ -2553,13 +2560,23 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Bind fixed parameters to allocas (parameters are now Value*)
                 // Support destructuring in function parameters
+                // Track parameter bindings for nested closures to capture
+                let mut param_bindings = Vec::new();
                 for (i, param_pattern) in params.iter().enumerate() {
                     let param_val = function.get_nth_param(i as u32)
                         .unwrap()
                         .into_pointer_value();
 
-                    // Destructure parameter pattern
-                    self.destructure_pattern(param_pattern, param_val)?;
+                    // Destructure parameter pattern and collect bindings
+                    let bindings = self.destructure_pattern(param_pattern, param_val)?;
+                    param_bindings.extend(bindings);
+                }
+
+                // Populate parameter_context so nested closures can capture these parameters
+                // This is critical for transducers which use nested multi-arity closures
+                self.parameter_context.clear();
+                for (name, alloca) in &param_bindings {
+                    self.parameter_context.insert(name.clone(), *alloca);
                 }
 
                 // Handle rest parameter if present
@@ -2585,6 +2602,9 @@ impl<'ctx> CodeGen<'ctx> {
                 // Compile function body (returns Value*)
                 let result = self.compile_expr(body)?;
                 self.builder.build_return(Some(&result)).unwrap();
+
+                // Clear parameter context before restoring variables
+                self.parameter_context.clear();
 
                 // Restore previous state
                 self.variables = saved_vars;
@@ -2859,9 +2879,14 @@ impl<'ctx> CodeGen<'ctx> {
                     let env_array = self.builder.build_alloca(env_array_type, "env_array").unwrap();
 
                     for (i, var_name) in free_vars.iter().enumerate() {
-                        // Get the value from current scope
+                        // Get the value from current scope (check saved_vars, parameter_context, then globals)
                         let var_value = if let Some(var_ptr) = saved_vars.get(var_name) {
                             self.builder.build_load(value_ptr_type, *var_ptr, var_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else if let Some(param_ptr) = self.parameter_context.get(var_name) {
+                            // Check parameter context for captured defn parameters
+                            self.builder.build_load(value_ptr_type, *param_ptr, var_name)
                                 .unwrap()
                                 .into_pointer_value()
                         } else if let Some(global) = self.globals.get(var_name) {
@@ -3055,9 +3080,14 @@ impl<'ctx> CodeGen<'ctx> {
                         let env_array = self.builder.build_alloca(env_array_type, "env_array").unwrap();
 
                         for (i, var_name) in free_vars.iter().enumerate() {
-                            // Get the value from current scope
+                            // Get the value from current scope (check variables, parameter_context, then globals)
                             let var_value = if let Some(var_ptr) = self.variables.get(var_name) {
                                 self.builder.build_load(value_ptr_type, *var_ptr, var_name)
+                                    .unwrap()
+                                    .into_pointer_value()
+                            } else if let Some(param_ptr) = self.parameter_context.get(var_name) {
+                                // Check parameter context for captured defn parameters
+                                self.builder.build_load(value_ptr_type, *param_ptr, var_name)
                                     .unwrap()
                                     .into_pointer_value()
                             } else if let Some(global) = self.globals.get(var_name) {

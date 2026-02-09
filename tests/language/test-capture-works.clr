@@ -1,0 +1,18 @@
+;; Test that multi-arity closures can NOW capture variables (compile test)
+(ns test-capture-compile)
+
+;; This used to fail with "Undefined variable: f"
+;; Now it should compile successfully (even if calling isn't fully supported yet)
+(defn completing [f]
+  (fn
+    ([result] result)
+    ([result input] (f result input))))
+
+;; Just creating the closure should work
+(def my-add (fn [x y] (+ x y)))
+(def plus-rf (completing my-add))
+
+;; Return the closure
+plus-rf
+
+"Capture works! Multi-arity closure created successfully."
