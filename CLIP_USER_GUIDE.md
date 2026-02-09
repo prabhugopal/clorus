@@ -479,30 +479,41 @@ No need to rebuild common code for each service!
 
 ### **Can REPL Use .clip Libraries?**
 
-**YES!** The REPL can load and use .clip libraries:
+**YES! ✅** The REPL fully supports .clip libraries using dynamic loading:
 
-#### **Phase 3: Basic REPL Support**
+#### **Phase 3: REPL Support (WORKING NOW)**
 ```bash
+$ cd factorial-demo  # Project with json-lib dependency
 $ clorus repl
 
 Clorus REPL v0.1.0
-> (require 'json-parser.core :as 'json)
-Loading json-parser v0.5.0...
-✅ Loaded
+Type :help for help, :quit to exit
 
-> (json/parse "{\"name\": \"Alice\"}")
-{:type :object, :data "{\"name\": \"Alice\"}"}
+📦 Loaded 1 .clip package(s) for REPL
+   ✓ json-lib v0.1.0
 
-> (json/stringify {:name "Bob"})
-"{:name \"Bob\"}"
+examples.factorialλ> (json/json-object-2 "name" "Clorus" "version" "0.2.0")
+=> "{\"name\":\"Clorus\",\"version\":\"0.2.0\"}"
+
+examples.factorialλ> (factorial 10)
+=> 3628800
 ```
 
 **How it works:**
-1. REPL reads `Clorus.toml` dependencies
-2. Automatically extracts and loads .clip files
-3. Functions available immediately
+1. REPL reads `Clorus.toml` dependencies on startup
+2. Extracts .clip packages to temp directories
+3. Links .o files as .dylib in `.repl/{package}/` cache
+4. Loads dynamic libraries with RTLD_GLOBAL
+5. Registers namespaces with CodeGen
+6. Functions available immediately - no manual loading needed!
 
-#### **Phase 4: Dynamic Loading in REPL**
+**Cache Benefits:**
+- `.repl/` folder caches built .dylib files
+- Subsequent REPL sessions reuse cached libraries
+- Much faster startup after first run
+- Per-project cache isolation
+
+#### **Phase 4: Advanced REPL (FUTURE)**
 ```bash
 $ clorus repl
 
@@ -595,11 +606,12 @@ Phase 2: Extraction & Parsing ✅ COMPLETE
 ├── ClipPackage struct         ✅ Data structure
 └── Metadata parsing           ✅ clip.toml + exports.json
 
-Phase 3: Automatic Linking ⏳ IN PROGRESS
-├── Integrate in build()       ⚠️ TODO
-├── Register external fns      ⚠️ TODO
-├── Link bitcode files         ⚠️ TODO
-└── Dependency graph           ⚠️ TODO
+Phase 3: Automatic Linking ✅ COMPLETE
+├── Integrate in build()       ✅ Auto-loads from Clorus.toml
+├── Register external fns      ✅ Namespace registration
+├── Static linking (.o files)  ✅ Build and run commands
+├── Dynamic linking (.dylib)   ✅ REPL support with .repl/ cache
+└── Multiple packages          ✅ Full support
 
 Phase 4: Registry & Advanced ⏳ FUTURE
 ├── Package registry           ⏳ Planned
@@ -614,14 +626,19 @@ Phase 4: Registry & Advanced ⏳ FUTURE
 ✅ **You can:**
 - Create .clip packages: `clorus pack`
 - Install .clip packages: `clorus install mylib.clip --local`
-- Package includes: metadata, compiled code, API definitions
-- Distribute .clip files to other developers
+- Auto-load dependencies from Clorus.toml in `clorus build`
+- Static linking of .clip packages in executables
+- Use .clip functions in your code via namespaces
+- Load .clip packages in REPL (dynamic loading with .repl/ cache)
+- Run programs with .clip dependencies: `clorus run`
+- Multiple .clip packages work simultaneously
+- Clean output without progress spam
 
 ❌ **What doesn't work yet:**
-- Automatic linking (need to manually link object files)
-- Dependency resolution from Clorus.toml
 - Package registry (download from internet)
-- REPL integration
+- Version conflict detection
+- Incremental compilation / build caching
+- Hot reload in REPL
 
 ### **Timeline**
 
@@ -629,8 +646,8 @@ Phase 4: Registry & Advanced ⏳ FUTURE
 |-------|----------|--------|-----|
 | Phase 1 | pack, install, format | ✅ Done | Released |
 | Phase 2 | Extract, parse, load | ✅ Done | Released |
-| Phase 3 | Auto-linking in build | ⏳ Next | 2-4 hours |
-| Phase 4 | Registry, REPL | ⏳ Future | TBD |
+| Phase 3 | Auto-linking, REPL | ✅ Done | Released |
+| Phase 4 | Registry, hot reload | ⏳ Future | TBD |
 
 ---
 
@@ -844,19 +861,22 @@ A: After Phase 4, yes! Use `(reload 'library-name)` in REPL.
 - ✅ Fast compilation (pre-compiled libraries)
 - ✅ Easy distribution (single file)
 - ✅ Version management (built-in)
-- ✅ Dependency resolution (automatic after Phase 3)
+- ✅ Dependency resolution (automatic)
+- ✅ REPL integration (dynamic loading)
+- ✅ Multiple packages (works seamlessly)
 
-**Current Status:** Phases 1 & 2 complete. Phase 3 in progress.
+**Current Status:** Phases 1, 2, and 3 complete. Phase 4 planned.
 
 **Next Steps:**
-1. Implement Phase 3 (automatic linking)
-2. Add Phase 4 (registry + REPL integration)
+1. Implement Phase 4 (registry + package download)
+2. Add hot reload support in REPL
 3. Build community package registry
+4. Implement improvements from IMPROVEMENTS.md (P2/P3)
 
 Join us in making Clorus a great systems programming language with first-class library support!
 
 ---
 
-**Documentation Version:** 1.0
+**Documentation Version:** 1.1
 **Last Updated:** February 2026
-**Status:** Phases 1-2 Complete, Phase 3 In Progress
+**Status:** Phases 1-3 Complete, Phase 4 Planned

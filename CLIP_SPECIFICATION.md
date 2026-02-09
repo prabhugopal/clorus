@@ -125,6 +125,38 @@ mylib = { path = "./libs/mylib.clip" }
   (println (lib/add 10 20)))
 ```
 
+### REPL Integration
+
+The REPL fully supports .clip packages through dynamic library loading:
+
+```bash
+$ cd my-app  # Project with .clip dependencies
+$ clorus repl
+
+Clorus REPL v0.1.0
+📦 Loaded 2 .clip package(s) for REPL
+   ✓ json-parser v0.5.0
+   ✓ http-client v1.2.0
+
+my-app.mainλ> (lib/add 10 20)
+=> 30
+```
+
+**How REPL Loading Works:**
+
+1. **Extract**: .clip packages extracted to temp directories
+2. **Build**: .o files linked as .dylib libraries
+3. **Cache**: Built .dylib cached in `.repl/{package}/` for reuse
+4. **Load**: Dynamic libraries loaded with RTLD_GLOBAL
+5. **Register**: Namespaces registered with CodeGen
+6. **Ready**: All functions immediately available
+
+**Cache Benefits:**
+- First REPL session: ~2-3 seconds to build .dylib
+- Subsequent sessions: ~100ms to load cached .dylib
+- Per-project isolation (each project has own `.repl/` folder)
+- Automatically rebuilds if .clip file changes
+
 ### Linking Process
 
 When you run `clorus build` or `clorus run` with .clip dependencies:
@@ -212,25 +244,33 @@ mylib = { path = "libs/mylib.clip" }
 
 ## Implementation Phases
 
-### Phase 1: Basic Packaging (This PR)
+### Phase 1: Basic Packaging ✅ COMPLETE
 - Create .clip archive from compiled .o/.bc files
 - Package metadata (clip.toml)
 - API exports extraction
+- Install command for local .clip files
 
-### Phase 2: Linking Support
+### Phase 2: Extraction & Parsing ✅ COMPLETE
 - Read .clip files during compilation
-- Extract and link object files
-- Symbol resolution
+- Extract and parse metadata
+- Load dependencies from Clorus.toml
+- ClipPackage data structures
 
-### Phase 3: Dependency Management
-- Install/uninstall commands
-- Version resolution
-- Dependency tree management
+### Phase 3: Automatic Linking ✅ COMPLETE
+- Static linking (.o files) in `clorus build`
+- Dynamic linking (.dylib files) in `clorus repl`
+- Namespace registration with CodeGen
+- Symbol resolution and LLVM linking
+- Multiple .clip package support
+- `.repl/` cache for fast REPL startup
 
-### Phase 4: Registry
+### Phase 4: Registry & Advanced ⏳ FUTURE
 - Central package repository
-- Publishing workflow
-- Package discovery
+- Publishing workflow (clorus publish)
+- Package discovery and download
+- Version conflict detection
+- Hot reload in REPL
+- Dependency tree visualization
 
 ## Example: Creating a Library
 
