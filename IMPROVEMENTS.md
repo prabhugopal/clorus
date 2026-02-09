@@ -131,9 +131,92 @@ $ clorus build
 
 ---
 
+### 6. Rust FFI Dependencies in .clip Packages
+**Status:** Not started
+**Effort:** Large (1-2 weeks)
+
+Currently .clip packages don't include Rust FFI dependencies, causing link errors when used.
+
+**Problem:**
+```toml
+# crypto-lib uses Rust FFI
+[rust-dependencies]
+sha2 = "0.10"
+
+# After packing, crypto-lib.clip is missing libsha2.a
+# Apps that use crypto-lib.clip fail to link
+```
+
+**Solution Options:**
+
+**Option A: Bundle Rust Static Libraries** (Recommended)
+- Package Rust .a files inside .clip archive
+- Platform-specific variants (macos-aarch64, linux-x86_64, etc.)
+- Extract and link during build
+
+**Option B: Transitive Rust Dependencies**
+- Store rust-dependencies in clip.toml
+- Apps rebuild Rust deps on-the-fly
+- Requires Rust toolchain on user machines
+
+**Implementation (Option A):**
+
+1. **Update pack.rs** to bundle Rust libraries:
+```rust
+// After building Rust FFI deps, copy them into .clip
+clip_archive/
+├── lib/
+│   ├── mylib.o
+│   ├── mylib.bc
+│   └── rust/              # NEW
+│       ├── libserde.a
+│       └── libsha2.a
+```
+
+2. **Update clip.toml format**:
+```toml
+[rust-dependencies]
+serde = "1.0"
+sha2 = "0.10"
+
+[bundled-libs]
+# Platform-specific artifacts
+platform = "macos-aarch64"
+libs = ["rust/libserde.a", "rust/libsha2.a"]
+```
+
+3. **Update extract_clip()** to extract Rust libs
+
+4. **Update build/link** to include bundled Rust libraries:
+```rust
+// In commands.rs link phase
+for rust_lib in package.rust_libs {
+    link_cmd.arg(rust_lib.path);
+}
+```
+
+**Benefits:**
+- Self-contained .clip packages
+- No Rust toolchain required for apps
+- Faster builds (no Rust recompilation)
+- Works like other language ecosystems
+
+**Challenges:**
+- Larger .clip files
+- Need platform detection/selection
+- License compliance for bundled Rust crates
+- Multiple platform support in single .clip
+
+**Alternative: Hybrid Approach**
+- Bundle Rust libs by default
+- Fall back to building if platform mismatch
+- Best of both worlds
+
+---
+
 ## P3 - Nice to Have
 
-### 6. Better Progress Indicators
+### 7. Better Progress Indicators
 **Status:** Not started
 **Effort:** Small (1-2 hours)
 
@@ -150,7 +233,7 @@ Replace `[PROGRESS]` logs with better UX.
 
 ---
 
-### 7. Package Registry Support (clorus install)
+### 8. Package Registry Support (clorus install)
 **Status:** Not started
 **Effort:** Large (2-3 weeks)
 
@@ -171,7 +254,7 @@ Support centralized package registry like crates.io.
 
 ---
 
-### 8. Dev Workflow Commands
+### 9. Dev Workflow Commands
 **Status:** Not started
 **Effort:** Medium (1-2 weeks)
 
@@ -223,7 +306,7 @@ $ clorus clean
 
 ---
 
-### 9. REPL Enhancements
+### 10. REPL Enhancements
 **Status:** Not started
 **Effort:** Medium (1 week)
 
@@ -266,7 +349,7 @@ json/json-object-3
 
 ---
 
-### 10. Performance Optimizations
+### 11. Performance Optimizations
 **Status:** Not started
 **Effort:** Large (2-3 weeks)
 
