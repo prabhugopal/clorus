@@ -3,4 +3,4 @@ name = "test-transducers"
 version = "0.1.0"
 
 [build]
-entry = "test-closure.clr"
+entry = "test-numeric.clr"

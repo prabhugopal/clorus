@@ -263,6 +263,32 @@
 (defn rem [a b]
   (mod a b))
 
+;; floor - Round down to nearest integer
+;; Example: (floor 3.7) => 3.0, (floor -3.7) => -4.0
+(defn floor [x]
+  (let [truncated (- x (mod x 1.0))]
+    (if (and (< x 0.0) (not (= x truncated)))
+      (- truncated 1.0)
+      truncated)))
+
+;; ceil - Round up to nearest integer
+;; Example: (ceil 3.2) => 4.0, (ceil -3.2) => -3.0
+(defn ceil [x]
+  (let [truncated (- x (mod x 1.0))]
+    (if (and (> x 0.0) (not (= x truncated)))
+      (+ truncated 1.0)
+      truncated)))
+
+;; round - Round to nearest integer
+;; Example: (round 3.5) => 4.0, (round 3.4) => 3.0
+(defn round [x]
+  (let [floored (floor x)
+        remainder (- x floored)]
+    (if (>= remainder 0.5)
+      (+ floored 1.0)
+      floored)))
+
+
 ;; ============================================================================
 ;; Sequence Utilities
 ;; ============================================================================
