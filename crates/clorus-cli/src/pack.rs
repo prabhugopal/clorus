@@ -322,7 +322,7 @@ authors = {:?}
 description = "{}"
 
 [build]
-entry = "{}"
+{}
 
 [api]
 # See api/exports.json for detailed function signatures
@@ -331,7 +331,10 @@ entry = "{}"
         manifest.package.version,
         manifest.package.authors,
         manifest.package.description.as_deref().unwrap_or(""),
-        manifest.build.entry
+        // Only include entry line if it's specified
+        manifest.build.entry.as_ref()
+            .map(|e| format!("entry = \"{}\"", e))
+            .unwrap_or_else(|| "# No entry - this is a library".to_string())
     );
 
     fs::write(temp_dir.join("clip.toml"), content)

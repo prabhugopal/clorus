@@ -180,8 +180,8 @@ pub struct Package {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Build {
-    #[serde(default = "default_entry")]
-    pub entry: String,
+    #[serde(default)]
+    pub entry: Option<String>,
     /// Multiple source directories (like deps.edn src = ["src" "resources"])
     #[serde(default)]
     pub src: Vec<String>,
@@ -190,14 +190,10 @@ pub struct Build {
 impl Default for Build {
     fn default() -> Self {
         Build {
-            entry: default_entry(),
+            entry: None,
             src: Vec::new(),
         }
     }
-}
-
-fn default_entry() -> String {
-    "src/main.clrs".to_string()
 }
 
 impl Manifest {

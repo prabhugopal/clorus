@@ -59,6 +59,7 @@ fn main() {
             commands::run(debug, use_jit, extra_args)
         }
         "check" => commands::check(),
+        "clean" => commands::clean(),
         "repl" => {
             // Check for --main-thread flag
             let main_thread = args.iter().any(|arg| arg == "--main-thread");
@@ -150,6 +151,7 @@ fn print_help() {
     println!("    clorus run --debug          Run with memory tracking");
     println!("    clorus pack                 Package as a .clip library");
     println!("    clorus check                Check for syntax errors");
+    println!("    clorus clean                Remove build artifacts (target/)");
     println!();
     println!("See https://github.com/yourusername/clorus for more information");
 }

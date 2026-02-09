@@ -169,22 +169,53 @@ fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, Strin
 
 pub fn check() -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
-    let entry_path = Path::new(&manifest.build.entry);
+
+    // If no entry specified, this is a library - nothing to check
+    let entry = match &manifest.build.entry {
+        Some(e) => e,
+        None => {
+            println!("   Skipping check for library package {} v{}",
+                manifest.package.name, manifest.package.version);
+            return Ok(());
+        }
+    };
+
+    let entry_path = Path::new(entry);
 
     if !entry_path.exists() {
-        return Err(format!("Entry file '{}' not found", manifest.build.entry));
+        return Err(format!("Entry file '{}' not found", entry));
     }
 
     println!("   Checking {} v{}", manifest.package.name, manifest.package.version);
 
     let source = fs::read_to_string(entry_path)
-        .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
+        .map_err(|e| format!("Failed to read {}: {}", entry, e))?;
 
     // Parse to check syntax (with macro expansion)
     clorus::parse_and_expand(&source)
-        .map_err(|e| format!("Parse error in {}: {}", manifest.build.entry, e))?;
+        .map_err(|e| format!("Parse error in {}: {}", entry, e))?;
 
     println!("    Finished checking {} in 0.00s", manifest.package.name);
+
+    Ok(())
+}
+
+pub fn clean() -> Result<(), String> {
+    let manifest = Manifest::find_in_current_dir()?;
+
+    println!("   Cleaning {} v{}", manifest.package.name, manifest.package.version);
+
+    let target_dir = Path::new("target");
+
+    if target_dir.exists() {
+        fs::remove_dir_all(target_dir)
+            .map_err(|e| format!("Failed to remove target directory: {}", e))?;
+        println!("      Removed target/");
+    } else {
+        println!("      Nothing to clean (target/ doesn't exist)");
+    }
+
+    println!("    Finished cleaning");
 
     Ok(())
 }
@@ -203,10 +234,22 @@ pub fn build_lib() -> Result<(), String> {
 
 fn build_internal(lib_mode: bool, debug: bool) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
-    let entry_path = Path::new(&manifest.build.entry);
+
+    // If no entry specified, this is a library - skip building executable
+    let entry = match &manifest.build.entry {
+        Some(e) => e.clone(),
+        None => {
+            println!("   Skipping build for library package {} v{}",
+                manifest.package.name, manifest.package.version);
+            println!("   (No entry point specified - this is a library)");
+            return Ok(());
+        }
+    };
+
+    let entry_path = Path::new(&entry);
 
     if !entry_path.exists() {
-        return Err(format!("Entry file '{}' not found", manifest.build.entry));
+        return Err(format!("Entry file '{}' not found", entry));
     }
 
     // Process Rust dependencies (auto-generate FFI and compile)
@@ -295,11 +338,11 @@ fn build_internal(lib_mode: bool, debug: bool) -> Result<(), String> {
 
     // Load and parse the user's entry file with module resolution
     let source = fs::read_to_string(entry_path)
-        .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
+        .map_err(|e| format!("Failed to read {}: {}", entry, e))?;
 
     // Parse entry file to find dependencies
     let entry_exprs = clorus::parse_and_expand(&source)
-        .map_err(|e| format!("Parse error in {}: {}", manifest.build.entry, e))?;
+        .map_err(|e| format!("Parse error in {}: {}", entry, e))?;
 
     // Load all required modules recursively (skip .clip namespaces)
     let base_path = std::env::current_dir()
@@ -946,10 +989,19 @@ pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), St
 /// Doesn't work with .clip dependencies due to LLVM bitcode compatibility
 fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
-    let entry_path = Path::new(&manifest.build.entry);
+
+    // If no entry specified, this is a library - cannot run
+    let entry = match &manifest.build.entry {
+        Some(e) => e.clone(),
+        None => {
+            return Err("Cannot run library package (no entry point specified)".to_string());
+        }
+    };
+
+    let entry_path = Path::new(&entry);
 
     if !entry_path.exists() {
-        return Err(format!("Entry file '{}' not found", manifest.build.entry));
+        return Err(format!("Entry file '{}' not found", entry));
     }
 
     // Process Rust dependencies (auto-generate FFI and compile)
@@ -1022,7 +1074,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     // Load entry file
     let source = fs::read_to_string(entry_path)
-        .map_err(|e| format!("Failed to read {}: {}", manifest.build.entry, e))?;
+        .map_err(|e| format!("Failed to read {}: {}", entry, e))?;
 
     // Parse and expand macros
     let exprs = clorus::parse_and_expand(&source)
@@ -1036,7 +1088,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
     }
 
     println!("    Finished dev [unoptimized] target(s) in 0.00s");
-    println!("     Running `{}`", manifest.build.entry);
+    println!("     Running `{}`", entry);
     println!();
 
     // Load clorus-runtime library FIRST (required for Value* operations)
