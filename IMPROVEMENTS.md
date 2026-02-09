@@ -216,7 +216,62 @@ for rust_lib in package.rust_libs {
 
 ## P3 - Nice to Have
 
-### 7. Better Progress Indicators
+### 7. Output .clip Packages to target/ Directory
+**Status:** Not started
+**Effort:** Trivial (15-30 minutes)
+
+Currently `clorus pack` creates .clip files in the project root, cluttering the workspace.
+
+**Problem:**
+```bash
+$ clorus pack
+✅ Created coral-gfx-1.0.0.clip  # In project root
+
+$ ls
+coral-gfx-1.0.0.clip  ← Clutter!
+Clorus.toml
+src/
+target/
+```
+
+**Solution:**
+Output to `target/package/` like Cargo:
+```bash
+$ clorus pack
+✅ Created target/package/coral-gfx-1.0.0.clip
+
+$ ls target/
+coral-gfx.o
+coral-gfx.bc
+package/
+  └── coral-gfx-1.0.0.clip  ← Clean!
+```
+
+**Implementation:**
+```rust
+// In pack.rs, line 262
+let output_filename = output.unwrap_or_else(|| {
+    // Create target/package/ if it doesn't exist
+    let package_dir = PathBuf::from("target/package");
+    fs::create_dir_all(&package_dir).ok();
+
+    format!("target/package/{}-{}.clip", package_name, package_version)
+});
+```
+
+**Benefits:**
+- Cleaner project root
+- Consistent with Cargo/Maven/Gradle conventions
+- Easy to add to .gitignore: `target/`
+- Natural location for build artifacts
+
+**Backward compatibility:**
+- Keep `--output` flag for custom paths
+- Update error messages and docs
+
+---
+
+### 8. Better Progress Indicators
 **Status:** Not started
 **Effort:** Small (1-2 hours)
 
@@ -233,7 +288,7 @@ Replace `[PROGRESS]` logs with better UX.
 
 ---
 
-### 8. Package Registry Support (clorus install)
+### 9. Package Registry Support (clorus install)
 **Status:** Not started
 **Effort:** Large (2-3 weeks)
 
@@ -254,7 +309,7 @@ Support centralized package registry like crates.io.
 
 ---
 
-### 9. Dev Workflow Commands
+### 10. Dev Workflow Commands
 **Status:** Not started
 **Effort:** Medium (1-2 weeks)
 
@@ -306,7 +361,7 @@ $ clorus clean
 
 ---
 
-### 10. REPL Enhancements
+### 11. REPL Enhancements
 **Status:** Not started
 **Effort:** Medium (1 week)
 
@@ -349,7 +404,7 @@ json/json-object-3
 
 ---
 
-### 11. Performance Optimizations
+### 12. Performance Optimizations
 **Status:** Not started
 **Effort:** Large (2-3 weeks)
 
