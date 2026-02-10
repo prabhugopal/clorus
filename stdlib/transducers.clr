@@ -1,0 +1,127 @@
+;; =============================================================================
+;; Transducers - Composable algorithmic transformations
+;; =============================================================================
+;; Transducers provide efficient data processing without intermediate collections.
+
+;; =============================================================================
+;; Reduced Values - Early Termination Support
+;; =============================================================================
+
+(defn reduced?
+  "Returns true if x is a reduced value."
+  [x]
+  (and (map? x) (= (:type x) :reduced)))
+
+(defn reduced
+  "Wraps value to signal early termination."
+  [x]
+  (if (reduced? x)
+    x
+    {:type :reduced :value x}))
+
+(defn unreduced
+  "Unwraps a reduced value."
+  [x]
+  (if (reduced? x)
+    (:value x)
+    x))
+
+(defn ensure-reduced
+  "Ensures value is reduced."
+  [x]
+  (if (reduced? x)
+    x
+    (reduced x)))
+
+;; =============================================================================
+;; Transducer Functions
+;; =============================================================================
+
+(defn map
+  "Map transducer."
+  ([xf]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (rf result (xf input))))))
+  ([xf coll]
+   (loop [result []
+          remaining coll]
+     (if (empty? remaining)
+       result
+       (recur (conj result (xf (first remaining)))
+              (rest remaining))))))
+
+(defn filter
+  "Filter transducer."
+  ([pred]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (if (pred input)
+          (rf result input)
+          result)))))
+  ([pred coll]
+   (loop [result []
+          remaining coll]
+     (if (empty? remaining)
+       result
+       (let [item (first remaining)]
+         (recur (if (pred item)
+                  (conj result item)
+                  result)
+                (rest remaining)))))))
+
+(defn take
+  "Take transducer - takes first n elements."
+  ([n]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (let [c (swap! counter inc)]
+            (if (<= c n)
+              (if (= c n)
+                (ensure-reduced (rf result input))
+                (rf result input))
+              result)))))))
+  ([n coll]
+   (loop [result []
+          remaining coll
+          count 0]
+     (if (or (empty? remaining) (>= count n))
+       result
+       (recur (conj result (first remaining))
+              (rest remaining)
+              (inc count))))))
+
+;; =============================================================================
+;; Transducer Application
+;; =============================================================================
+
+(defn transduce
+  "Apply transducer to collection."
+  ([xform rf-fn coll]
+   (transduce xform rf-fn (rf-fn) coll))
+  ([xform rf-fn init coll]
+   (let [rf (xform rf-fn)
+         result (reduce (fn [acc input]
+                         (let [r (rf acc input)]
+                           (if (reduced? r)
+                             (reduced r)
+                             r)))
+                       init
+                       coll)]
+     (if (reduced? result)
+       (unreduced result)
+       (rf result)))))
+
+(defn into
+  "Build collection using transducer."
+  ([to from]
+   (reduce conj to from))
+  ([to xform from]
+   (transduce xform conj to from)))

@@ -1699,6 +1699,38 @@ impl<'ctx> CodeGen<'ctx> {
                     self.collect_free_vars(val, free_vars, seen, bound);
                 }
             }
+            Expr::Fn { params, rest_param, body } => {
+                // Nested function - parameters are bound within the function body
+                let mut new_bound = bound.clone();
+                for param in params {
+                    if let Pattern::Symbol(name) = param {
+                        new_bound.insert(name.clone());
+                    }
+                }
+                if let Some(rest_name) = rest_param {
+                    new_bound.insert(rest_name.clone());
+                }
+                // Collect free vars from body with new bound set
+                self.collect_free_vars(body, free_vars, seen, &new_bound);
+            }
+            Expr::FnMulti { arities } => {
+                // Multi-arity nested function - parameters from all arities are bound
+                let mut new_bound = bound.clone();
+                for arity in arities {
+                    for param in &arity.params {
+                        if let Pattern::Symbol(name) = param {
+                            new_bound.insert(name.clone());
+                        }
+                    }
+                    if let Some(rest_name) = &arity.rest_param {
+                        new_bound.insert(rest_name.clone());
+                    }
+                }
+                // Collect free vars from all arity bodies
+                for arity in arities {
+                    self.collect_free_vars(&arity.body, free_vars, seen, &new_bound);
+                }
+            }
             // Literals and other non-recursive cases
             _ => {}
         }
