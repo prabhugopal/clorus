@@ -218,14 +218,36 @@ pub fn clean() -> Result<(), String> {
 
     println!("   Cleaning {} v{}", manifest.package.name, manifest.package.version);
 
-    let target_dir = Path::new("target");
+    let mut cleaned_items = Vec::new();
 
+    // Remove target directory
+    let target_dir = Path::new("target");
     if target_dir.exists() {
         fs::remove_dir_all(target_dir)
             .map_err(|e| format!("Failed to remove target directory: {}", e))?;
-        println!("      Removed target/");
+        cleaned_items.push("target/".to_string());
+    }
+
+    // Remove .clip files (packaged artifacts)
+    if let Ok(entries) = fs::read_dir(".") {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            if let Some(name) = file_name.to_str() {
+                if name.starts_with(&manifest.package.name) && name.ends_with(".clip") {
+                    fs::remove_file(entry.path())
+                        .map_err(|e| format!("Failed to remove .clip file: {}", e))?;
+                    cleaned_items.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    if cleaned_items.is_empty() {
+        println!("      Nothing to clean");
     } else {
-        println!("      Nothing to clean (target/ doesn't exist)");
+        for item in &cleaned_items {
+            println!("      Removed {}", item);
+        }
     }
 
     println!("    Finished cleaning");
