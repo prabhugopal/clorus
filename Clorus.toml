@@ -3,5 +3,5 @@ name = "clorus-test-suite"
 version = "0.1.0"
 
 [build]
-entry = "tests/language/test-transducers.clr"
+entry = "tests/language/test-capture-works.clr"
 src = ["tests", "stdlib", "src"]  # Search tests/ first, then stdlib/, then src/

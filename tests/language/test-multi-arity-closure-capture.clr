@@ -7,13 +7,13 @@
     ([x] (+ x n))
     ([x y] (+ x y n))))
 
-;; Global test instances
-(def adder5 (make-adder 5))
-(def adder10 (make-adder 10))
-
 (defn -main []
   (do
     (println "Testing multi-arity closure capture...")
+
+    ;; Create closures inside -main
+    (def adder5 (make-adder 5))
+    (def adder10 (make-adder 10))
 
     ;; Test 1-arity
     (println "Test 1: adder5 with 1 arg (should be 15):")

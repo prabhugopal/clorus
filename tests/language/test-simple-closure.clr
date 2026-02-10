@@ -1,0 +1,19 @@
+;; Simple test of multi-arity closure capture
+(ns test-simple-closure)
+
+;; Test: Simple multi-arity closure with one capture
+(defn make-adder [n]
+  (fn
+    ([x] (+ x n))
+    ([x y] (+ x y n))))
+
+;; Create a closure
+(def adder5 (make-adder 5))
+
+;; Test 1-arity at global level
+(adder5 10)
+
+;; Test 2-arity at global level
+(adder5 10 20)
+
+"tests complete"

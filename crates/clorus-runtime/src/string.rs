@@ -702,6 +702,9 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
         ValueTag::Function => {
             "#<function>".to_string()
         }
+        ValueTag::MultiArityFunction => {
+            "#<function>".to_string()
+        }
         ValueTag::Atom => {
             "#<atom>".to_string()
         }

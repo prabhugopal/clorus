@@ -29,6 +29,7 @@ pub enum ValueTag {
     Channel = 14,
     Function = 15,
     Var = 16,  // Var for dynamic bindings (shifted by 1)
+    MultiArityFunction = 17,  // Multi-arity function with runtime dispatch
 }
 
 /// Header for all heap-allocated values
@@ -214,6 +215,16 @@ impl Value {
     /// Get the function data (unsafe - caller must ensure tag is Function)
     pub unsafe fn as_function(&self) -> *mut crate::function::FunctionData {
         self.data.ptr as *mut crate::function::FunctionData
+    }
+
+    /// Create a multi-arity function value from MultiArityFunctionData pointer
+    pub fn from_multi_arity_function(func_data: *mut crate::function::MultiArityFunctionData) -> *mut Self {
+        Self::from_ptr(ValueTag::MultiArityFunction, func_data as *mut u8)
+    }
+
+    /// Get the multi-arity function data (unsafe - caller must ensure tag is MultiArityFunction)
+    pub unsafe fn as_multi_arity_function(&self) -> *mut crate::function::MultiArityFunctionData {
+        self.data.ptr as *mut crate::function::MultiArityFunctionData
     }
 
     /// Create a var value from Var pointer
@@ -597,6 +608,35 @@ unsafe fn deallocate_value(val: *mut Value) {
             }
             drop(Box::from_raw(val));
         }
+        ValueTag::MultiArityFunction => {
+            // Release multi-arity function data
+            let multi_func_data = (*val).as_multi_arity_function();
+            if !multi_func_data.is_null() {
+                let arity_count = (*multi_func_data).arity_count;
+                let env_size = (*multi_func_data).env_size;
+
+                // Release captured environment values (after arity variants)
+                if env_size > 0 {
+                    let variants_ptr = multi_func_data.offset(1) as *const crate::function::ArityVariant;
+                    let env_ptr = variants_ptr.offset(arity_count as isize) as *const *mut Value;
+                    for i in 0..env_size {
+                        let env_val = *env_ptr.offset(i as isize);
+                        if !env_val.is_null() {
+                            clorus_release(env_val);
+                        }
+                    }
+                }
+
+                // Free the multi-arity function data
+                let header_size = std::mem::size_of::<crate::function::MultiArityFunctionData>();
+                let variants_size = (arity_count as usize) * std::mem::size_of::<crate::function::ArityVariant>();
+                let env_data_size = (env_size as usize) * std::mem::size_of::<*mut Value>();
+                let total_size = header_size + variants_size + env_data_size;
+                let layout = std::alloc::Layout::from_size_align_unchecked(total_size, 8);
+                std::alloc::dealloc(multi_func_data as *mut u8, layout);
+            }
+            drop(Box::from_raw(val));
+        }
         ValueTag::Var => {
             // Release var and free Value
             let var_ptr = (*val).as_var();
@@ -799,7 +839,8 @@ pub extern "C" fn clorus_is_fn(val: *mut Value) -> bool {
         return false;
     }
     unsafe {
-        (*val).header().tag() == ValueTag::Function
+        let tag = (*val).header().tag();
+        tag == ValueTag::Function || tag == ValueTag::MultiArityFunction
     }
 }
 
@@ -896,7 +937,7 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
             // TODO: Implement deep equality for collections
             ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet |
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
-            ValueTag::Function | ValueTag::Var => {
+            ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var => {
                 (*left).as_ptr() == (*right).as_ptr()
             }
         }

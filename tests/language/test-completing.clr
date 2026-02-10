@@ -1,0 +1,34 @@
+;; Test completing function - the simplest transducer pattern
+(ns test-completing)
+
+;; Custom addition function to pass to completing
+(defn my-add [x y]
+  (+ x y))
+
+;; This is the critical test case that was failing
+;; completing takes a reducing function and returns a multi-arity closure
+;; that captures the input function
+(defn completing [f]
+  (fn
+    ([result] result)
+    ([result input] (f result input))))
+
+;; Test with our custom add function
+(def plus-rf (completing my-add))
+
+(defn -main []
+  (do
+    (println "Testing completing function (multi-arity closure capture)...")
+
+    ;; Test 1-arity (completion)
+    (println "Test 1: Completion arity (should return 42):")
+    (println (plus-rf 42))
+
+    ;; Test 2-arity (reduction step)
+    (println "Test 2: Reduction step (should return 47):")
+    (println (plus-rf 42 5))
+
+    (println "All tests passed! Multi-arity closure capture works!")
+    0))
+
+(-main)

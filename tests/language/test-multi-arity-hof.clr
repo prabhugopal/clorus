@@ -1,0 +1,31 @@
+;; Test multi-arity closure capture with higher-order function pattern
+(ns test-multi-arity-hof)
+
+;; Test: Simple multi-arity closure with one capture
+(defn make-adder [n]
+  (fn
+    ([x] (+ x n))
+    ([x y] (+ x y n))))
+
+;; Helper function to test 1-arity closure
+(defn test-arity-1 [f x]
+  (f x))
+
+;; Helper function to test 2-arity closure
+(defn test-arity-2 [f x y]
+  (f x y))
+
+;; Create closure
+(def adder5 (make-adder 5))
+
+;; Test 1-arity through HOF
+(def result1 (test-arity-1 adder5 10))
+
+;; Test 2-arity through HOF
+(def result2 (test-arity-2 adder5 10 20))
+
+;; Print results
+result1
+result2
+
+"tests complete"

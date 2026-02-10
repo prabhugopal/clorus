@@ -1,0 +1,16 @@
+;; Test multi-arity closure creation without calling
+(ns test-create-only)
+
+;; Test: Create multi-arity closure with capture
+(defn make-adder [n]
+  (fn
+    ([x] (+ x n))
+    ([x y] (+ x y n))))
+
+;; Just create the closure
+(def adder5 (make-adder 5))
+
+;; Print it
+adder5
+
+"creation complete"

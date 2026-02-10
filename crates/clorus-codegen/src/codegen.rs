@@ -601,6 +601,29 @@ impl<'ctx> CodeGen<'ctx> {
         );
         self.module.add_function("clorus_function_call", function_call_type, None);
 
+        // clorus_multi_arity_function_new(arities: *const ArityVariant, arity_count: u32, env: *const *mut Value, env_size: u32) -> *mut Value
+        let multi_arity_function_new_type = i8_ptr_type.fn_type(
+            &[
+                i8_ptr_type.into(),  // arities pointer (treated as opaque)
+                self.context.i32_type().into(),  // arity_count
+                i8_ptr_type.ptr_type(AddressSpace::default()).into(),  // env pointer
+                self.context.i32_type().into()  // env_size
+            ],
+            false
+        );
+        self.module.add_function("clorus_multi_arity_function_new", multi_arity_function_new_type, None);
+
+        // clorus_multi_arity_function_call(func: *mut Value, args: *const *mut Value, arg_count: i32) -> *mut Value
+        let multi_arity_function_call_type = i8_ptr_type.fn_type(
+            &[
+                i8_ptr_type.into(),
+                i8_ptr_type.ptr_type(AddressSpace::default()).into(),
+                self.context.i32_type().into()
+            ],
+            false
+        );
+        self.module.add_function("clorus_multi_arity_function_call", multi_arity_function_call_type, None);
+
         // ===== Exception Handling (C++ ABI) =====
         // __cxa_allocate_exception(size: size_t) -> *mut i8
         let allocate_exception_type = i8_ptr_type.fn_type(&[self.context.i64_type().into()], false);
@@ -3020,7 +3043,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                let mut last_function = None;
+                let mut arity_functions = Vec::new();
 
                 // Generate a function for each arity
                 for arity in arities.iter() {
@@ -3116,84 +3139,137 @@ impl<'ctx> CodeGen<'ctx> {
                         self.builder.position_at_end(block);
                     }
 
-                    // Keep track of the last function for returning
-                    last_function = Some(function);
+                    // Store function with its arity
+                    let arity_count = if arity.rest_param.is_some() {
+                        -1  // Variadic
+                    } else {
+                        arity.params.len() as i32
+                    };
+                    arity_functions.push((arity_count, function));
                 }
 
-                // Now create the closure value with captured environment
-                if let Some(function) = last_function {
-                    // Build environment array with captured values (similar to single-arity Fn)
-                    let env_ptr = if !free_vars.is_empty() {
-                        // Allocate array for environment: [*mut Value; free_vars.len()]
-                        let env_array_type = value_ptr_type.array_type(free_vars.len() as u32);
-                        let env_array = self.builder.build_alloca(env_array_type, "env_array").unwrap();
+                // Now create the multi-arity closure value with captured environment
+                // Build environment array with captured values (similar to single-arity Fn)
+                let env_ptr = if !free_vars.is_empty() {
+                    // Allocate array for environment: [*mut Value; free_vars.len()]
+                    let env_array_type = value_ptr_type.array_type(free_vars.len() as u32);
+                    let env_array = self.builder.build_alloca(env_array_type, "env_array").unwrap();
 
-                        for (i, var_name) in free_vars.iter().enumerate() {
-                            // Get the value from current scope (check variables, parameter_context, then globals)
-                            let var_value = if let Some(var_ptr) = self.variables.get(var_name) {
-                                self.builder.build_load(value_ptr_type, *var_ptr, var_name)
-                                    .unwrap()
-                                    .into_pointer_value()
-                            } else if let Some(param_ptr) = self.parameter_context.get(var_name) {
-                                // Check parameter context for captured defn parameters
-                                self.builder.build_load(value_ptr_type, *param_ptr, var_name)
-                                    .unwrap()
-                                    .into_pointer_value()
-                            } else if let Some(global) = self.globals.get(var_name) {
-                                self.builder.build_load(value_ptr_type, global.as_pointer_value(), var_name)
-                                    .unwrap()
-                                    .into_pointer_value()
-                            } else {
-                                return Err(format!("Captured variable not found: {}", var_name));
-                            };
+                    for (i, var_name) in free_vars.iter().enumerate() {
+                        // Get the value from current scope (check variables, parameter_context, then globals)
+                        let var_value = if let Some(var_ptr) = self.variables.get(var_name) {
+                            self.builder.build_load(value_ptr_type, *var_ptr, var_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else if let Some(param_ptr) = self.parameter_context.get(var_name) {
+                            // Check parameter context for captured defn parameters
+                            self.builder.build_load(value_ptr_type, *param_ptr, var_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else if let Some(global) = self.globals.get(var_name) {
+                            self.builder.build_load(value_ptr_type, global.as_pointer_value(), var_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else {
+                            return Err(format!("Captured variable not found: {}", var_name));
+                        };
 
-                            // Store in environment array
-                            let elem_ptr = unsafe {
-                                self.builder.build_gep(
-                                    env_array_type,
-                                    env_array,
-                                    &[
-                                        self.context.i32_type().const_zero(),
-                                        self.context.i32_type().const_int(i as u64, false)
-                                    ],
-                                    &format!("env_elem_{}", i)
-                                ).unwrap()
-                            };
-                            self.builder.build_store(elem_ptr, var_value).unwrap();
-                        }
+                        // Store in environment array
+                        let elem_ptr = unsafe {
+                            self.builder.build_gep(
+                                env_array_type,
+                                env_array,
+                                &[
+                                    self.context.i32_type().const_zero(),
+                                    self.context.i32_type().const_int(i as u64, false)
+                                ],
+                                &format!("env_elem_{}", i)
+                            ).unwrap()
+                        };
+                        self.builder.build_store(elem_ptr, var_value).unwrap();
+                    }
 
-                        // Cast to *const *mut Value
-                        self.builder.build_pointer_cast(
-                            env_array,
-                            value_ptr_type.ptr_type(AddressSpace::default()),
-                            "env_ptr"
+                    // Cast to *const *mut Value
+                    self.builder.build_pointer_cast(
+                        env_array,
+                        value_ptr_type.ptr_type(AddressSpace::default()),
+                        "env_ptr"
+                    ).unwrap()
+                } else {
+                    // No captures - pass null
+                    value_ptr_type.ptr_type(AddressSpace::default()).const_null()
+                };
+
+                // Create ArityVariant array
+                // struct ArityVariant { arity: i32, func_ptr: *const u8 }
+                let i32_type = self.context.i32_type();
+                let arity_variant_type = self.context.struct_type(
+                    &[i32_type.into(), value_ptr_type.into()],
+                    false
+                );
+                let arity_variants_array_type = arity_variant_type.array_type(arity_functions.len() as u32);
+                let arity_variants_array = self.builder.build_alloca(arity_variants_array_type, "arity_variants").unwrap();
+
+                for (i, (arity_count, function)) in arity_functions.iter().enumerate() {
+                    // Create ArityVariant struct: { arity: i32, func_ptr: *const u8 }
+                    let variant_ptr = unsafe {
+                        self.builder.build_gep(
+                            arity_variants_array_type,
+                            arity_variants_array,
+                            &[
+                                i32_type.const_zero(),
+                                i32_type.const_int(i as u64, false)
+                            ],
+                            &format!("variant_{}", i)
                         ).unwrap()
-                    } else {
-                        // No captures - pass null
-                        value_ptr_type.ptr_type(AddressSpace::default()).const_null()
                     };
 
-                    // Create a proper Function value using clorus_function_new
-                    // For multi-arity, use the last arity function as a temporary solution
-                    // TODO: Implement proper multi-arity dispatch
-                    let function_new_fn = self.module.get_function("clorus_function_new")
-                        .ok_or("clorus_function_new not declared")?;
+                    // Store arity (field 0)
+                    let arity_field_ptr = unsafe {
+                        self.builder.build_gep(
+                            arity_variant_type,
+                            variant_ptr,
+                            &[i32_type.const_zero(), i32_type.const_zero()],
+                            "arity_field"
+                        ).unwrap()
+                    };
+                    let arity_val = i32_type.const_int(*arity_count as u64, true);  // signed
+                    self.builder.build_store(arity_field_ptr, arity_val).unwrap();
 
+                    // Store func_ptr (field 1)
+                    let func_ptr_field_ptr = unsafe {
+                        self.builder.build_gep(
+                            arity_variant_type,
+                            variant_ptr,
+                            &[i32_type.const_zero(), i32_type.const_int(1, false)],
+                            "func_ptr_field"
+                        ).unwrap()
+                    };
                     let fn_ptr = function.as_global_value().as_pointer_value();
-                    // Use -1 as arity to indicate multi-arity function (runtime will need to handle this)
-                    let arity = self.context.i32_type().const_int((-1i64) as u64, false);
-                    let env_size = self.context.i32_type().const_int(free_vars.len() as u64, false);
-
-                    let func_val = self.builder.build_call(
-                        function_new_fn,
-                        &[fn_ptr.into(), arity.into(), env_ptr.into(), env_size.into()],
-                        "new_multi_function"
-                    ).unwrap();
-
-                    Ok(func_val.try_as_basic_value().left().unwrap().into_pointer_value())
-                } else {
-                    Err("Multi-arity fn must have at least one arity".to_string())
+                    self.builder.build_store(func_ptr_field_ptr, fn_ptr).unwrap();
                 }
+
+                // Cast arity variants array to *const ArityVariant (*const u8 for FFI)
+                let arities_ptr = self.builder.build_pointer_cast(
+                    arity_variants_array,
+                    value_ptr_type,
+                    "arities_ptr"
+                ).unwrap();
+
+                // Call clorus_multi_arity_function_new
+                let multi_arity_function_new_fn = self.module.get_function("clorus_multi_arity_function_new")
+                    .ok_or("clorus_multi_arity_function_new not declared")?;
+
+                let arity_count = i32_type.const_int(arity_functions.len() as u64, false);
+                let env_size = i32_type.const_int(free_vars.len() as u64, false);
+
+                let func_val = self.builder.build_call(
+                    multi_arity_function_new_fn,
+                    &[arities_ptr.into(), arity_count.into(), env_ptr.into(), env_size.into()],
+                    "new_multi_arity_function"
+                ).unwrap();
+
+                Ok(func_val.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             Expr::Do { exprs } => {

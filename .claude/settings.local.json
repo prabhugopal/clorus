@@ -136,7 +136,13 @@
       "Bash(./organize-repo.sh)",
       "Bash(./target/test-transducers:*)",
       "Bash(./target/test-let:*)",
-      "Bash(./target/clorus-test-suite)"
+      "Bash(./target/clorus-test-suite)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus check:*)",
+      "Bash(tar:*)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus clean:*)",
+      "Bash(ln:*)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus jit:*)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus help:*)"
     ]
   }
 }
