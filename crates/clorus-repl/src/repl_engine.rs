@@ -58,7 +58,8 @@ pub struct ReplEngine<'ctx> {
     /// Parsed stdlib expressions to include in every evaluation
     stdlib_exprs: Vec<Expr>,
     /// Parsed module expressions (from required modules) to include in every evaluation
-    module_exprs: Vec<Expr>,
+    /// Stored as (namespace, expr) tuples to preserve namespace context
+    module_exprs: Vec<(String, Expr)>,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -274,9 +275,9 @@ impl<'ctx> ReplEngine<'ctx> {
     }
 
     /// Recursively load a module and its dependencies
-    /// Returns parsed expressions of all loaded modules (in dependency order)
+    /// Returns parsed expressions with their namespace (in dependency order)
     /// Excludes require/ns statements which are already processed
-    fn load_module_recursive(&mut self, namespace: &str) -> Result<Vec<Expr>, String> {
+    fn load_module_recursive(&mut self, namespace: &str) -> Result<Vec<(String, Expr)>, String> {
         use std::fs;
 
         // Skip if already loaded
@@ -328,14 +329,15 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Add this module's expressions AFTER its dependencies
         // BUT exclude Require and Ns expressions (already processed)
+        // Tag each expression with its namespace
         for expr in exprs {
             match expr {
                 Expr::Require { .. } | Expr::Ns { .. } => {
                     // Skip - already processed
                 }
                 _ => {
-                    // Add expression to be compiled
-                    all_exprs.push(expr);
+                    // Add expression with its namespace
+                    all_exprs.push((namespace.to_string(), expr));
                 }
             }
         }
@@ -523,7 +525,16 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Compile loaded module expressions (after stdlib, before user history)
         // These are from required modules (e.g., demos.shapes-demo)
-        for (module_idx, module_expr) in self.module_exprs.iter().enumerate() {
+        // Each expression is compiled with its module's namespace to avoid collisions
+        for (module_idx, (module_namespace, module_expr)) in self.module_exprs.iter().enumerate() {
+            // Set namespace context for this module's expressions
+            let module_codegen_ns = clorus_codegen::NamespaceContext {
+                current: module_namespace.clone(),
+                aliases: HashMap::new(),  // Module's own aliases handled during parsing
+                imports: HashMap::new(),
+            };
+            codegen.set_namespace(module_codegen_ns);
+
             let expanded = expand_macros(module_expr);
 
             // Skip namespace declarations (already processed)
@@ -539,7 +550,7 @@ impl<'ctx> ReplEngine<'ctx> {
                 continue;
             }
 
-            let fn_name = format!("module_{}", module_idx);
+            let fn_name = format!("module_{}_{}", module_namespace.replace('.', "_"), module_idx);
             codegen.wrap_in_function(&expanded, &fn_name)?;
         }
 
