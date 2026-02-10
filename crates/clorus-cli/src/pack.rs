@@ -263,7 +263,10 @@ pub fn extract_clip(clip_path: &str) -> Result<ClipPackage, String> {
 pub fn load_clip_dependencies(manifest: &Manifest) -> Result<Vec<ClipPackage>, String> {
     let mut packages = Vec::new();
 
-    for (name, dep) in &manifest.dependencies {
+    // Resolve dependencies with workspace context
+    let resolved_deps = manifest.resolve_dependencies()?;
+
+    for (name, dep) in resolved_deps {
         if let Some(path) = dep.get_path() {
             if path.ends_with(".clip") {
                 println!("   📦 Loading dependency: {} from {}", name, path);

@@ -200,6 +200,64 @@ impl ClorusDependency {
             _ => None,
         }
     }
+
+    /// Check if this is a workspace dependency reference
+    pub fn is_workspace(&self) -> bool {
+        matches!(self, ClorusDependency::Workspace { workspace: true })
+    }
+
+    /// Resolve this dependency to a concrete dependency using workspace context
+    /// Returns the resolved dependency or self if no workspace resolution needed
+    pub fn resolve_with_workspace(
+        &self,
+        dep_name: &str,
+        workspace_manifest: Option<&Manifest>,
+        workspace_root: Option<&Path>,
+    ) -> Result<ClorusDependency, String> {
+        match self {
+            ClorusDependency::Workspace { workspace: true } => {
+                // Look up dependency in workspace manifest
+                let ws_manifest = workspace_manifest
+                    .ok_or_else(|| format!(
+                        "Dependency '{}' uses workspace = true but no workspace manifest found",
+                        dep_name
+                    ))?;
+
+                let ws_config = ws_manifest.workspace.as_ref()
+                    .ok_or_else(|| format!(
+                        "Dependency '{}' uses workspace = true but no [workspace] section found",
+                        dep_name
+                    ))?;
+
+                // Look up in workspace.dependencies
+                let ws_dep = ws_config.dependencies.get(dep_name)
+                    .ok_or_else(|| format!(
+                        "Dependency '{}' not found in workspace dependencies",
+                        dep_name
+                    ))?;
+
+                // Recursively resolve in case workspace dep also needs resolution
+                ws_dep.resolve_with_workspace(dep_name, workspace_manifest, workspace_root)
+            }
+            ClorusDependency::Path { path } => {
+                // If path is relative and we have workspace root, make it absolute from workspace root
+                if let Some(ws_root) = workspace_root {
+                    let path_buf = PathBuf::from(path);
+                    if path_buf.is_relative() {
+                        let absolute = ws_root.join(&path_buf);
+                        Ok(ClorusDependency::Path {
+                            path: absolute.to_string_lossy().to_string(),
+                        })
+                    } else {
+                        Ok(self.clone())
+                    }
+                } else {
+                    Ok(self.clone())
+                }
+            }
+            _ => Ok(self.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -363,5 +421,35 @@ impl Manifest {
             .ok_or("Not in a workspace (no Clorus.toml with [workspace] found)")?;
         let manifest = Self::from_file(&workspace_root.join("Clorus.toml"))?;
         Ok((manifest, workspace_root))
+    }
+
+    /// Resolve all dependencies for this manifest, considering workspace context
+    /// Returns a HashMap of resolved dependencies (name -> resolved ClorusDependency)
+    pub fn resolve_dependencies(&self) -> Result<HashMap<String, ClorusDependency>, String> {
+        let mut resolved = HashMap::new();
+
+        // Try to load workspace context if we're in a workspace
+        let workspace_context = if Self::is_in_workspace() {
+            Self::load_workspace().ok()
+        } else {
+            None
+        };
+
+        let (workspace_manifest, workspace_root) = match &workspace_context {
+            Some((manifest, root)) => (Some(manifest), Some(root.as_path())),
+            None => (None, None),
+        };
+
+        // Resolve each dependency
+        for (name, dep) in &self.dependencies {
+            let resolved_dep = dep.resolve_with_workspace(
+                name,
+                workspace_manifest,
+                workspace_root,
+            )?;
+            resolved.insert(name.clone(), resolved_dep);
+        }
+
+        Ok(resolved)
     }
 }
