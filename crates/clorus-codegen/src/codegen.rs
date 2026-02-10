@@ -442,37 +442,28 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Extract a raw pointer from a Value* (for opaque pointers)
     fn extract_pointer_from_value(&self, value_ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
-        // Value* contains a pointer in its data field
-        // For pointers, we stored them as i8* directly
-        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-        // Cast Value* to i8**
-        let ptr_ptr = self.builder.build_pointer_cast(
-            value_ptr,
-            i8_ptr_type.ptr_type(AddressSpace::default()),
-            "value_to_ptr_ptr"
+        // Use runtime function to properly extract opaque pointer from Value*
+        let extract_fn = self.module.get_function("clorus_extract_opaque_pointer")
+            .expect("clorus_extract_opaque_pointer not declared - runtime functions not initialized");
+        let call_result = self.builder.build_call(
+            extract_fn,
+            &[value_ptr.into()],
+            "extract_ptr"
         ).unwrap();
-
-        // Load the i8*
-        self.builder.build_load(
-            i8_ptr_type,
-            ptr_ptr,
-            "load_ptr"
-        ).unwrap().into_pointer_value()
+        call_result.try_as_basic_value().left().unwrap().into_pointer_value()
     }
 
     /// Box a raw pointer into a Value* (for opaque pointers)
     fn box_pointer(&self, ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
-        // Allocate a Value* to hold the pointer
-        let value_ptr = self.builder.build_malloc(
-            self.context.i8_type().ptr_type(AddressSpace::default()),
-            "alloc_value_ptr"
+        // Use runtime function to properly create Value* with OpaquePointer tag
+        let box_fn = self.module.get_function("clorus_value_opaque_pointer")
+            .expect("clorus_value_opaque_pointer not declared - runtime functions not initialized");
+        let call_result = self.builder.build_call(
+            box_fn,
+            &[ptr.into()],
+            "box_ptr"
         ).unwrap();
-
-        // Store the pointer
-        self.builder.build_store(value_ptr, ptr).unwrap();
-
-        value_ptr
+        call_result.try_as_basic_value().left().unwrap().into_pointer_value()
     }
 
     /// Declare runtime library FFI functions
@@ -562,6 +553,10 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_f64_to_value_fn("clorus_value_bool");
         self.declare_value_to_i32_fn("clorus_is_truthy");
         self.declare_bool_to_value_fn("clorus_value_boolean");
+
+        // Opaque pointer boxing/unboxing (for FFI pointers like window handles)
+        self.declare_ptr_to_value_fn("clorus_value_opaque_pointer");
+        self.declare_value_to_ptr_fn("clorus_extract_opaque_pointer");
 
         // ===== Value Comparison =====
         self.declare_value2_to_bool_fn("clorus_equals");  // General equality function
@@ -1039,6 +1034,20 @@ impl<'ctx> CodeGen<'ctx> {
     fn declare_bool_to_value_fn(&mut self, name: &str) {
         let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
         let fn_type = i8_ptr_type.fn_type(&[self.context.bool_type().into()], false);
+        self.module.add_function(name, fn_type, None);
+    }
+
+    /// Declare a function that takes i8* pointer and returns Value*
+    fn declare_ptr_to_value_fn(&mut self, name: &str) {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function(name, fn_type, None);
+    }
+
+    /// Declare a function that takes Value* and returns i8* pointer
+    fn declare_value_to_ptr_fn(&mut self, name: &str) {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
         self.module.add_function(name, fn_type, None);
     }
 

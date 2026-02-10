@@ -30,6 +30,7 @@ pub enum ValueTag {
     Function = 15,
     Var = 16,  // Var for dynamic bindings (shifted by 1)
     MultiArityFunction = 17,  // Multi-arity function with runtime dispatch
+    OpaquePointer = 18,  // FFI opaque pointer (window, etc.)
 }
 
 /// Header for all heap-allocated values
@@ -207,6 +208,16 @@ impl Value {
         self.data.ptr
     }
 
+    /// Create an opaque pointer value (for FFI opaque pointers like window handles)
+    pub fn opaque_pointer(ptr: *mut u8) -> *mut Self {
+        Self::from_ptr(ValueTag::OpaquePointer, ptr)
+    }
+
+    /// Get the opaque pointer value (unsafe - caller must ensure tag is OpaquePointer)
+    pub unsafe fn as_opaque_pointer(&self) -> *mut u8 {
+        self.data.ptr
+    }
+
     /// Create a function value from FunctionData pointer
     pub fn from_function(func_data: *mut crate::function::FunctionData) -> *mut Self {
         Self::from_ptr(ValueTag::Function, func_data as *mut u8)
@@ -324,6 +335,23 @@ pub extern "C" fn clorus_value_double(n: f64) -> *mut Value {
 #[no_mangle]
 pub extern "C" fn clorus_value_boolean(b: bool) -> *mut Value {
     Value::boolean(b)
+}
+
+/// Create an opaque pointer Value (for LLVM codegen FFI pointers)
+#[no_mangle]
+pub extern "C" fn clorus_value_opaque_pointer(ptr: *mut u8) -> *mut Value {
+    Value::opaque_pointer(ptr)
+}
+
+/// Extract opaque pointer from Value (for LLVM codegen FFI calls)
+#[no_mangle]
+pub extern "C" fn clorus_extract_opaque_pointer(val: *mut Value) -> *mut u8 {
+    if val.is_null() {
+        return std::ptr::null_mut();
+    }
+    unsafe {
+        (*val).as_opaque_pointer()
+    }
 }
 
 /// Check if a Value is truthy (for if/when/etc.)
