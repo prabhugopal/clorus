@@ -1883,6 +1883,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // Variables now store Value* instead of f64
 
                 // First, try to resolve qualified names (namespace/var or alias/var)
+                // Globals are now namespace-mangled like functions
                 let resolved_name = if name.contains('/') {
                     let parts: Vec<&str> = name.split('/').collect();
                     if parts.len() == 2 {
@@ -1895,18 +1896,32 @@ impl<'ctx> CodeGen<'ctx> {
                             .map(|s| s.as_str())
                             .unwrap_or(namespace_or_alias);
 
-                        // For now, globals are stored with simple names, not mangled
-                        // So we look up the simple name directly
-                        // TODO: Once globals are namespace-mangled, use mangled lookup
-                        var_name.to_string()
+                        // Generate mangled name for global lookup
+                        // const/PADDING-SMALL with const=utils.constants
+                        // -> clorus_utils_constants_PADDING_SMALL
+                        if resolved_namespace == "user" {
+                            var_name.to_string()
+                        } else {
+                            format!("clorus_{}_{}",
+                                resolved_namespace.replace('.', "_").replace('-', "_"),
+                                var_name.replace('-', "_"))
+                        }
                     } else {
                         name.clone()
                     }
                 } else {
-                    name.clone()
+                    // Unqualified name - mangle with current namespace for global lookup
+                    if self.namespace.current == "user" {
+                        name.clone()
+                    } else {
+                        format!("clorus_{}_{}",
+                            self.namespace.current.replace('.', "_").replace('-', "_"),
+                            name.replace('-', "_"))
+                    }
                 };
 
                 // BUGFIX: Check LOCALS first to allow shadowing of globals
+                // Locals are never namespace-mangled (always use simple name)
                 if let Some(ptr) = self.variables.get(name) {
                     // Load Value* from local variable
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
@@ -1917,21 +1932,12 @@ impl<'ctx> CodeGen<'ctx> {
                     ).unwrap();
                     Ok(val.into_pointer_value())
                 } else if let Some(global) = self.globals.get(&resolved_name) {
-                    // Load Value* from global variable
+                    // Load Value* from global variable (namespace-mangled)
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let val = self.builder.build_load(
                         value_ptr_type,
                         global.as_pointer_value(),
                         &resolved_name
-                    ).unwrap();
-                    Ok(val.into_pointer_value())
-                } else if let Some(ptr) = self.variables.get(name) {
-                    // Load Value* from local variable
-                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                    let val = self.builder.build_load(
-                        value_ptr_type,
-                        *ptr,
-                        name
                     ).unwrap();
                     Ok(val.into_pointer_value())
                 } else {
@@ -2483,17 +2489,28 @@ impl<'ctx> CodeGen<'ctx> {
                 // Compile the value (returns Value*)
                 let val = self.compile_expr(value)?;
 
+                // Generate mangled name based on current namespace (like defn)
+                // utils.constants/PADDING-SMALL -> clorus_utils_constants_PADDING_SMALL
+                let mangled_name = if self.namespace.current == "user" {
+                    // In default namespace, use simple name
+                    name.clone()
+                } else {
+                    format!("clorus_{}_{}",
+                        self.namespace.current.replace('.', "_").replace('-', "_"),
+                        name.replace('-', "_"))
+                };
+
                 // Create or update global variable (now stores Value*)
-                let global = if let Some(existing_global) = self.globals.get(name) {
+                let global = if let Some(existing_global) = self.globals.get(&mangled_name) {
                     // If global already exists, just update it
                     *existing_global
                 } else {
                     // Create new global variable of type Value* (i8*)
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                    let global = self.module.add_global(value_ptr_type, Some(AddressSpace::default()), name);
+                    let global = self.module.add_global(value_ptr_type, Some(AddressSpace::default()), &mangled_name);
                     // Initialize with null pointer
                     global.set_initializer(&value_ptr_type.const_null());
-                    self.globals.insert(name.clone(), global);
+                    self.globals.insert(mangled_name.clone(), global);
                     global
                 };
 
