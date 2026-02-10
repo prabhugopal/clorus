@@ -4027,9 +4027,47 @@ impl<'ctx> CodeGen<'ctx> {
                     return self.compile_core_call(func, args);
                 }
 
-                // Check if function name is a local variable (parameter or let-binding)
-                // This allows first-class functions: (fn [f] (f 42))
-                if let Some(var_ptr) = self.variables.get(func).cloned() {
+                // Check if function name is a local variable or global (for first-class functions)
+                // This allows: (fn [f] (f 42)) and (def xf (map inc)) (xf conj)
+                let func_var_ptr = self.variables.get(func).cloned()
+                    .or_else(|| {
+                        // Also check globals for function values
+                        // Need to check if it exists and resolve namespace-mangled name
+                        let resolved_name = if func.contains('/') {
+                            let parts: Vec<&str> = func.split('/').collect();
+                            if parts.len() == 2 {
+                                let namespace_or_alias = parts[0];
+                                let var_name = parts[1];
+
+                                let resolved_namespace = self.namespace.aliases
+                                    .get(namespace_or_alias)
+                                    .map(|s| s.as_str())
+                                    .unwrap_or(namespace_or_alias);
+
+                                if resolved_namespace == "user" {
+                                    var_name.to_string()
+                                } else {
+                                    format!("clorus_{}_{}",
+                                        resolved_namespace.replace('.', "_").replace('-', "_"),
+                                        var_name.replace('-', "_"))
+                                }
+                            } else {
+                                func.clone()
+                            }
+                        } else {
+                            if self.namespace.current == "user" {
+                                func.clone()
+                            } else {
+                                format!("clorus_{}_{}",
+                                    self.namespace.current.replace('.', "_").replace('-', "_"),
+                                    func.replace('-', "_"))
+                            }
+                        };
+
+                        self.globals.get(&resolved_name).map(|g| g.as_pointer_value())
+                    });
+
+                if let Some(var_ptr) = func_var_ptr {
                     // It's a variable - use dynamic dispatch via clorus_function_call
                     let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let func_val = self.builder.build_load(i8_ptr_type, var_ptr, "load_func_var")

@@ -103,21 +103,18 @@
 ;; =============================================================================
 
 (defn transduce
-  "Apply transducer to collection."
+  "Apply transducer to collection. Simplified version without completion arity."
   ([xform rf-fn coll]
-   (transduce xform rf-fn (rf-fn) coll))
+   (transduce xform rf-fn [] coll))
   ([xform rf-fn init coll]
-   (let [rf (xform rf-fn)
-         result (reduce (fn [acc input]
-                         (let [r (rf acc input)]
-                           (if (reduced? r)
-                             (reduced r)
-                             r)))
-                       init
-                       coll)]
-     (if (reduced? result)
-       (unreduced result)
-       (rf result)))))
+   (let [rf (xform rf-fn)]
+     (reduce (fn [acc input]
+               (let [r (rf acc input)]
+                 (if (reduced? r)
+                   (unreduced r)
+                   r)))
+             init
+             coll))))
 
 (defn into
   "Build collection using transducer."
