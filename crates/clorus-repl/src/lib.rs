@@ -494,6 +494,12 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                             println!("   ✓ {} v{}", pkg.name, pkg.version);
                             // Register the namespace with the REPL engine
                             repl_engine.register_clip_namespace(&pkg.name);
+
+                            // Register discovered modules with full namespace paths
+                            for module in &pkg.modules {
+                                let full_module_path = format!("{}.{}", pkg.name, module);
+                                repl_engine.register_clip_namespace(&full_module_path);
+                            }
                         }
                         println!();
                         _clip_libs = libs;  // Keep libraries loaded
@@ -1391,12 +1397,17 @@ struct ClipPackage {
     name: String,
     version: String,
     object_path: Option<std::path::PathBuf>,
+    rust_ffi_libs: Vec<std::path::PathBuf>,  // Rust FFI static libraries to link
+    frameworks: Vec<String>,  // macOS frameworks to link (from [link] section)
+    modules: Vec<String>,  // Discovered modules (e.g., ["components.button", "utils.text"])
+    clip_path: String,  // Original .clip file path (for module discovery)
 }
 
 /// Load .clip dependencies for REPL
 /// Returns (Vec<libloading::Library>, Vec<ClipPackage>) to keep libraries loaded
 fn load_clip_dependencies_for_repl() -> Result<(Vec<libloading::Library>, Vec<ClipPackage>), String> {
     use std::fs;
+    use std::path::PathBuf;
 
     // Read and parse Clorus.toml
     let manifest_content = fs::read_to_string("Clorus.toml")
@@ -1407,6 +1418,51 @@ fn load_clip_dependencies_for_repl() -> Result<(Vec<libloading::Library>, Vec<Cl
 
     let mut packages = Vec::new();
     let mut loaded_libs = Vec::new();
+
+    // Extract rust-dependencies for FFI linking
+    let mut rust_ffi_libs: Vec<PathBuf> = Vec::new();
+    if let Some(rust_deps) = manifest.get("rust-dependencies").and_then(|v| v.as_table()) {
+        for (dep_name, dep_info) in rust_deps {
+            // Get the path to the Rust crate
+            if let Some(path_table) = dep_info.as_table() {
+                if let Some(path) = path_table.get("path").and_then(|p| p.as_str()) {
+                    // Convert dep name to library name (e.g., coral-gfx -> coral_gfx_ffi)
+                    let lib_name_base = dep_name.replace('-', "_");
+                    let lib_name = format!("lib{}_ffi.a", lib_name_base);
+
+                    // The rust-dependencies path points to the Rust source directory
+                    // But the built library is in the parent directory's target/rust-ffi/
+                    let rust_path = PathBuf::from(path);
+                    let parent_dir = rust_path.parent()
+                        .ok_or_else(|| format!("Cannot get parent directory of: {}", path))?;
+
+                    let rust_target_dir = parent_dir
+                        .join("target/rust-ffi")
+                        .join(format!("{}_ffi", lib_name_base))
+                        .join("target/release");
+                    let lib_path = rust_target_dir.join(&lib_name);
+
+                    if lib_path.exists() {
+                        rust_ffi_libs.push(lib_path);
+                    } else {
+                        eprintln!("   ⚠ Rust FFI library not found: {}", lib_path.display());
+                    }
+                }
+            }
+        }
+    }
+
+    // Extract frameworks from [link] section (macOS)
+    let mut frameworks = Vec::new();
+    if let Some(link_section) = manifest.get("link").and_then(|l| l.as_table()) {
+        if let Some(fws) = link_section.get("frameworks").and_then(|f| f.as_array()) {
+            for fw in fws {
+                if let Some(fw_str) = fw.as_str() {
+                    frameworks.push(fw_str.to_string());
+                }
+            }
+        }
+    }
 
     // Extract dependencies
     if let Some(deps) = manifest.get("dependencies").and_then(|d| d.as_table()) {
@@ -1428,7 +1484,27 @@ fn load_clip_dependencies_for_repl() -> Result<(Vec<libloading::Library>, Vec<Cl
 
             if let Some(clip_path) = clip_path {
                 // Extract .clip package
-                let package = extract_clip_package(&clip_path)?;
+                let mut package = extract_clip_package(&clip_path)?;
+
+                // Attach Rust FFI libraries to this package
+                package.rust_ffi_libs = rust_ffi_libs.clone();
+
+                // Attach frameworks from [link] section
+                package.frameworks = frameworks.clone();
+
+                // Discover modules from source directory (if available)
+                match discover_clip_modules(&clip_path, &package.name) {
+                    Ok(modules) => {
+                        if !modules.is_empty() {
+                            println!("   → Found {} modules in {}", modules.len(), package.name);
+                            package.modules = modules;
+                        }
+                    }
+                    Err(e) => {
+                        // Non-fatal: source directory might not be available
+                        eprintln!("   ⚠ Could not discover modules for {}: {}", package.name, e);
+                    }
+                }
 
                 // Build as dynamic library for REPL
                 match build_dylib_for_package(&package) {
@@ -1547,7 +1623,89 @@ fn extract_clip_package(clip_path: &str) -> Result<ClipPackage, String> {
         name,
         version,
         object_path,
+        rust_ffi_libs: Vec::new(),  // Will be populated by caller
+        frameworks: Vec::new(),  // Will be populated by caller
+        modules: Vec::new(),  // Will be populated by caller after module discovery
+        clip_path: clip_path.to_string(),  // Store original path for module discovery
     })
+}
+
+/// Discover modules from source directory for a .clip package
+/// Returns list of module paths like ["components.button", "components.textfield", "utils.text"]
+fn discover_clip_modules(clip_path: &str, package_name: &str) -> Result<Vec<String>, String> {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    let clip_path_buf = PathBuf::from(clip_path);
+
+    // Try to find source directory
+    // .clip is usually in dist/, source is in ../package-name/src/
+    let clip_dir = clip_path_buf.parent()
+        .ok_or_else(|| format!("Cannot get parent directory of: {}", clip_path))?;
+
+    // Go up one directory from dist/
+    let workspace_dir = clip_dir.parent()
+        .ok_or_else(|| format!("Cannot get workspace directory from: {}", clip_dir.display()))?;
+
+    // Look for package-name/src/ directory
+    let src_dir = workspace_dir.join(package_name).join("src");
+
+    if !src_dir.exists() {
+        // Source directory not found - this is OK, just return empty list
+        return Ok(Vec::new());
+    }
+
+    println!("   → Scanning {} for modules...", src_dir.display());
+
+    // Recursively scan for .clrs files
+    let mut modules = Vec::new();
+    scan_directory_for_modules(&src_dir, &src_dir, &mut modules)?;
+
+    Ok(modules)
+}
+
+/// Recursively scan directory for .clrs files and build module paths
+fn scan_directory_for_modules(
+    base_dir: &Path,
+    current_dir: &Path,
+    modules: &mut Vec<String>
+) -> Result<(), String> {
+    use std::fs;
+
+    let entries = fs::read_dir(current_dir)
+        .map_err(|e| format!("Failed to read directory {}: {}", current_dir.display(), e))?;
+
+    for entry_result in entries {
+        let entry = entry_result
+            .map_err(|e| format!("Failed to read entry: {}", e))?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // Recursively scan subdirectory
+            scan_directory_for_modules(base_dir, &path, modules)?;
+        } else if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext == "clrs" {
+                    // Convert file path to module path
+                    // e.g., src/components/button.clrs -> components.button
+                    if let Ok(rel_path) = path.strip_prefix(base_dir) {
+                        let module_path = rel_path
+                            .with_extension("") // Remove .clrs
+                            .to_string_lossy()
+                            .replace('/', ".")
+                            .replace('\\', ".");
+
+                        // Skip lib.clrs (entry point)
+                        if module_path != "lib" {
+                            modules.push(module_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, String> {
@@ -1594,11 +1752,21 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
         .arg("-o").arg(&dylib_path)
         .arg("-lc++");
 
+    // Add Rust FFI libraries
+    for rust_lib in &package.rust_ffi_libs {
+        link_cmd.arg(rust_lib);
+    }
+
     #[cfg(target_os = "macos")]
     {
         link_cmd.arg("-dynamiclib");
+        // Always link CoreFoundation and Security (base macOS requirements)
         link_cmd.arg("-framework").arg("CoreFoundation");
         link_cmd.arg("-framework").arg("Security");
+        // Add frameworks from [link] section in Clorus.toml
+        for framework in &package.frameworks {
+            link_cmd.arg("-framework").arg(framework);
+        }
     }
 
     let status = link_cmd

@@ -1228,7 +1228,32 @@ impl Parser {
             }
         }
 
-        Err("Currently only {:keys [x y]} map destructuring is supported".to_string())
+        // Long-form map destructuring: {bx :x by :y ...}
+        let mut bindings = Vec::new();
+
+        while !matches!(self.current_token(), Token::RBrace(_)) {
+            // Expect: symbol (binding name)
+            let binding_name = match self.current_token() {
+                Token::Symbol(s, _) => s.clone(),
+                _ => return Err("Map destructuring requires symbol before keyword".to_string()),
+            };
+            self.advance();
+
+            // Expect: keyword (map key)
+            let map_key = match self.current_token() {
+                Token::Keyword(k, _) => k.clone(),
+                _ => return Err(format!("Expected keyword after {} in map destructuring", binding_name)),
+            };
+            self.advance();
+
+            bindings.push((
+                MapPatternKey::Symbol(map_key),
+                Pattern::Symbol(binding_name)
+            ));
+        }
+
+        self.expect(Token::RBrace(Span::dummy()))?;
+        Ok(Pattern::Map { bindings, defaults: None })
     }
 
     fn parse_def(&mut self) -> Result<Expr, String> {
