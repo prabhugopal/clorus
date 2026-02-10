@@ -180,6 +180,8 @@ pub struct Package {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Build {
+    /// Entry point for applications (e.g., "src/main.clrs")
+    /// For libraries, omit this and use src/lib.clrs or lib.clrs instead
     #[serde(default)]
     pub entry: Option<String>,
     /// Multiple source directories (like deps.edn src = ["src" "resources"])
@@ -190,7 +192,7 @@ pub struct Build {
 impl Default for Build {
     fn default() -> Self {
         Build {
-            entry: None,
+            entry: None,  // Applications: use entry, Libraries: use src/lib.clrs
             src: Vec::new(),
         }
     }

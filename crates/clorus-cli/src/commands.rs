@@ -170,13 +170,26 @@ fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, Strin
 pub fn check() -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
-    // If no entry specified, this is a library - nothing to check
+    // Determine entry point: explicit entry, src/lib.clrs, lib.clrs, src/lib.clr, lib.clr, or skip
     let entry = match &manifest.build.entry {
         Some(e) => e,
         None => {
-            println!("   Skipping check for library package {} v{}",
-                manifest.package.name, manifest.package.version);
-            return Ok(());
+            // No explicit entry - check for library entry points
+            if Path::new("src/lib.clrs").exists() {
+                "src/lib.clrs"
+            } else if Path::new("lib.clrs").exists() {
+                "lib.clrs"
+            } else if Path::new("src/lib.clr").exists() {
+                "src/lib.clr"
+            } else if Path::new("lib.clr").exists() {
+                "lib.clr"
+            } else {
+                // No entry and no lib file - nothing to check
+                println!("   Skipping check for library package {} v{}",
+                    manifest.package.name, manifest.package.version);
+                println!("   (No entry point or src/lib.clrs found)");
+                return Ok(());
+            }
         }
     };
 
@@ -235,14 +248,26 @@ pub fn build_lib() -> Result<(), String> {
 fn build_internal(lib_mode: bool, debug: bool) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
-    // If no entry specified, this is a library - skip building executable
+    // Determine entry point: explicit entry, src/lib.clrs, lib.clrs, src/lib.clr, lib.clr, or skip
     let entry = match &manifest.build.entry {
         Some(e) => e.clone(),
         None => {
-            println!("   Skipping build for library package {} v{}",
-                manifest.package.name, manifest.package.version);
-            println!("   (No entry point specified - this is a library)");
-            return Ok(());
+            // No explicit entry - check for library entry points
+            if Path::new("src/lib.clrs").exists() {
+                "src/lib.clrs".to_string()
+            } else if Path::new("lib.clrs").exists() {
+                "lib.clrs".to_string()
+            } else if Path::new("src/lib.clr").exists() {
+                "src/lib.clr".to_string()
+            } else if Path::new("lib.clr").exists() {
+                "lib.clr".to_string()
+            } else {
+                // No entry and no lib file - this is a library with no code to compile
+                println!("   Skipping build for library package {} v{}",
+                    manifest.package.name, manifest.package.version);
+                println!("   (No entry point or src/lib.clrs found)");
+                return Ok(());
+            }
         }
     };
 
@@ -990,11 +1015,12 @@ pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), St
 fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
-    // If no entry specified, this is a library - cannot run
+    // For run, we need an explicit entry point (not src/lib.clrs)
+    // Libraries with src/lib.clrs shouldn't be run directly
     let entry = match &manifest.build.entry {
         Some(e) => e.clone(),
         None => {
-            return Err("Cannot run library package (no entry point specified)".to_string());
+            return Err("Cannot run library package (no entry point specified)\nLibraries use src/lib.clrs and cannot be run directly. Specify entry in Clorus.toml or create a test/example file.".to_string());
         }
     };
 
