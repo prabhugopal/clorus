@@ -73,13 +73,17 @@
 ;;
 ;; Example: (def inc-then-double (comp (partial * 2) inc))
 ;;          (inc-then-double 5) ; => 12
-(defn comp [& fns]
-  (if (empty? fns)
-    (fn [x] x)    ; identity function inlined
-    (fn [x]
-      (reduce (fn [acc f] (f acc))
-              x
-              (reverse fns)))))
+(defn comp
+  ([] (fn [x] x))
+  ([f] f)
+  ([f g]
+   (fn [x] (f (g x))))
+  ([f g h]
+   (fn [x] (f (g (h x)))))
+  ([f g h i & more]
+   ;; Use reduce without init to compose all functions
+   (reduce (fn [f1 f2] (fn [x] (f1 (f2 x))))
+           (cons f (cons g (cons h (cons i more)))))))
 
 ;; constantly - Returns a function that always returns the same value
 ;; Example: (def always-42 (constantly 42))

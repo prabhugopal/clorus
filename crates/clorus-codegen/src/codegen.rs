@@ -5730,15 +5730,27 @@ impl<'ctx> CodeGen<'ctx> {
                 // Compile the reducing function - supports both named functions and inline lambdas
                 let func_val = self.compile_expr(&args[0])?;
 
-                let (init_expr, coll_expr) = if args.len() == 3 {
-                    (&args[1], &args[2])
+                let (init_val, coll_ptr, start_index) = if args.len() == 3 {
+                    // (reduce f init coll) - explicit init value
+                    let init_val = self.compile_expr(&args[1])?;
+                    let coll_ptr = self.compile_expr(&args[2])?;
+                    (init_val, coll_ptr, self.context.i64_type().const_zero())
                 } else {
-                    // No init value - use first element
-                    return Err("reduce without init value not yet supported".to_string());
-                };
+                    // (reduce f coll) - use first element as init
+                    let coll_ptr = self.compile_expr(&args[1])?;
 
-                let init_val = self.compile_expr(init_expr)?;
-                let coll_ptr = self.compile_expr(coll_expr)?;
+                    // Get first element using nth
+                    let nth_fn = self.module.get_function("clorus_nth")
+                        .ok_or("nth not declared")?;
+                    let first_elem = self.builder.build_call(
+                        nth_fn,
+                        &[coll_ptr.into(), self.context.i64_type().const_zero().into()],
+                        "first_elem"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Start from index 1 since we used index 0 as init
+                    (first_elem, coll_ptr, self.context.i64_type().const_int(1, false))
+                };
 
                 let count_fn = self.module.get_function("clorus_count")
                     .ok_or("count not declared")?;
@@ -5752,7 +5764,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let end_block = self.context.append_basic_block(current_fn, "reduce_end");
 
                 let index_alloca = self.builder.build_alloca(self.context.i64_type(), "index").unwrap();
-                self.builder.build_store(index_alloca, self.context.i64_type().const_zero()).unwrap();
+                self.builder.build_store(index_alloca, start_index).unwrap();
 
                 let acc_alloca = self.builder.build_alloca(init_val.get_type(), "accumulator").unwrap();
                 self.builder.build_store(acc_alloca, init_val).unwrap();
