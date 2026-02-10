@@ -43,7 +43,17 @@ fn main() {
             }
             commands::new(&args[2])
         }
-        "build" => commands::build(),
+        "build" => {
+            // Check for --workspace flag
+            let is_workspace = args.iter().any(|arg| arg == "--workspace");
+            let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
+
+            if is_workspace {
+                commands::build_workspace(debug)
+            } else {
+                commands::build()
+            }
+        }
         "run" => {
             // Check for flags
             let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
@@ -59,7 +69,16 @@ fn main() {
             commands::run(debug, use_jit, extra_args)
         }
         "check" => commands::check(),
-        "clean" => commands::clean(),
+        "clean" => {
+            // Check for --workspace flag
+            let is_workspace = args.iter().any(|arg| arg == "--workspace");
+
+            if is_workspace {
+                commands::clean_workspace()
+            } else {
+                commands::clean()
+            }
+        }
         "repl" => {
             // Check for --main-thread flag
             let main_thread = args.iter().any(|arg| arg == "--main-thread");
@@ -70,13 +89,26 @@ fn main() {
             commands::replx(&args[2..])
         }
         "pack" => {
-            // Parse --output flag
-            let output = if args.len() >= 4 && args[2] == "--output" {
-                Some(args[3].clone())
+            // Check for --workspace flag
+            let is_workspace = args.iter().any(|arg| arg == "--workspace");
+
+            if is_workspace {
+                // Parse --output flag for workspace pack
+                let output = args.iter()
+                    .position(|arg| arg == "--output")
+                    .and_then(|i| args.get(i + 1))
+                    .map(|s| s.clone());
+
+                commands::pack_workspace(output)
             } else {
-                None
-            };
-            pack::pack(output)
+                // Parse --output flag for single pack
+                let output = if args.len() >= 4 && args[2] == "--output" {
+                    Some(args[3].clone())
+                } else {
+                    None
+                };
+                pack::pack(output)
+            }
         }
         "install" => {
             if args.len() < 3 {
@@ -121,11 +153,15 @@ fn print_help() {
     println!("COMMANDS:");
     println!("    new <name>    Create a new Clorus project");
     println!("    build         Compile the current project");
+    println!("                    --workspace  Build all workspace members");
     println!("    run           Compile and run the current project (like cargo run)");
     println!("                    --jit       Use JIT mode (faster, but no .clip support)");
     println!("    check         Check syntax without building");
+    println!("    clean         Remove build artifacts");
+    println!("                    --workspace  Clean all workspace members");
     println!("    pack          Package project as .clip library");
-    println!("                    --output <name>  Output file name");
+    println!("                    --workspace  Package all workspace libraries");
+    println!("                    --output <dir>  Output directory (workspace only)");
     println!("    install       Install a .clip package");
     println!("                    --local  Install to project (default: global)");
     println!("    repl          Start an interactive REPL");
@@ -142,6 +178,7 @@ fn print_help() {
     println!("    -h, --help       Print help information");
     println!("    -V, --version    Print version information");
     println!("    -d, --debug      Enable debug mode (memory tracking)");
+    println!("    --workspace      Apply command to all workspace members");
     println!();
     println!("EXAMPLES:");
     println!("    clorus new my-project       Create a new project");
@@ -152,6 +189,11 @@ fn print_help() {
     println!("    clorus pack                 Package as a .clip library");
     println!("    clorus check                Check for syntax errors");
     println!("    clorus clean                Remove build artifacts (target/)");
+    println!();
+    println!("WORKSPACE EXAMPLES:");
+    println!("    clorus build --workspace    Build all workspace members");
+    println!("    clorus pack --workspace     Package all libraries to dist/");
+    println!("    clorus clean --workspace    Clean all workspace members");
     println!();
     println!("See https://github.com/yourusername/clorus for more information");
 }

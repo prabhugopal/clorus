@@ -1,7 +1,7 @@
 /// Commands for the Clorus CLI tool
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::io::{Write, Read};
 use crate::manifest::Manifest;
 use clorus_syntax::Expr;
@@ -2083,4 +2083,208 @@ fn load_core_library() -> Result<libloading::Library, String> {
     })?;
 
     load_dynamic_library(&lib_path)
+}
+
+// ============================================================================
+// Workspace Commands
+// ============================================================================
+
+/// Build all members in a workspace
+pub fn build_workspace(debug: bool) -> Result<(), String> {
+    let (workspace_manifest, workspace_root) = Manifest::load_workspace()?;
+    let workspace_config = workspace_manifest.workspace
+        .ok_or("Not a workspace (no [workspace] section found)")?;
+
+    let members = workspace_config.resolve_members(&workspace_root)?;
+
+    println!("📦 Building workspace with {} member(s)", members.len());
+    println!();
+
+    let mut succeeded = Vec::new();
+    let mut failed = Vec::new();
+
+    for member_path in members {
+        let member_name = member_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        println!("   Building {}...", member_name);
+
+        // Change to member directory
+        std::env::set_current_dir(&member_path)
+            .map_err(|e| format!("Failed to cd to {}: {}", member_path.display(), e))?;
+
+        // Build member
+        match build_with_debug(debug) {
+            Ok(_) => {
+                succeeded.push(member_name.to_string());
+            }
+            Err(e) => {
+                eprintln!("   ❌ Failed to build {}: {}", member_name, e);
+                failed.push(member_name.to_string());
+            }
+        }
+
+        // Return to workspace root
+        std::env::set_current_dir(&workspace_root)
+            .map_err(|e| format!("Failed to cd back to workspace root: {}", e))?;
+    }
+
+    println!();
+    if failed.is_empty() {
+        println!("✅ Workspace build complete - {} member(s) built", succeeded.len());
+        Ok(())
+    } else {
+        println!("⚠️  Workspace build completed with errors:");
+        println!("   ✓ Succeeded: {}", succeeded.join(", "));
+        println!("   ❌ Failed: {}", failed.join(", "));
+        Err(format!("{} member(s) failed to build", failed.len()))
+    }
+}
+
+/// Clean all members in a workspace
+pub fn clean_workspace() -> Result<(), String> {
+    let (workspace_manifest, workspace_root) = Manifest::load_workspace()?;
+    let workspace_config = workspace_manifest.workspace
+        .ok_or("Not a workspace (no [workspace] section found)")?;
+
+    let members = workspace_config.resolve_members(&workspace_root)?;
+
+    println!("🧹 Cleaning workspace with {} member(s)", members.len());
+    println!();
+
+    for member_path in members {
+        let member_name = member_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        println!("   Cleaning {}...", member_name);
+
+        std::env::set_current_dir(&member_path)
+            .map_err(|e| format!("Failed to cd to {}: {}", member_path.display(), e))?;
+
+        // Clean member (ignore errors)
+        let _ = clean();
+
+        std::env::set_current_dir(&workspace_root)
+            .map_err(|e| format!("Failed to cd back to workspace root: {}", e))?;
+    }
+
+    // Clean workspace-level target directory
+    let workspace_target = workspace_root.join("target");
+    if workspace_target.exists() {
+        println!("   Cleaning workspace target/...");
+        fs::remove_dir_all(&workspace_target)
+            .map_err(|e| format!("Failed to clean workspace target: {}", e))?;
+    }
+
+    println!();
+    println!("✅ Workspace cleaned");
+    Ok(())
+}
+
+/// Package all members in a workspace to output directory
+pub fn pack_workspace(output_dir: Option<String>) -> Result<(), String> {
+    let (workspace_manifest, workspace_root) = Manifest::load_workspace()?;
+    let workspace_config = workspace_manifest.workspace
+        .ok_or("Not a workspace (no [workspace] section found)")?;
+
+    let members = workspace_config.resolve_members(&workspace_root)?;
+
+    // Determine output directory
+    let output_dir = output_dir.unwrap_or_else(|| "dist".to_string());
+    let output_path = workspace_root.join(&output_dir);
+    fs::create_dir_all(&output_path)
+        .map_err(|e| format!("Failed to create output dir: {}", e))?;
+
+    println!("📦 Packaging workspace to {}", output_path.display());
+    println!();
+
+    let mut packaged = Vec::new();
+    let mut skipped = Vec::new();
+
+    for member_path in members {
+        let member_name = member_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+
+        println!("   Packaging {}...", member_name);
+
+        std::env::set_current_dir(&member_path)
+            .map_err(|e| format!("Failed to cd to {}: {}", member_path.display(), e))?;
+
+        // Load member manifest to check if it's a library
+        match Manifest::find_in_current_dir() {
+            Ok(member_manifest) => {
+                // Only package libraries (no entry point or explicit lib.clrs)
+                let is_library = member_manifest.build.entry.is_none()
+                    || member_manifest.build.entry.as_deref() == Some("src/lib.clrs")
+                    || member_manifest.build.entry.as_deref() == Some("lib.clrs");
+
+                if is_library {
+                    let clip_name = format!("{}-{}.clip",
+                        member_manifest.package.name,
+                        member_manifest.package.version);
+
+                    // Build as library first
+                    if let Err(e) = build_lib() {
+                        eprintln!("      ⚠️  Failed to build {}: {}", member_name, e);
+                        std::env::set_current_dir(&workspace_root)
+                            .map_err(|e| format!("Failed to cd back: {}", e))?;
+                        continue;
+                    }
+
+                    // Pack member
+                    match crate::pack::pack(Some(clip_name.clone())) {
+                        Ok(_) => {
+                            // Move .clip to workspace output directory
+                            let clip_path = PathBuf::from(&clip_name);
+                            if clip_path.exists() {
+                                let dest = output_path.join(&clip_name);
+                                fs::copy(&clip_path, &dest)
+                                    .map_err(|e| format!("Failed to copy .clip: {}", e))?;
+                                fs::remove_file(&clip_path)
+                                    .map_err(|e| format!("Failed to remove .clip: {}", e))?;
+
+                                packaged.push(clip_name);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("      ⚠️  Failed to pack {}: {}", member_name, e);
+                        }
+                    }
+                } else {
+                    println!("      Skipped (not a library)");
+                    skipped.push(member_name.to_string());
+                }
+            }
+            Err(e) => {
+                eprintln!("      ⚠️  Failed to load manifest: {}", e);
+            }
+        }
+
+        std::env::set_current_dir(&workspace_root)
+            .map_err(|e| format!("Failed to cd back to workspace root: {}", e))?;
+    }
+
+    println!();
+    if !packaged.is_empty() {
+        println!("✅ Packaged {} member(s):", packaged.len());
+        for clip in &packaged {
+            println!("   📦 {}", clip);
+        }
+    }
+
+    if !skipped.is_empty() {
+        println!();
+        println!("ℹ️  Skipped {} member(s) (applications):", skipped.len());
+        for name in &skipped {
+            println!("   → {}", name);
+        }
+    }
+
+    println!();
+    println!("Output directory: {}", output_path.display());
+
+    Ok(())
 }
