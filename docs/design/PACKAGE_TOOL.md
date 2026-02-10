@@ -2,6 +2,21 @@
 
 A Cargo-like build tool for the Clorus programming language.
 
+**Last Updated:** February 2026
+**Status:** Production-ready with workspace support
+
+---
+
+## Overview
+
+The Clorus CLI provides a complete build toolchain for Clorus projects:
+- Project scaffolding (`clorus new`)
+- Compilation to native executables (`clorus build`)
+- Package management (`.clip` format)
+- Workspace/monorepo support
+- Rust FFI integration
+- Interactive REPL
+
 ## Installation
 
 Build the Clorus CLI tool:
@@ -47,66 +62,97 @@ Output:
 
 ## Commands
 
-### `clorus new <name>`
-Create a new Clorus project with the given name.
+### Core Commands
 
-```bash
-clorus new hello-world
-```
+| Command | Description | Status |
+|---------|-------------|--------|
+| `new <name>` | Create a new project | ✅ Complete |
+| `build` | Compile to native executable | ✅ Complete |
+| `run` | Compile and execute | ✅ Complete |
+| `check` | Syntax checking only | ✅ Complete |
+| `clean` | Remove build artifacts | ✅ Complete |
+| `pack` | Package as .clip library | ✅ Complete |
+| `install` | Install .clip package | ✅ Complete |
+| `repl` | Interactive REPL | ✅ Complete |
+| `replx` | Extended REPL | ✅ Complete |
 
-### `clorus build`
-Compile the current project (syntax check in JIT mode).
+### Workspace Commands
 
-```bash
-clorus build
-```
+| Command | Description | Status |
+|---------|-------------|--------|
+| `build --workspace` | Build all members | ✅ Complete |
+| `clean --workspace` | Clean all members | ✅ Complete |
+| `pack --workspace` | Package all libraries | ✅ Complete |
 
-### `clorus run`
-Compile and run the current project.
+### Build Features
 
-```bash
-clorus run
-```
+**✅ Implemented:**
+- AOT compilation to native executables
+- JIT mode for fast iteration (`--jit`)
+- Automatic dependency resolution (.clip packages)
+- Module system with recursive loading
+- Rust FFI with automatic interface generation
+- Debug mode with memory tracking (`--debug`)
+- Workspace/monorepo support
+- Static and dynamic linking
 
-### `clorus check`
-Check for syntax errors without running.
-
-```bash
-clorus check
-```
-
-### `clorus repl`
-Information about starting an interactive REPL.
-
-```bash
-clorus repl
-```
-
-### `clorus help`
-Display help information.
-
-```bash
-clorus help
-```
-
-### `clorus version`
-Display version information.
-
-```bash
-clorus version
-```
+---
 
 ## Project Manifest (Clorus.toml)
 
+**Application Example:**
 ```toml
 [package]
-name = "my-project"
+name = "my-app"
 version = "0.1.0"
 authors = ["Your Name <you@example.com>"]
+description = "A Clorus application"
 
 [build]
-entry = "src/main.clrs"  # Entry point file
+entry = "src/main.clrs"  # Entry point for applications
+
+[dependencies]
+json-lib = { path = "libs/json-lib-1.0.0.clip" }
+math-utils = { workspace = true }  # From workspace
+
+[rust-dependencies]
+graphics-lib = { path = "../graphics-rs", interface = true }
+
+[link]
+frameworks = ["OpenGL", "CoreFoundation"]  # macOS
+libraries = ["pthread", "m"]
 ```
+
+**Library Example:**
+```toml
+[package]
+name = "mylib"
+version = "1.0.0"
+
+[build]
+# No entry = library
+# Creates mylib.o and mylib.bc for linking
+
+[dependencies]
+string-utils = "0.5.0"
+```
+
+**Workspace Example:**
+```toml
+[workspace]
+members = ["lib1", "lib2", "examples/*"]
+exclude = ["examples/experimental"]
+
+[workspace.package]
+version = "1.0.0"
+authors = ["Team"]
+
+[workspace.dependencies]
+lib1 = { path = "lib1" }
+lib2 = { path = "lib2" }
+```
+
+---
 
 ## Examples
 
@@ -196,77 +242,81 @@ $ clorus run
 => 200
 ```
 
-## Current Features
+## Current Features (February 2026)
 
-✅ **Project scaffolding** - `clorus new`
-✅ **JIT compilation** - Fast development cycle
-✅ **Syntax checking** - `clorus check`
-✅ **Global variables** - `def`
-✅ **Functions** - `defn` with parameters
-✅ **Recursion** - Full support for recursive functions
-✅ **Control flow** - `if` expressions
-✅ **Local bindings** - `let` expressions
-✅ **Arithmetic** - `+`, `-`, `*`, `/`
-✅ **Comparisons** - `<`, `>`, `=`
+### Language Features ✅
+- ✅ **Complete type system** - Long, Double, String, Bool, Nil
+- ✅ **Collections** - Vectors, Maps, HashSets, Lists
+- ✅ **Functions** - defn with parameters, recursion, closures
+- ✅ **Control flow** - if, cond, case, when, when-not
+- ✅ **Local bindings** - let, letfn
+- ✅ **Loops** - loop/recur, doseq, for
+- ✅ **Macros** - Full macro system
+- ✅ **Namespaces** - ns, require, :as, :refer
+- ✅ **Concurrency** - Atoms, Refs/STM, Agents, Channels/CSP
+- ✅ **Lazy sequences** - Full lazy evaluation support
+- ✅ **String operations** - str, subs, split, join, etc.
+- ✅ **Transducers** - Composable transformations
 
-## Future Features (Roadmap)
+### Build Tool Features ✅
+- ✅ **Project scaffolding** - `clorus new`
+- ✅ **AOT compilation** - Native executables
+- ✅ **JIT mode** - Fast iteration (`--jit`)
+- ✅ **Dependency management** - .clip packages
+- ✅ **Package system** - `clorus pack`, `clorus install`
+- ✅ **Workspaces** - Multi-package monorepo support
+- ✅ **Rust FFI** - Automatic interface generation
+- ✅ **Interactive REPL** - With .clip support
+- ✅ **Debug mode** - Memory tracking (`--debug`)
 
-### Phase 1: Language Features
-- [ ] More data types (integers, booleans, strings)
-- [ ] Lists and vectors
-- [ ] Maps/hashmaps
-- [ ] Loop constructs (`loop`, `recur`)
-- [ ] Pattern matching
-- [ ] Macros
+### Future Features 🚧
+- 🚧 **Package registry** - Central package hosting
+- 🚧 **Testing framework** - `clorus test`
+- 🚧 **Documentation generation** - `clorus doc`
+- 🚧 **Optimization levels** - `--release` flag
+- 🚧 **Cross-compilation** - Multi-platform builds
+- 🚧 **Benchmarking** - `clorus bench`
 
-### Phase 2: Build Tool Features
-- [ ] AOT compilation to native executables
-- [ ] Optimization levels (`--release`)
-- [ ] Dependency management
-- [ ] Package registry
-- [ ] Testing framework (`clorus test`)
-- [ ] Documentation generation (`clorus doc`)
-- [ ] Benchmarking (`clorus bench`)
-
-### Phase 3: Advanced Features
-- [ ] FFI (Foreign Function Interface) with Rust/C
-- [ ] Standard library
-- [ ] Module system
-- [ ] Package publishing
-- [ ] Cross-compilation
-- [ ] Self-hosting (compiler written in Clorus)
+---
 
 ## Comparison with Cargo
 
 | Feature | Cargo | Clorus | Status |
 |---------|-------|--------|--------|
 | `new` | ✅ | ✅ | Complete |
-| `build` | ✅ | ✅ | JIT only |
+| `build` | ✅ | ✅ | AOT + JIT modes |
 | `run` | ✅ | ✅ | Complete |
 | `check` | ✅ | ✅ | Complete |
-| `test` | ✅ | ❌ | Planned |
-| `bench` | ✅ | ❌ | Planned |
-| `doc` | ✅ | ❌ | Planned |
-| Dependencies | ✅ | ❌ | Planned |
-| Workspaces | ✅ | ❌ | Planned |
-| Publishing | ✅ | ❌ | Planned |
-| Native executables | ✅ | ❌ | Planned |
+| `clean` | ✅ | ✅ | Complete |
+| `pack` (publish) | ✅ | ✅ | Local only |
+| `install` | ✅ | ✅ | Local/global |
+| Dependencies | ✅ | ✅ | .clip packages |
+| Workspaces | ✅ | ✅ | Complete |
+| Publishing | ✅ | 🚧 | Planned |
+| Native executables | ✅ | ✅ | Complete |
+| `test` | ✅ | 🚧 | Planned |
+| `bench` | ✅ | 🚧 | Planned |
+| `doc` | ✅ | 🚧 | Planned |
+
+---
 
 ## Implementation Details
 
-### JIT Mode (Current)
-- Uses LLVM JIT compilation
-- Compiles and runs code in memory
-- No executable files created
-- Fast iteration during development
-- Requires Clorus toolchain to run programs
-
-### AOT Mode (Future)
+### AOT Mode (Default)
 - Ahead-of-time compilation to native code
 - Creates standalone executables
 - Can distribute binaries without Clorus toolchain
-- Better performance with optimizations
-- Standard linking with system libraries
+- Full .clip dependency support
+- Static and dynamic linking
+
+### JIT Mode (`--jit`)
+- Uses LLVM JIT compilation
+- Compiles and runs code in memory
+- Fast iteration during development
+- Limited .clip support (bitcode only)
+- Best for quick testing
+
+---
 
 ## Contributing
 
