@@ -74,6 +74,7 @@ fn load_module_recursive(
     loaded_modules: &mut HashSet<String>,
     base_path: &Path,
     clip_namespaces: &HashSet<String>,
+    debug: bool,
 ) -> Result<Vec<Expr>, String> {
     // Skip if already loaded
     if loaded_modules.contains(namespace) {
@@ -87,7 +88,9 @@ fn load_module_recursive(
     // coral.widgets → src/coral/widgets.clrs
     let file_path = namespace_to_path(namespace, base_path)?;
 
-    println!("     → Found: {}", file_path.display());
+    if debug {
+        println!("     → Found: {}", file_path.display());
+    }
 
     // Read the file
     let source = fs::read_to_string(&file_path)
@@ -111,7 +114,7 @@ fn load_module_recursive(
                 if is_clip {
                     continue;
                 }
-                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces)?;
+                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces, debug)?;
                 all_exprs.extend(dep_exprs);
             }
         }
@@ -126,7 +129,7 @@ fn load_module_recursive(
                 if is_clip {
                     continue;
                 }
-                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces)?;
+                let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces, debug)?;
                 all_exprs.extend(dep_exprs);
             }
         }
@@ -413,6 +416,43 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
         clip_namespace_prefixes.insert(package.name.clone());
     }
 
+    // First pass: collect all modules to load (for summary)
+    let mut modules_to_load = Vec::new();
+    for expr in &entry_exprs {
+        if let Expr::Require { specs } = expr {
+            for spec in specs {
+                let is_clip = clip_namespace_prefixes.iter().any(|prefix| {
+                    spec.module.starts_with(prefix)
+                });
+                if !is_clip {
+                    modules_to_load.push(spec.module.clone());
+                }
+            }
+        }
+        if let Expr::Ns { requires, .. } = expr {
+            for spec in requires {
+                let is_clip = clip_namespace_prefixes.iter().any(|prefix| {
+                    spec.module.starts_with(prefix)
+                });
+                if !is_clip {
+                    modules_to_load.push(spec.module.clone());
+                }
+            }
+        }
+    }
+
+    // Show summary
+    if !modules_to_load.is_empty() {
+        if debug {
+            println!("   Loading {} modules:", modules_to_load.len());
+            for module in &modules_to_load {
+                println!("      → {}", module);
+            }
+        } else {
+            println!("   Loading {} module(s)...", modules_to_load.len());
+        }
+    }
+
     for expr in &entry_exprs {
         // Check top-level Expr::Require
         if let Expr::Require { specs } = expr {
@@ -423,12 +463,13 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                 });
 
                 if is_clip {
-                    println!("   Skipping module (from .clip): {}", spec.module);
+                    if debug {
+                        println!("   Skipping module (from .clip): {}", spec.module);
+                    }
                     continue;
                 }
 
-                println!("   Loading module: {}", spec.module);
-                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes)?;
+                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes, debug)?;
                 module_exprs.extend(dep_exprs);
             }
         }
@@ -442,12 +483,13 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                 });
 
                 if is_clip {
-                    println!("   Skipping module (from .clip): {}", spec.module);
+                    if debug {
+                        println!("   Skipping module (from .clip): {}", spec.module);
+                    }
                     continue;
                 }
 
-                println!("   Loading module: {}", spec.module);
-                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes)?;
+                let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes, debug)?;
                 module_exprs.extend(dep_exprs);
             }
         }
