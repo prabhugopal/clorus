@@ -267,14 +267,23 @@ pub fn build_lib() -> Result<(), String> {
     build_internal(true, false)
 }
 
-fn build_internal(lib_mode: bool, debug: bool) -> Result<(), String> {
+fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
     // Determine entry point: explicit entry, src/lib.clrs, lib.clrs, src/lib.clr, lib.clr, or skip
     let entry = match &manifest.build.entry {
-        Some(e) => e.clone(),
+        Some(e) => {
+            // Check if explicitly specified entry is a library entry point
+            if e == "src/lib.clrs" || e == "lib.clrs" || e == "src/lib.clr" || e == "lib.clr" {
+                lib_mode = true;
+            }
+            e.clone()
+        },
         None => {
             // No explicit entry - check for library entry points
+            // When using implicit lib.clrs, this is a library package
+            lib_mode = true;
+
             if Path::new("src/lib.clrs").exists() {
                 "src/lib.clrs".to_string()
             } else if Path::new("lib.clrs").exists() {
