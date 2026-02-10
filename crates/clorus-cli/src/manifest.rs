@@ -1,7 +1,7 @@
 /// Clorus.toml manifest parser
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -15,6 +15,112 @@ pub struct Manifest {
     pub dependencies: HashMap<String, ClorusDependency>,
     #[serde(default)]
     pub link: Link,
+    /// Optional workspace configuration (for root Clorus.toml)
+    #[serde(default)]
+    pub workspace: Option<WorkspaceConfig>,
+}
+
+/// Workspace configuration (for multi-package projects)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkspaceConfig {
+    /// Member package paths (supports globs like "examples/*")
+    pub members: Vec<String>,
+    /// Excluded paths (don't build)
+    #[serde(default)]
+    pub exclude: Vec<String>,
+    /// Optional workspace-level package metadata
+    #[serde(default)]
+    pub package: Option<WorkspacePackage>,
+    /// Shared dependencies (members can reference with workspace = true)
+    #[serde(default)]
+    pub dependencies: HashMap<String, ClorusDependency>,
+}
+
+/// Workspace-level package metadata
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkspacePackage {
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub authors: Vec<String>,
+    #[serde(default)]
+    pub repository: Option<String>,
+}
+
+impl WorkspaceConfig {
+    /// Resolve all workspace members (expand globs)
+    /// Returns absolute paths to member directories
+    pub fn resolve_members(&self, workspace_root: &Path) -> Result<Vec<PathBuf>, String> {
+        let mut members = Vec::new();
+
+        for pattern in &self.members {
+            if pattern.contains('*') {
+                // Glob expansion
+                let glob_pattern = workspace_root.join(pattern);
+                let glob_str = glob_pattern.to_str()
+                    .ok_or_else(|| format!("Invalid path: {}", glob_pattern.display()))?;
+
+                match glob::glob(glob_str) {
+                    Ok(paths) => {
+                        for path_result in paths {
+                            let path = path_result
+                                .map_err(|e| format!("Glob error: {}", e))?;
+
+                            // Only include directories that have Clorus.toml
+                            if path.is_dir() && path.join("Clorus.toml").exists() {
+                                if !self.is_excluded(&path, workspace_root) {
+                                    members.push(path);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("Invalid glob pattern '{}': {}", pattern, e));
+                    }
+                }
+            } else {
+                // Exact path
+                let path = workspace_root.join(pattern);
+                if path.exists() && path.is_dir() {
+                    if !self.is_excluded(&path, workspace_root) {
+                        members.push(path);
+                    }
+                } else {
+                    return Err(format!("Member not found: {} (looking for {})", pattern, path.display()));
+                }
+            }
+        }
+
+        Ok(members)
+    }
+
+    /// Check if a path is excluded from the workspace
+    fn is_excluded(&self, path: &Path, workspace_root: &Path) -> bool {
+        let relative = match path.strip_prefix(workspace_root) {
+            Ok(rel) => rel,
+            Err(_) => return false,
+        };
+
+        let rel_str = relative.to_string_lossy();
+
+        for exclude_pattern in &self.exclude {
+            if exclude_pattern.contains('*') {
+                // Glob match
+                if let Ok(pattern) = glob::Pattern::new(exclude_pattern) {
+                    if pattern.matches(&rel_str) {
+                        return true;
+                    }
+                }
+            } else {
+                // Exact match
+                if rel_str == *exclude_pattern {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]
@@ -30,6 +136,10 @@ pub struct Link {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
 pub enum ClorusDependency {
+    /// Workspace dependency reference
+    Workspace {
+        workspace: bool,
+    },
     /// Git repository with optional branch/tag/rev
     Git {
         git: String,
@@ -217,5 +327,41 @@ impl Manifest {
             return Err("Could not find Clorus.toml in current directory".to_string());
         }
         Self::from_file(manifest_path)
+    }
+
+    /// Find workspace root by walking up directories
+    /// Returns None if no workspace root is found
+    pub fn find_workspace_root() -> Option<PathBuf> {
+        let mut current = std::env::current_dir().ok()?;
+
+        loop {
+            let manifest_path = current.join("Clorus.toml");
+            if manifest_path.exists() {
+                if let Ok(content) = fs::read_to_string(&manifest_path) {
+                    if let Ok(manifest) = toml::from_str::<Manifest>(&content) {
+                        if manifest.workspace.is_some() {
+                            return Some(current);
+                        }
+                    }
+                }
+            }
+
+            // Move to parent directory
+            current = current.parent()?.to_path_buf();
+        }
+    }
+
+    /// Check if current directory is inside a workspace
+    pub fn is_in_workspace() -> bool {
+        Self::find_workspace_root().is_some()
+    }
+
+    /// Load workspace manifest
+    /// Returns (manifest, workspace_root_path)
+    pub fn load_workspace() -> Result<(Manifest, PathBuf), String> {
+        let workspace_root = Self::find_workspace_root()
+            .ok_or("Not in a workspace (no Clorus.toml with [workspace] found)")?;
+        let manifest = Self::from_file(&workspace_root.join("Clorus.toml"))?;
+        Ok((manifest, workspace_root))
     }
 }
