@@ -673,6 +673,11 @@ unsafe fn deallocate_value(val: *mut Value) {
             }
             drop(Box::from_raw(val));
         }
+        ValueTag::OpaquePointer => {
+            // Opaque pointers are managed by FFI layer
+            // Just free the Value wrapper, not the pointer itself
+            drop(Box::from_raw(val));
+        }
     }
 }
 
@@ -965,7 +970,8 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
             // TODO: Implement deep equality for collections
             ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet |
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
-            ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var => {
+            ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
+            ValueTag::OpaquePointer => {
                 (*left).as_ptr() == (*right).as_ptr()
             }
         }

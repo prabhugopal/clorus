@@ -735,6 +735,9 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
         ValueTag::Symbol => {
             "symbol".to_string() // TODO: Implement when Symbol type is added
         }
+        ValueTag::OpaquePointer => {
+            "#<opaque-pointer>".to_string()
+        }
     }
 }
 
