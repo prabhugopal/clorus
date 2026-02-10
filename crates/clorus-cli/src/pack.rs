@@ -95,7 +95,45 @@ pub fn build_dylib_for_repl(package: &ClipPackage) -> Result<PathBuf, String> {
 
 /// Find runtime library for linking
 fn find_runtime_library() -> Result<String, String> {
-    // Search for libclorus_runtime.a
+    // First, try relative to clorus executable (same directory)
+    if let Ok(exe_path) = std::env::current_exe() {
+        // Resolve symlinks
+        let exe_path = if let Ok(canonical) = exe_path.canonicalize() {
+            canonical
+        } else {
+            exe_path
+        };
+
+        if let Some(exe_dir) = exe_path.parent() {
+            // Check same directory as executable (.a static library)
+            let runtime_path = exe_dir.join("libclorus_runtime.a");
+            if runtime_path.exists() {
+                return Ok(runtime_path.to_string_lossy().to_string());
+            }
+
+            // Check dylib in same directory
+            let runtime_dylib = exe_dir.join("libclorus_runtime.dylib");
+            if runtime_dylib.exists() {
+                return Ok(runtime_dylib.to_string_lossy().to_string());
+            }
+
+            // Check .rlib (Rust library)
+            let runtime_rlib = exe_dir.join("libclorus_runtime.rlib");
+            if runtime_rlib.exists() {
+                return Ok(runtime_rlib.to_string_lossy().to_string());
+            }
+
+            // Check ../lib (for installed version)
+            let runtime_path = exe_dir.join("../lib/libclorus_runtime.a");
+            if runtime_path.exists() {
+                return Ok(runtime_path.to_string_lossy().to_string());
+            }
+
+            eprintln!("  ⚠ Searched exe directory: {:?}", exe_dir);
+        }
+    }
+
+    // Search for libclorus_runtime.a in common build locations
     let search_paths = vec![
         "target/release/libclorus_runtime.a",
         "target/debug/libclorus_runtime.a",
@@ -103,21 +141,13 @@ fn find_runtime_library() -> Result<String, String> {
         "../target/debug/libclorus_runtime.a",
         "../../target/release/libclorus_runtime.a",
         "../../target/debug/libclorus_runtime.a",
+        "../../../target/release/libclorus_runtime.a",  // For deeper project structures
+        "../../../target/debug/libclorus_runtime.a",
     ];
 
     for path in search_paths {
         if Path::new(path).exists() {
             return Ok(path.to_string());
-        }
-    }
-
-    // Try relative to clorus executable
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let runtime_path = exe_dir.join("../lib/libclorus_runtime.a");
-            if runtime_path.exists() {
-                return Ok(runtime_path.to_string_lossy().to_string());
-            }
         }
     }
 

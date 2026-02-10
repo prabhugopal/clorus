@@ -57,6 +57,8 @@ pub struct ReplEngine<'ctx> {
     stdlib_loaded: bool,
     /// Parsed stdlib expressions to include in every evaluation
     stdlib_exprs: Vec<Expr>,
+    /// Parsed module expressions (from required modules) to include in every evaluation
+    module_exprs: Vec<Expr>,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -74,6 +76,7 @@ impl<'ctx> ReplEngine<'ctx> {
             symbol_registry: HashMap::new(),
             stdlib_loaded: false,
             stdlib_exprs: Vec::new(),
+            module_exprs: Vec::new(),
         };
 
         // Note: Stdlib is now loaded separately in lib.rs to avoid O(n²) recompilation
@@ -235,6 +238,111 @@ impl<'ctx> ReplEngine<'ctx> {
         self.symbol_registry.get(namespace)
     }
 
+    /// Convert namespace to file path
+    /// demos.shapes-demo → src/demos/shapes-demo.clrs
+    fn namespace_to_path(&self, namespace: &str) -> Result<std::path::PathBuf, String> {
+        use std::path::PathBuf;
+        use std::env;
+
+        let parts: Vec<&str> = namespace.split('.').collect();
+
+        if parts.is_empty() {
+            return Err(format!("Invalid namespace: {}", namespace));
+        }
+
+        // Get current working directory as base path
+        let base_path = env::current_dir()
+            .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+        // Build path: src/demos/shapes-demo.clrs
+        let mut path = base_path.join("src");
+
+        // Add directory components
+        for part in &parts[..parts.len()-1] {
+            path = path.join(part);
+        }
+
+        // Add file name
+        let file_name = format!("{}.clrs", parts[parts.len()-1]);
+        path = path.join(file_name);
+
+        if !path.exists() {
+            return Err(format!("Module file not found: {} (looking for {})", namespace, path.display()));
+        }
+
+        Ok(path)
+    }
+
+    /// Recursively load a module and its dependencies
+    /// Returns parsed expressions of all loaded modules (in dependency order)
+    /// Excludes require/ns statements which are already processed
+    fn load_module_recursive(&mut self, namespace: &str) -> Result<Vec<Expr>, String> {
+        use std::fs;
+
+        // Skip if already loaded
+        if self.loaded_modules.contains(namespace) {
+            return Ok(Vec::new());
+        }
+
+        // Skip if from .clip package
+        let is_clip = self.clip_namespaces.iter().any(|prefix| {
+            namespace.starts_with(prefix)
+        });
+        if is_clip {
+            return Ok(Vec::new());
+        }
+
+        // Mark as loaded (before recursion to handle circular deps)
+        self.loaded_modules.insert(namespace.to_string());
+
+        // Convert namespace to file path
+        let file_path = self.namespace_to_path(namespace)?;
+
+        // Read the file
+        let source = fs::read_to_string(&file_path)
+            .map_err(|e| format!("Failed to read module {}: {}", namespace, e))?;
+
+        // Parse the source
+        let exprs = parse(&source)?;
+
+        // Recursively load dependencies first
+        let mut all_exprs = Vec::new();
+
+        for expr in &exprs {
+            // Check top-level Expr::Require
+            if let Expr::Require { specs } = expr {
+                for spec in specs {
+                    let dep_exprs = self.load_module_recursive(&spec.module)?;
+                    all_exprs.extend(dep_exprs);
+                }
+            }
+
+            // Check Expr::Ns for embedded :require clauses
+            if let Expr::Ns { requires, .. } = expr {
+                for spec in requires {
+                    let dep_exprs = self.load_module_recursive(&spec.module)?;
+                    all_exprs.extend(dep_exprs);
+                }
+            }
+        }
+
+        // Add this module's expressions AFTER its dependencies
+        // BUT exclude Require and Ns expressions (already processed)
+        for expr in exprs {
+            match expr {
+                Expr::Require { .. } | Expr::Ns { .. } => {
+                    // Skip - already processed
+                }
+                _ => {
+                    // Add expression to be compiled
+                    all_exprs.push(expr);
+                }
+            }
+        }
+
+        Ok(all_exprs)
+    }
+
     /// Process a require spec and update namespace context
     fn process_require(&mut self, spec: &RequireSpec) {
         // Add namespace alias if specified
@@ -293,8 +401,15 @@ impl<'ctx> ReplEngine<'ctx> {
                 // Switch to new namespace
                 self.set_namespace(name);
 
-                // Process all requires
+                // Load and process all requires (synchronously)
                 for req_spec in requires {
+                    // Load the module and all its dependencies
+                    let module_exprs = self.load_module_recursive(&req_spec.module)?;
+
+                    // Add loaded module expressions to module_exprs for compilation
+                    self.module_exprs.extend(module_exprs);
+
+                    // Update namespace aliases after loading
                     self.process_require(req_spec);
                 }
 
@@ -320,8 +435,16 @@ impl<'ctx> ReplEngine<'ctx> {
             }
 
             Expr::Require { specs } => {
-                // Process all require specs
+                // Load each required module synchronously (blocking)
+                // This matches Clojure REPL behavior
                 for spec in specs {
+                    // Load the module and all its dependencies
+                    let module_exprs = self.load_module_recursive(&spec.module)?;
+
+                    // Add loaded module expressions to module_exprs for compilation
+                    self.module_exprs.extend(module_exprs);
+
+                    // Update namespace aliases after loading
                     self.process_require(spec);
                 }
 
@@ -395,6 +518,28 @@ impl<'ctx> ReplEngine<'ctx> {
             }
 
             let fn_name = format!("stdlib_{}", stdlib_idx);
+            codegen.wrap_in_function(&expanded, &fn_name)?;
+        }
+
+        // Compile loaded module expressions (after stdlib, before user history)
+        // These are from required modules (e.g., demos.shapes-demo)
+        for (module_idx, module_expr) in self.module_exprs.iter().enumerate() {
+            let expanded = expand_macros(module_expr);
+
+            // Skip namespace declarations (already processed)
+            if matches!(expanded, Expr::Ns { .. }) {
+                continue;
+            }
+
+            // Skip declare statements
+            if let Expr::Declare { names } = &expanded {
+                for name in names {
+                    codegen.add_forward_declaration(name);
+                }
+                continue;
+            }
+
+            let fn_name = format!("module_{}", module_idx);
             codegen.wrap_in_function(&expanded, &fn_name)?;
         }
 

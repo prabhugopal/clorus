@@ -694,11 +694,26 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     // Try to find relative to clorus executable (for installed version or running from workspace)
     if runtime_lib.is_none() {
         if let Ok(exe_path) = std::env::current_exe() {
+            // Resolve symlinks
+            let exe_path = if let Ok(canonical) = exe_path.canonicalize() {
+                canonical
+            } else {
+                exe_path
+            };
+
             if let Some(exe_dir) = exe_path.parent() {
+                // Try same directory as executable first
+                let same_dir = exe_dir.join("libclorus_runtime.a");
+                if same_dir.exists() {
+                    runtime_lib = Some(same_dir.to_string_lossy().to_string());
+                }
+
                 // Try relative to executable: deps/libclorus_runtime.a (same directory as exe)
-                let same_dir_deps = exe_dir.join("deps/libclorus_runtime.a");
-                if same_dir_deps.exists() {
-                    runtime_lib = Some(same_dir_deps.to_string_lossy().to_string());
+                if runtime_lib.is_none() {
+                    let same_dir_deps = exe_dir.join("deps/libclorus_runtime.a");
+                    if same_dir_deps.exists() {
+                        runtime_lib = Some(same_dir_deps.to_string_lossy().to_string());
+                    }
                 }
 
                 // Try relative to workspace root: ../target/{release,debug}/deps/
