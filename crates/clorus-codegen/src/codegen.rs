@@ -3706,9 +3706,190 @@ impl<'ctx> CodeGen<'ctx> {
                     );
                 }
 
-                // Protocols are compile-time only metadata
-                // They define method signatures but don't generate runtime code
-                // The actual implementation is in extend-type/deftype
+                // Generate dispatch functions for each protocol method
+                // These allow cross-module calls like coral-ui.core.protocols/measure
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+                for method in methods {
+                    // Generate function name using current namespace (same logic as defn)
+                    let func_name = if self.namespace.current == "user" {
+                        format!("clorus_{}", method.name.replace('-', "_"))
+                    } else {
+                        format!("clorus_{}_{}",
+                            self.namespace.current.replace('.', "_").replace('-', "_"),
+                            method.name.replace('-', "_"))
+                    };
+
+                    // Skip if already defined (from forward declaration or previous protocol)
+                    if self.functions.contains_key(&func_name) {
+                        continue;
+                    }
+
+                    // Create parameter types (all Value*, plus env)
+                    let param_count = method.params.len();
+                    let mut param_types: Vec<_> = (0..param_count)
+                        .map(|_| value_ptr_type.into())
+                        .collect();
+                    param_types.push(value_ptr_type.into()); // env parameter
+
+                    let fn_type = value_ptr_type.fn_type(&param_types, false);
+                    let function = self.module.add_function(&func_name, fn_type, None);
+                    self.functions.insert(func_name.clone(), function);
+
+                    // Save state
+                    let saved_vars = self.variables.clone();
+                    let saved_block = self.builder.get_insert_block();
+
+                    // Create entry block and generate dispatch logic
+                    let entry = self.context.append_basic_block(function, "entry");
+                    self.builder.position_at_end(entry);
+                    self.variables.clear();
+
+                    // Generate the dispatch logic (same as in compile_expr for protocol calls)
+                    // Get the first parameter (the instance)
+                    let instance = function.get_nth_param(0).unwrap().into_pointer_value();
+
+                    // Extract __type__ from first argument
+                    let map_get_fn = self.module.get_function("clorus_map_get")
+                        .ok_or("clorus_map_get not declared")?;
+
+                    let keyword_fn = self.module.get_function("clorus_keyword")
+                        .ok_or("clorus_keyword not declared")?;
+                    let type_keyword_str = self.builder.build_global_string_ptr("__type__", "proto_dispatch_type_keyword").unwrap();
+                    let type_keyword = self.builder.build_call(
+                        keyword_fn,
+                        &[type_keyword_str.as_pointer_value().into()],
+                        "proto_dispatch_type_kw"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    let type_name_val = self.builder.build_call(
+                        map_get_fn,
+                        &[instance.into(), type_keyword.into()],
+                        "proto_dispatch_type_name"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Get string data from Value*
+                    let str_data_fn = self.module.get_function("clorus_string_data")
+                        .ok_or("clorus_string_data not declared")?;
+                    let type_name_cstr = self.builder.build_call(
+                        str_data_fn,
+                        &[type_name_val.into()],
+                        "proto_dispatch_type_cstr"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Lookup protocol method
+                    let lookup_fn = self.module.get_function("clorus_lookup_protocol_method")
+                        .ok_or("clorus_lookup_protocol_method not declared")?;
+
+                    let protocol_name_str = self.builder.build_global_string_ptr(name, "proto_dispatch_proto").unwrap();
+                    let method_name_str = self.builder.build_global_string_ptr(&method.name, "proto_dispatch_method").unwrap();
+
+                    let fn_ptr_int = self.builder.build_call(
+                        lookup_fn,
+                        &[
+                            type_name_cstr.into(),
+                            protocol_name_str.as_pointer_value().into(),
+                            method_name_str.as_pointer_value().into(),
+                        ],
+                        "proto_dispatch_fn_ptr"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_int_value();
+
+                    // Check if method was found
+                    let zero = self.context.i64_type().const_zero();
+                    let found = self.builder.build_int_compare(
+                        IntPredicate::NE,
+                        fn_ptr_int,
+                        zero,
+                        "proto_dispatch_found"
+                    ).unwrap();
+
+                    let found_block = self.context.append_basic_block(function, "proto_dispatch_found");
+                    let not_found_block = self.context.append_basic_block(function, "proto_dispatch_not_found");
+                    let continue_block = self.context.append_basic_block(function, "proto_dispatch_continue");
+
+                    self.builder.build_conditional_branch(found, found_block, not_found_block).unwrap();
+
+                    // Found block: cast and call
+                    self.builder.position_at_end(found_block);
+
+                    let fn_ptr = self.builder.build_int_to_ptr(
+                        fn_ptr_int,
+                        value_ptr_type,
+                        "proto_dispatch_fn"
+                    ).unwrap();
+
+                    let method_param_types: Vec<_> = (0..param_count)
+                        .map(|_| value_ptr_type.into())
+                        .collect();
+                    let method_fn_type = value_ptr_type.fn_type(&method_param_types, false);
+
+                    let fn_ptr_typed = self.builder.build_pointer_cast(
+                        fn_ptr,
+                        method_fn_type.ptr_type(AddressSpace::default()),
+                        "proto_dispatch_fn_typed"
+                    ).unwrap();
+
+                    // Collect arguments (exclude env parameter)
+                    let arg_metadata: Vec<_> = (0..param_count)
+                        .map(|i| function.get_nth_param(i as u32).unwrap().into())
+                        .collect();
+
+                    let result = self.builder.build_indirect_call(
+                        method_fn_type,
+                        fn_ptr_typed,
+                        &arg_metadata,
+                        "proto_dispatch_result"
+                    ).unwrap();
+
+                    let result_val = result.try_as_basic_value().left().unwrap().into_pointer_value();
+                    self.builder.build_unconditional_branch(continue_block).unwrap();
+
+                    // Not found block: error
+                    self.builder.position_at_end(not_found_block);
+                    let error_msg = format!("No implementation of protocol method {}.{} found for type", name, method.name);
+                    let error_str = self.builder.build_global_string_ptr(&error_msg, "proto_dispatch_error").unwrap();
+
+                    let str_fn = self.module.get_function("clorus_value_string")
+                        .ok_or("clorus_value_string not declared")?;
+                    let error_val = self.builder.build_call(
+                        str_fn,
+                        &[error_str.as_pointer_value().into()],
+                        "error_val"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    let println_fn = self.module.get_function("clorus_println")
+                        .ok_or("clorus_println not declared")?;
+                    self.builder.build_call(
+                        println_fn,
+                        &[error_val.into()],
+                        "print_error"
+                    ).unwrap();
+
+                    let nil_fn = self.module.get_function("clorus_value_nil")
+                        .ok_or("clorus_value_nil not declared")?;
+                    let error_result = self.builder.build_call(nil_fn, &[], "error_nil")
+                        .unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    self.builder.build_unconditional_branch(continue_block).unwrap();
+
+                    // Continue block: merge results
+                    self.builder.position_at_end(continue_block);
+                    let phi = self.builder.build_phi(value_ptr_type, "proto_dispatch_phi").unwrap();
+                    phi.add_incoming(&[
+                        (&result_val, found_block),
+                        (&error_result, not_found_block),
+                    ]);
+
+                    self.builder.build_return(Some(&phi.as_basic_value())).unwrap();
+
+                    // Restore state
+                    self.variables = saved_vars;
+                    if let Some(block) = saved_block {
+                        self.builder.position_at_end(block);
+                    }
+                }
+
+                // Return nil for defprotocol form
                 let nil_fn = self.module.get_function("clorus_value_nil")
                     .ok_or("clorus_value_nil not declared")?;
                 let nil_val = self.builder.build_call(nil_fn, &[], "defprotocol_nil").unwrap()
