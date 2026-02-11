@@ -1905,6 +1905,83 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    /// Generate a record/type constructor function: ->TypeName
+    /// Creates a function that takes field values and returns a map
+    /// Shared by defrecord and deftype implementations
+    fn generate_record_constructor(&mut self, type_name: &str, fields: &[String]) -> Result<(), String> {
+        let constructor_name = format!("->{}", type_name);
+        let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+        // Create parameter types (one Value* for each field)
+        let param_types: Vec<_> = fields.iter()
+            .map(|_| value_ptr_type.into())
+            .collect();
+
+        let fn_type = value_ptr_type.fn_type(&param_types, false);
+        let function = self.module.add_function(&constructor_name, fn_type, None);
+
+        // Add function to table for calls
+        self.functions.insert(constructor_name.clone(), function);
+
+        // Save current state
+        let saved_vars = self.variables.clone();
+        let saved_block = self.builder.get_insert_block();
+
+        // Create entry block for constructor
+        let entry = self.context.append_basic_block(function, "entry");
+        self.builder.position_at_end(entry);
+        self.variables.clear();
+
+        // Create empty map to hold record fields
+        let map_empty_fn = self.module.get_function("clorus_map_empty")
+            .ok_or("clorus_map_empty not declared")?;
+        let mut map_val = self.builder.build_call(
+            map_empty_fn,
+            &[],
+            "record_map"
+        ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+        // Get map_assoc and keyword functions
+        let map_assoc_fn = self.module.get_function("clorus_map_assoc")
+            .ok_or("clorus_map_assoc not declared")?;
+        let keyword_fn = self.module.get_function("clorus_keyword")
+            .ok_or("clorus_keyword not declared")?;
+
+        // For each field, add keyword->value pair to map
+        for (i, field_name) in fields.iter().enumerate() {
+            // Get parameter value for this field
+            let param_val = function.get_nth_param(i as u32)
+                .unwrap()
+                .into_pointer_value();
+
+            // Create keyword for field name
+            let field_c_str = self.builder.build_global_string_ptr(field_name, "field_name").unwrap();
+            let keyword_val = self.builder.build_call(
+                keyword_fn,
+                &[field_c_str.as_pointer_value().into()],
+                &format!("field_keyword_{}", i)
+            ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+            // Add keyword->value pair to map
+            map_val = self.builder.build_call(
+                map_assoc_fn,
+                &[map_val.into(), keyword_val.into(), param_val.into()],
+                &format!("record_map_{}", i)
+            ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+        }
+
+        // Return the constructed record (map)
+        self.builder.build_return(Some(&map_val)).unwrap();
+
+        // Restore previous state
+        self.variables = saved_vars;
+        if let Some(block) = saved_block {
+            self.builder.position_at_end(block);
+        }
+
+        Ok(())
+    }
+
     /// Compile an expression to a Value*
     /// All expressions now return boxed values
     pub fn compile_expr(&mut self, expr: &Expr) -> Result<PointerValue<'ctx>, String> {
@@ -3543,76 +3620,7 @@ impl<'ctx> CodeGen<'ctx> {
 
             Expr::Defrecord { name, fields } => {
                 // Generate constructor function: ->RecordName
-                // Example: (defrecord Person [name age]) creates ->Person function
-                let constructor_name = format!("->{}", name);
-
-                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-                // Create parameter types (one Value* for each field)
-                let param_types: Vec<_> = fields.iter()
-                    .map(|_| value_ptr_type.into())
-                    .collect();
-
-                let fn_type = value_ptr_type.fn_type(&param_types, false);
-                let function = self.module.add_function(&constructor_name, fn_type, None);
-
-                // Add function to table for calls
-                self.functions.insert(constructor_name.clone(), function);
-
-                // Save current state
-                let saved_vars = self.variables.clone();
-                let saved_block = self.builder.get_insert_block();
-
-                // Create entry block for constructor
-                let entry = self.context.append_basic_block(function, "entry");
-                self.builder.position_at_end(entry);
-
-                // Create empty map to hold record fields
-                let map_empty_fn = self.module.get_function("clorus_map_empty")
-                    .ok_or("clorus_map_empty not declared")?;
-                let mut map_val = self.builder.build_call(
-                    map_empty_fn,
-                    &[],
-                    "record_map"
-                ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
-
-                // Get map_assoc and keyword functions
-                let map_assoc_fn = self.module.get_function("clorus_map_assoc")
-                    .ok_or("clorus_map_assoc not declared")?;
-                let keyword_fn = self.module.get_function("clorus_keyword")
-                    .ok_or("clorus_keyword not declared")?;
-
-                // For each field, add keyword->value pair to map
-                for (i, field_name) in fields.iter().enumerate() {
-                    // Get parameter value for this field
-                    let param_val = function.get_nth_param(i as u32)
-                        .unwrap()
-                        .into_pointer_value();
-
-                    // Create keyword for field name
-                    let field_c_str = self.builder.build_global_string_ptr(field_name, "field_name").unwrap();
-                    let keyword_val = self.builder.build_call(
-                        keyword_fn,
-                        &[field_c_str.as_pointer_value().into()],
-                        &format!("field_keyword_{}", i)
-                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
-
-                    // Add keyword->value pair to map
-                    map_val = self.builder.build_call(
-                        map_assoc_fn,
-                        &[map_val.into(), keyword_val.into(), param_val.into()],
-                        &format!("record_map_{}", i)
-                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
-                }
-
-                // Return the constructed record (map)
-                self.builder.build_return(Some(&map_val)).unwrap();
-
-                // Restore previous state
-                self.variables = saved_vars;
-                if let Some(block) = saved_block {
-                    self.builder.position_at_end(block);
-                }
+                self.generate_record_constructor(name, fields)?;
 
                 // defrecord returns nil (like defn)
                 let nil_fn = self.module.get_function("clorus_value_nil")
@@ -3635,69 +3643,10 @@ impl<'ctx> CodeGen<'ctx> {
 
             Expr::Deftype { name, fields, protocols } => {
                 // Deftype combines defrecord + inline protocol implementations
-                // 1. Generate constructor like defrecord
-                // 2. Generate protocol method implementations like extend-type
+                // 1. Generate constructor using shared helper
+                self.generate_record_constructor(name, fields)?;
 
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-                // 1. Generate constructor: ->TypeName
-                let constructor_name = format!("->{}", name);
-                let param_types: Vec<_> = fields.iter()
-                    .map(|_| value_ptr_type.into())
-                    .collect();
-
-                let fn_type = value_ptr_type.fn_type(&param_types, false);
-                let constructor_fn = self.module.add_function(&constructor_name, fn_type, None);
-                self.functions.insert(constructor_name.clone(), constructor_fn);
-
-                // Save current state for constructor
-                let saved_vars = self.variables.clone();
-                let saved_block = self.builder.get_insert_block();
-
-                // Create constructor entry block
-                let entry = self.context.append_basic_block(constructor_fn, "entry");
-                self.builder.position_at_end(entry);
-                self.variables.clear();
-
-                // Create record map
-                let empty_map_fn = self.module.get_function("clorus_map_empty")
-                    .ok_or("clorus_map_empty not declared")?;
-                let mut record_val = self.builder.build_call(empty_map_fn, &[], "empty_map").unwrap()
-                    .try_as_basic_value().left().unwrap().into_pointer_value();
-
-                let assoc_fn = self.module.get_function("clorus_map_assoc")
-                    .ok_or("clorus_map_assoc not declared")?;
-                let keyword_fn = self.module.get_function("clorus_keyword")
-                    .ok_or("clorus_keyword not declared")?;
-
-                // Add each field to the map
-                for (i, field_name) in fields.iter().enumerate() {
-                    let field_val = constructor_fn.get_nth_param(i as u32).unwrap().into_pointer_value();
-
-                    // Create keyword for field name
-                    let field_c_str = self.builder.build_global_string_ptr(field_name, "field_name").unwrap();
-                    let keyword_val = self.builder.build_call(
-                        keyword_fn,
-                        &[field_c_str.as_pointer_value().into()],
-                        &format!("field_keyword_{}", i)
-                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
-
-                    record_val = self.builder.build_call(
-                        assoc_fn,
-                        &[record_val.into(), keyword_val.into(), field_val.into()],
-                        "assoc"
-                    ).unwrap()
-                        .try_as_basic_value().left().unwrap().into_pointer_value();
-                }
-
-                // Return the record
-                self.builder.build_return(Some(&record_val)).unwrap();
-
-                // Restore state
-                self.variables = saved_vars;
-                if let Some(block) = saved_block {
-                    self.builder.position_at_end(block);
-                }
 
                 // 2. Generate protocol method implementations
                 for (protocol_name, methods) in protocols {
