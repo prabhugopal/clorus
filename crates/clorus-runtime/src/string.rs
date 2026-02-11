@@ -617,6 +617,39 @@ pub extern "C" fn clorus_string(s_ptr: *const c_char) -> *mut Value {
 /// # Returns
 /// A new String Value with the readable representation
 #[no_mangle]
+pub extern "C" fn clorus_string_data(val: *mut Value) -> *const c_char {
+    unsafe {
+        if val.is_null() {
+            return std::ptr::null();
+        }
+
+        // Extract string from Value*
+        if (*val).header().tag() != ValueTag::String {
+            return std::ptr::null();
+        }
+
+        let rust_str = (*val).as_string();
+
+        // Convert to C string and leak (caller must manage)
+        // This is safe for protocol dispatch where we only read during dispatch
+        let c_string = std::ffi::CString::new(rust_str).unwrap();
+        c_string.into_raw() as *const c_char
+    }
+}
+
+/// pr-str - Print to string with readable representation
+///
+/// Converts a value to a readable string representation:
+/// - Strings are quoted and escaped
+/// - Keywords include the colon
+/// - Other values use their display format
+///
+/// # Arguments
+/// * `val` - The value to convert to string
+///
+/// # Returns
+/// A new String Value with the readable representation
+#[no_mangle]
 pub extern "C" fn clorus_pr_str(val: *mut Value) -> *mut Value {
     unsafe {
         let result = value_to_pr_string(val);

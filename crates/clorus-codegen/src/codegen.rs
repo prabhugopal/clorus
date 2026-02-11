@@ -77,6 +77,9 @@ pub struct CodeGen<'ctx> {
     compile_timeout: Duration,
     /// Number of expressions compiled (for progress tracking)
     expr_count: usize,
+    /// Protocol methods for automatic dispatch
+    /// Maps method_name -> (protocol_name, param_count)
+    protocol_methods: HashMap<String, (String, usize)>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -101,6 +104,7 @@ impl<'ctx> CodeGen<'ctx> {
             compile_start: Instant::now(),
             compile_timeout: Duration::from_secs(60), // 60 second default timeout
             expr_count: 0,
+            protocol_methods: HashMap::new(),
         };
 
         // Declare runtime functions
@@ -682,6 +686,11 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_i32_fn("clorus_is_fn");      // fn? predicate
         self.declare_value2_to_i32_fn("clorus_starts_with");
         self.declare_value2_to_i32_fn("clorus_ends_with");
+
+        // clorus_string_data(Value*) -> *const c_char
+        // Extract C string from String Value* for protocol dispatch
+        let string_data_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_string_data", string_data_type, None);
 
         // ===== Protocol Dispatch =====
         // clorus_register_protocol_method(type_name: *const c_char, protocol_name: *const c_char,
@@ -3682,10 +3691,20 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(nil_val)
             }
 
-            Expr::Defprotocol { .. } => {
+            Expr::Defprotocol { name, methods } => {
+                // PHASE 5.1: Track protocol methods for automatic dispatch
+                // Store each method with its protocol name and parameter count
+                for method in methods {
+                    let param_count = method.params.len();
+                    self.protocol_methods.insert(
+                        method.name.clone(),
+                        (name.clone(), param_count)
+                    );
+                }
+
                 // Protocols are compile-time only metadata
                 // They define method signatures but don't generate runtime code
-                // The actual implementation is in extend-type
+                // The actual implementation is in extend-type/deftype
                 let nil_fn = self.module.get_function("clorus_value_nil")
                     .ok_or("clorus_value_nil not declared")?;
                 let nil_val = self.builder.build_call(nil_fn, &[], "defprotocol_nil").unwrap()
@@ -4091,6 +4110,173 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Call { func, args } => {
+                // PHASE 5.2: Automatic Protocol Dispatch
+                // Check if this is a protocol method call
+                if let Some((protocol_name, param_count)) = self.protocol_methods.get(func).cloned() {
+                    // Verify argument count matches
+                    if args.len() != param_count {
+                        return Err(format!(
+                            "Protocol method {} expects {} arguments, got {}",
+                            func, param_count, args.len()
+                        ));
+                    }
+
+                    // Compile all arguments first
+                    let mut arg_values = Vec::new();
+                    for arg in args {
+                        arg_values.push(self.compile_expr(arg)?);
+                    }
+
+                    // Extract __type__ from first argument (the instance)
+                    let instance = arg_values[0];
+
+                    // Get map-get function to extract __type__ field
+                    let map_get_fn = self.module.get_function("clorus_map_get")
+                        .ok_or("clorus_map_get not declared")?;
+
+                    // Create __type__ keyword
+                    let keyword_fn = self.module.get_function("clorus_keyword")
+                        .ok_or("clorus_keyword not declared")?;
+                    let type_keyword_str = self.builder.build_global_string_ptr("__type__", "dispatch_type_keyword").unwrap();
+                    let type_keyword = self.builder.build_call(
+                        keyword_fn,
+                        &[type_keyword_str.as_pointer_value().into()],
+                        "dispatch_type_kw"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Extract type name from instance
+                    let type_name_val = self.builder.build_call(
+                        map_get_fn,
+                        &[instance.into(), type_keyword.into()],
+                        "dispatch_type_name"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Get string data from Value*
+                    let str_data_fn = self.module.get_function("clorus_string_data")
+                        .ok_or("clorus_string_data not declared")?;
+                    let type_name_cstr = self.builder.build_call(
+                        str_data_fn,
+                        &[type_name_val.into()],
+                        "dispatch_type_cstr"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Lookup protocol method in registry
+                    let lookup_fn = self.module.get_function("clorus_lookup_protocol_method")
+                        .ok_or("clorus_lookup_protocol_method not declared")?;
+
+                    // Create string constants for protocol and method names
+                    let protocol_name_str = self.builder.build_global_string_ptr(&protocol_name, "dispatch_proto").unwrap();
+                    let method_name_str = self.builder.build_global_string_ptr(func, "dispatch_method").unwrap();
+
+                    // Call lookup function
+                    let fn_ptr_int = self.builder.build_call(
+                        lookup_fn,
+                        &[
+                            type_name_cstr.into(),
+                            protocol_name_str.as_pointer_value().into(),
+                            method_name_str.as_pointer_value().into(),
+                        ],
+                        "dispatch_fn_ptr"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_int_value();
+
+                    // Check if method was found (non-zero)
+                    let zero = self.context.i64_type().const_zero();
+                    let found = self.builder.build_int_compare(
+                        IntPredicate::NE,
+                        fn_ptr_int,
+                        zero,
+                        "dispatch_found"
+                    ).unwrap();
+
+                    let current_fn = self.builder.get_insert_block()
+                        .and_then(|b| b.get_parent())
+                        .ok_or("Call must be inside a function")?;
+
+                    let found_block = self.context.append_basic_block(current_fn, "dispatch_found");
+                    let not_found_block = self.context.append_basic_block(current_fn, "dispatch_not_found");
+                    let continue_block = self.context.append_basic_block(current_fn, "dispatch_continue");
+
+                    self.builder.build_conditional_branch(found, found_block, not_found_block).unwrap();
+
+                    // Found block: cast and call the function
+                    self.builder.position_at_end(found_block);
+
+                    let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let fn_ptr = self.builder.build_int_to_ptr(
+                        fn_ptr_int,
+                        i8_ptr_type,
+                        "dispatch_fn"
+                    ).unwrap();
+
+                    // Create function type: (Value*, ...) -> Value*
+                    let param_types: Vec<_> = (0..param_count)
+                        .map(|_| i8_ptr_type.into())
+                        .collect();
+                    let fn_type = i8_ptr_type.fn_type(&param_types, false);
+
+                    // Cast to function pointer type
+                    let fn_ptr_typed = self.builder.build_pointer_cast(
+                        fn_ptr,
+                        fn_type.ptr_type(AddressSpace::default()),
+                        "dispatch_fn_typed"
+                    ).unwrap();
+
+                    // Call the function
+                    let arg_metadata: Vec<_> = arg_values.iter()
+                        .map(|&v| v.into())
+                        .collect();
+
+                    let result = self.builder.build_indirect_call(
+                        fn_type,
+                        fn_ptr_typed,
+                        &arg_metadata,
+                        "dispatch_result"
+                    ).unwrap();
+
+                    let result_val = result.try_as_basic_value().left().unwrap().into_pointer_value();
+                    self.builder.build_unconditional_branch(continue_block).unwrap();
+
+                    // Not found block: error
+                    self.builder.position_at_end(not_found_block);
+                    let error_msg = format!("No implementation of protocol method {}.{} found for type", protocol_name, func);
+                    let error_str = self.builder.build_global_string_ptr(&error_msg, "dispatch_error").unwrap();
+                    let println_fn = self.module.get_function("clorus_println")
+                        .ok_or("clorus_println not declared")?;
+
+                    // Print error message
+                    let str_fn = self.module.get_function("clorus_value_string")
+                        .ok_or("clorus_value_string not declared")?;
+                    let error_val = self.builder.build_call(
+                        str_fn,
+                        &[error_str.as_pointer_value().into()],
+                        "error_val"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    self.builder.build_call(
+                        println_fn,
+                        &[error_val.into()],
+                        "print_error"
+                    ).unwrap();
+
+                    // Return nil for error case
+                    let nil_fn = self.module.get_function("clorus_value_nil")
+                        .ok_or("clorus_value_nil not declared")?;
+                    let error_result = self.builder.build_call(nil_fn, &[], "error_nil")
+                        .unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    self.builder.build_unconditional_branch(continue_block).unwrap();
+
+                    // Continue block: merge results
+                    self.builder.position_at_end(continue_block);
+                    let phi = self.builder.build_phi(i8_ptr_type, "dispatch_phi").unwrap();
+                    phi.add_incoming(&[
+                        (&result_val, found_block),
+                        (&error_result, not_found_block),
+                    ]);
+
+                    return Ok(phi.as_basic_value().into_pointer_value());
+                }
+
                 // Handle arithmetic operators (can come from macro expansion)
                 match func.as_str() {
                     "+" => return self.compile_add(args),

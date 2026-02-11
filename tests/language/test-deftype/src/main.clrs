@@ -31,22 +31,67 @@
   (greet [this]
     (str "Meow! I'm " (:name this) ", a " (:color this) " cat")))
 
-;; Test 4: Test protocol method calls (manual dispatch for now)
+;; Test 4: Test automatic protocol dispatch
 (defn test-protocol-methods []
   (let [dog (->Dog "Rex" "Golden Retriever")
         cat (->Cat "Whiskers" "orange")]
-    (println "\nTesting protocol methods...")
+    (println "\nTesting automatic protocol dispatch...")
 
     (println (str "  Dog: " (:name dog)))
     (println (str "  Dog type: " (:__type__ dog)))
-    (println (str "  Greeting: " (Dog_Greetable_greet dog)))
+    (println (str "  Greeting: " (greet dog)))
 
     (println (str "  Cat: " (:name cat)))
     (println (str "  Cat type: " (:__type__ cat)))
-    (println (str "  Greeting: " (Cat_Greetable_greet cat)))
+    (println (str "  Greeting: " (greet cat)))
 
-    (println "✓ Protocol methods executed for multiple types!")))
+    (println "✓ Automatic protocol dispatch works!")))
 
 ;; Run tests
 (test-type-metadata)
 (test-protocol-methods)
+
+;; ============================================================================
+;; Test 5: CORAL-style UI Component Protocol
+;; ============================================================================
+
+(defprotocol IComponent
+  (render [this ctx] "Render the component"))
+
+;; Button component
+(deftype Button2 [props state]
+  IComponent
+  (render [this ctx]
+    (str "Button(label=" (:label (:props this)) ", ctx=" ctx ")")))
+
+;; TextField component
+(deftype TextField2 [props state]
+  IComponent
+  (render [this ctx]
+    (str "TextField(value=" (:value (:props this)) ", ctx=" ctx ")")))
+
+;; Label component
+(deftype Label [props state]
+  IComponent
+  (render [this ctx]
+    (str "Label(text=" (:text (:props this)) ", ctx=" ctx ")")))
+
+;; Test automatic polymorphic dispatch
+(defn test-coral-components []
+  (let [button (->Button2 {:label "Click Me"} {:hover false})
+        textfield (->TextField2 {:value "Hello"} {:focus false})
+        label (->Label {:text "Username:"} {})]
+
+    (println "\n============================================")
+    (println "Testing CORAL-style UI components...")
+    (println "============================================")
+
+    ;; Polymorphic dispatch - automatically calls the right implementation!
+    (println (render button "canvas-ctx-1"))
+    (println (render textfield "canvas-ctx-2"))
+    (println (render label "canvas-ctx-3"))
+
+    (println "\n✓ Polymorphic protocol dispatch works for UI components!")))
+
+(test-coral-components)
+
