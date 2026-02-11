@@ -1,0 +1,5 @@
+{:name "test-deftype"
+ :version "0.1.0"
+ :description "Test deftype implementation"
+ :entry "test-deftype/-main"
+ :source-paths ["src"]}

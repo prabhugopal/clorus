@@ -58,8 +58,8 @@ pub struct ReplEngine<'ctx> {
     /// Parsed stdlib expressions to include in every evaluation
     stdlib_exprs: Vec<Expr>,
     /// Parsed module expressions (from required modules) to include in every evaluation
-    /// Stored as (namespace, expr) tuples to preserve namespace context
-    module_exprs: Vec<(String, Expr)>,
+    /// Stored as (namespace, aliases, expr) tuples to preserve namespace context and aliases
+    module_exprs: Vec<(String, HashMap<String, String>, Expr)>,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -277,7 +277,7 @@ impl<'ctx> ReplEngine<'ctx> {
     /// Recursively load a module and its dependencies
     /// Returns parsed expressions with their namespace (in dependency order)
     /// Excludes require/ns statements which are already processed
-    fn load_module_recursive(&mut self, namespace: &str) -> Result<Vec<(String, Expr)>, String> {
+    fn load_module_recursive(&mut self, namespace: &str) -> Result<Vec<(String, HashMap<String, String>, Expr)>, String> {
         use std::fs;
 
         // Skip if already loaded
@@ -309,6 +309,9 @@ impl<'ctx> ReplEngine<'ctx> {
         // Recursively load dependencies first
         let mut all_exprs = Vec::new();
 
+        // Track this module's own aliases (from its ns declaration)
+        let mut module_aliases = HashMap::new();
+
         for expr in &exprs {
             // Check top-level Expr::Require
             if let Expr::Require { specs } = expr {
@@ -323,21 +326,26 @@ impl<'ctx> ReplEngine<'ctx> {
                 for spec in requires {
                     let dep_exprs = self.load_module_recursive(&spec.module)?;
                     all_exprs.extend(dep_exprs);
+
+                    // Track this module's alias for this require
+                    if let Some(alias) = &spec.alias {
+                        module_aliases.insert(alias.clone(), spec.module.clone());
+                    }
                 }
             }
         }
 
         // Add this module's expressions AFTER its dependencies
         // BUT exclude Require and Ns expressions (already processed)
-        // Tag each expression with its namespace
+        // Tag each expression with its namespace AND aliases
         for expr in exprs {
             match expr {
                 Expr::Require { .. } | Expr::Ns { .. } => {
                     // Skip - already processed
                 }
                 _ => {
-                    // Add expression with its namespace
-                    all_exprs.push((namespace.to_string(), expr));
+                    // Add expression with its namespace and aliases
+                    all_exprs.push((namespace.to_string(), module_aliases.clone(), expr));
                 }
             }
         }
@@ -485,6 +493,12 @@ impl<'ctx> ReplEngine<'ctx> {
             codegen.register_clip_namespace(namespace);
         }
 
+        // Register all loaded local modules (demos.*, utils.*, etc.)
+        // This allows the codegen to resolve qualified function calls like textfield/render
+        for namespace in &self.loaded_modules {
+            codegen.register_clip_namespace(namespace);
+        }
+
         // Set the current namespace context
         // Convert clorus::NamespaceContext to codegen::NamespaceContext
         let codegen_ns = clorus_codegen::NamespaceContext {
@@ -525,12 +539,12 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Compile loaded module expressions (after stdlib, before user history)
         // These are from required modules (e.g., demos.shapes-demo)
-        // Each expression is compiled with its module's namespace to avoid collisions
-        for (module_idx, (module_namespace, module_expr)) in self.module_exprs.iter().enumerate() {
-            // Set namespace context for this module's expressions
+        // Each expression is compiled with its module's namespace AND aliases to properly resolve references
+        for (module_idx, (module_namespace, module_aliases, module_expr)) in self.module_exprs.iter().enumerate() {
+            // Set namespace context for this module's expressions, INCLUDING ITS ALIASES
             let module_codegen_ns = clorus_codegen::NamespaceContext {
                 current: module_namespace.clone(),
-                aliases: HashMap::new(),  // Module's own aliases handled during parsing
+                aliases: module_aliases.clone(),  // Use the module's own aliases!
                 imports: HashMap::new(),
             };
             codegen.set_namespace(module_codegen_ns);
@@ -633,6 +647,24 @@ impl<'ctx> ReplEngine<'ctx> {
                     continue;
                 }
 
+                // Handle standalone require expressions (load modules)
+                if let clorus_syntax::Expr::Require { specs } = &expanded_expr {
+                    // Load each required module synchronously
+                    for spec in specs {
+                        // Load the module and all its dependencies
+                        let module_exprs = self.load_module_recursive(&spec.module)?;
+
+                        // Add loaded module expressions to module_exprs for compilation
+                        self.module_exprs.extend(module_exprs);
+
+                        // Update namespace aliases after loading
+                        self.process_require(spec);
+                    }
+
+                    // Skip compilation for require (it's a compile-time directive)
+                    continue;
+                }
+
                 // Handle forward declarations (compile-time directive)
                 if let clorus_syntax::Expr::Declare { names } = &expanded_expr {
                     // Process declare directly - adds forward declarations to codegen
@@ -672,6 +704,13 @@ impl<'ctx> ReplEngine<'ctx> {
             self.register_symbol(&namespace, &symbol);
         }
 
+        // IMPORTANT: Re-register all loaded modules after processing init forms
+        // This is necessary because init forms may contain (require ...) statements
+        // that load new modules, and those need to be registered with the codegen
+        for namespace in &self.loaded_modules {
+            codegen.register_clip_namespace(namespace);
+        }
+
         // Compile interactive history forms
         for (i, historical_input) in self.history.iter().enumerate() {
             let historical_exprs = parse(historical_input)?;
@@ -706,6 +745,11 @@ impl<'ctx> ReplEngine<'ctx> {
         codegen.wrap_in_function(&expanded_current, &fn_name)?;
         latest_fn_name = fn_name.clone();
 
+        // Verify LLVM module before JIT
+        if let Err(e) = codegen.get_module().verify() {
+            return Err(format!("LLVM module verification failed: {:?}", e));
+        }
+
         // Create JIT engine
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
@@ -715,8 +759,13 @@ impl<'ctx> ReplEngine<'ctx> {
         for fn_name in &def_fn_names {
             unsafe {
                 type EvalFunc = unsafe extern "C" fn() -> *mut u8;
-                if let Ok(jit_fn) = engine.get_function::<EvalFunc>(fn_name) {
-                    jit_fn.call(); // We don't care about the return value
+                match engine.get_function::<EvalFunc>(fn_name) {
+                    Ok(jit_fn) => {
+                        jit_fn.call();
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to execute {}: {:?}", fn_name, e));
+                    }
                 }
             }
         }

@@ -1,0 +1,14 @@
+[package]
+name = "test-deftype"
+version = "0.1.0"
+authors = []
+description = "Test deftype implementation"
+
+[dependencies]
+
+[build]
+entry = "src/main.clrs"
+
+[link]
+frameworks = []
+libraries = []

@@ -1,0 +1,8 @@
+[package]
+name = "test-assoc-atom"
+version = "0.1.0"
+authors = ["Clorus Team"]
+
+[build]
+entry = "src/main.clrs"
+output = "test-assoc-atom"

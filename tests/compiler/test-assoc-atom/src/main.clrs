@@ -1,0 +1,30 @@
+;; Test case for assoc + atom bug - comprehensive test
+(ns test-assoc-atom)
+
+(defn layout-with-assoc [component bounds]
+  (assoc component :bounds bounds))
+
+(defn -main []
+  ;; Create component with atom containing a map
+  (let [button-state (atom {:clicked false :count 0})
+        button-component {:id 123
+                         :tag :button
+                         :props {:label "Click Me"}
+                         :bounds {:x 0 :y 0 :w 80 :h 25}
+                         :children []
+                         :state button-state
+                         :handlers {}}]
+
+    ;; Update bounds multiple times (like a real UI loop)
+    (let [frame1 (layout-with-assoc button-component {:x 10 :y 10 :w 80 :h 25})
+          frame2 (layout-with-assoc frame1 {:x 20 :y 20 :w 80 :h 25})
+          frame3 (layout-with-assoc frame2 {:x 30 :y 30 :w 80 :h 25})]
+
+      ;; Also update the atom state between layouts
+      (reset! button-state {:clicked true :count 1})
+      (let [frame4 (layout-with-assoc frame3 {:x 40 :y 40 :w 80 :h 25})]
+
+        ;; Reset atom again
+        (reset! button-state {:clicked false :count 2})
+        (let [frame5 (layout-with-assoc frame4 {:x 50 :y 50 :w 80 :h 25})]
+          frame5)))))

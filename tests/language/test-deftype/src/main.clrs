@@ -1,0 +1,18 @@
+(ns test-deftype)
+
+;; Test 1: Define a simple type without protocols
+(deftype Person [name age])
+
+;; Test 2: Create an instance and access fields
+(defn test-constructor []
+  (let [alice (->Person "Alice" 30)
+        bob (->Person "Bob" 25)]
+    (println "Testing deftype constructor...")
+    (println (str "Alice name: " (:name alice)))
+    (println (str "Alice age: " (:age alice)))
+    (println (str "Bob name: " (:name bob)))
+    (println (str "Bob age: " (:age bob)))
+    (println "Constructor test passed!")))
+
+;; Run test
+(test-constructor)
