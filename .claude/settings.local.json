@@ -142,7 +142,26 @@
       "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus clean:*)",
       "Bash(ln:*)",
       "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus jit:*)",
-      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus help:*)"
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus help:*)",
+      "Bash(../../..)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus pack:*)",
+      "Bash(clorus --version:*)",
+      "Bash(./build.sh:*)",
+      "Bash(./target/coral-test-app)",
+      "Bash(./target/coral-gallery)",
+      "Bash(./target/test-assoc-atom:*)",
+      "Bash(./target/test-deftype:*)",
+      "Bash(../../../target/release/clorus:*)",
+      "Bash(target/debug/clorus:*)",
+      "Bash(../../../target/debug/clorus:*)",
+      "Bash(target/debug/clorus-cli run:*)",
+      "Bash(git restore:*)",
+      "Bash(clorus repl)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/debug/clorus repl:*)",
+      "Bash(RUST_BACKTRACE=1 ./target/coral-gallery:*)",
+      "Bash(llvm-dis:*)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus compile:*)",
+      "Bash(/Users/prabhugopal/Learning/git/clorus/target/release/clorus build-lib)"
     ]
   }
 }

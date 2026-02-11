@@ -12,6 +12,17 @@
 (defn inc [x] (+ x 1))
 (defn dec [x] (- x 1))
 
+;; int - Convert float to integer (truncate towards zero)
+;; Example: (int 3.7) ; => 3
+;; Example: (int -3.7) ; => -3
+(defn int [x]
+  ;; For positive numbers: subtract fractional part
+  ;; For negative numbers: add fractional part back
+  (if (>= x 0)
+    (- x (mod x 1))
+    (+ x (mod (- x) 1))))
+
+
 ;; partial - Partial function application
 ;; Takes a function and some arguments, returns a new function that takes
 ;; the remaining arguments and calls the original with all arguments combined
@@ -333,9 +344,6 @@
     []
     (conj (butlast (rest coll)) (first coll))))
 
-;; reverse - Reverse collection
-(defn reverse [coll]
-  (reduce (fn [acc x] (conj [x] acc)) [] coll))
 
 ;; sort - Sort collection (simple bubble sort for now)
 (defn sort [coll]
@@ -406,6 +414,28 @@
 ;; ============================================================================
 ;; Map Utilities
 ;; ============================================================================
+
+;; ============================================================================
+;; Core Map Operations
+;; ============================================================================
+;; Note: get, assoc, dissoc, contains? are built-in functions (implemented in compiler)
+
+;; update - Update value in map using function
+;; Example: (update {:count 5} :count inc) ; => {:count 6}
+(defn update [m k f]
+  (assoc m k (f (get m k))))
+
+;; keys - Get all keys from map
+;; Example: (keys {:a 1 :b 2}) ; => [:a :b]
+(defn keys [m]
+  ;; TODO: Needs runtime support
+  [])
+
+;; vals - Get all values from map
+;; Example: (vals {:a 1 :b 2}) ; => [1 2]
+(defn vals [m]
+  ;; TODO: Needs runtime support
+  [])
 
 ;; select-keys - Select subset of keys from map
 ;; Example: (select-keys {:a 1 :b 2 :c 3} [:a :c]) ; => {:a 1 :c 3}
@@ -548,9 +578,6 @@
 (defn zero? [n]
   (= n 0))
 
-;; pos? - Check if number is positive
-(defn pos? [n]
-  (> n 0))
 
 ;; neg? - Check if number is negative
 (defn neg? [n]

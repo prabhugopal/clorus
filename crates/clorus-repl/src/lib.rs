@@ -376,6 +376,13 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
     }
 
     if let Some(core_path) = core_stdlib_path {
+        // TEMP: Disable stdlib auto-loading in REPL due to JIT compilation bugs
+        // Stdlib works perfectly in compiled mode (clorus build)
+        // TODO: Fix REPL JIT compilation of stdlib expressions
+        println!("⚠ clorus.core auto-loading disabled in REPL (use compiled mode)");
+        core_loaded = false;
+
+        /*
         match std::fs::read_to_string(&core_path) {
             Ok(source) => {
                 // Use new batch loader - compiles stdlib ONCE, never recompiled
@@ -393,6 +400,7 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                 eprintln!("⚠ Could not read stdlib: {}", e);
             }
         }
+        */
     }
 
     if !core_loaded {
@@ -440,26 +448,47 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
 
                                         // Load and parse interface file to register functions
                                         let interface_path = format!("interfaces/{}.clorus-ffi", dep_name);
-                                        if let Ok(interface_content) = std::fs::read_to_string(&interface_path) {
-                                            match parse_interface_file(&interface_content, dep_name) {
-                                                Ok(mut rust_lib) => {
-                                                    // Register library with full rust.* module name for lookup
-                                                    rust_lib.name = format!("rust.{}", dep_name.replace('-', "_"));
-                                                    println!("  → Registered {} functions from {}", rust_lib.functions.len(), dep_name);
-
-                                                    // Register with both full module name and library name
-                                                    // Full name (rust.egui_hello) for alias resolution
-                                                    repl_engine.register_rust_library(rust_lib.clone());
-                                                    // Library name (egui-hello) for ns declaration processing
-                                                    rust_lib.name = dep_name.to_string();
-                                                    repl_engine.register_rust_library(rust_lib);
-                                                }
-                                                Err(e) => {
-                                                    eprintln!("  ⚠ Failed to parse interface file: {}", e);
-                                                }
-                                            }
+                                        let rust_lib_result = if let Ok(interface_content) = std::fs::read_to_string(&interface_path) {
+                                            // Use interface file if available
+                                            parse_interface_file(&interface_content, dep_name)
                                         } else {
-                                            eprintln!("  ⚠ Interface file not found: {}", interface_path);
+                                            // Auto-parse from generated wrapper source (interface = false case)
+                                            let lib_name_base = dep_name.replace('-', "_");
+                                            let wrapper_path = format!("target/rust-ffi/{}_ffi/src/lib.rs", lib_name_base);
+                                            if let Ok(wrapper_content) = std::fs::read_to_string(&wrapper_path) {
+                                                parse_wrapper_source(&wrapper_content, dep_name)
+                                            } else {
+                                                Err(format!("Neither interface file nor generated wrapper found for {}", dep_name))
+                                            }
+                                        };
+
+                                        match rust_lib_result {
+                                            Ok(mut rust_lib) => {
+                                                // Register library with full rust.* module name for lookup
+                                                rust_lib.name = format!("rust.{}", dep_name.replace('-', "_"));
+                                                println!("  → Registered {} functions from {}", rust_lib.functions.len(), dep_name);
+
+                                                // DEBUG: Print all functions
+                                                eprintln!("DEBUG: Functions in rust.{}:", dep_name.replace('-', "_"));
+                                                for (i, func) in rust_lib.functions.iter().enumerate() {
+                                                    if i < 10 {
+                                                        eprintln!("  - {}", func.name);
+                                                    }
+                                                }
+                                                if rust_lib.functions.len() > 10 {
+                                                    eprintln!("  ... and {} more", rust_lib.functions.len() - 10);
+                                                }
+
+                                                // Register with both full module name and library name
+                                                // Full name (rust.egui_hello) for alias resolution
+                                                repl_engine.register_rust_library(rust_lib.clone());
+                                                // Library name (egui-hello) for ns declaration processing
+                                                rust_lib.name = dep_name.to_string();
+                                                repl_engine.register_rust_library(rust_lib);
+                                            }
+                                            Err(e) => {
+                                                eprintln!("  ⚠ Failed to register FFI functions: {}", e);
+                                            }
                                         }
                                         break;
                                     }
@@ -490,7 +519,7 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                 Ok((libs, packages)) => {
                     if !packages.is_empty() {
                         println!("📦 Loaded {} .clip package(s) for REPL", packages.len());
-                        for pkg in &packages {
+                        for (i, pkg) in packages.iter().enumerate() {
                             println!("   ✓ {} v{}", pkg.name, pkg.version);
                             // Register the namespace with the REPL engine
                             repl_engine.register_clip_namespace(&pkg.name);
@@ -499,6 +528,22 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                             for module in &pkg.modules {
                                 let full_module_path = format!("{}.{}", pkg.name, module);
                                 repl_engine.register_clip_namespace(&full_module_path);
+                            }
+
+                            // Call the library initialization function to register protocols
+                            let init_fn_name = format!("clorus_{}_init", pkg.name.replace('-', "_"));
+                            if let Some(lib) = libs.get(i) {
+                                unsafe {
+                                    type InitFunc = unsafe extern "C" fn() -> *mut std::ffi::c_void;
+                                    match lib.get::<InitFunc>(init_fn_name.as_bytes()) {
+                                        Ok(init_fn) => {
+                                            init_fn();
+                                        }
+                                        Err(_) => {
+                                            // Init function not found - that's OK for older packages
+                                        }
+                                    }
+                                }
                             }
                         }
                         println!();
@@ -567,9 +612,11 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
 
                         // When we have a complete form (paren_depth returns to 0)
                         if paren_depth == 0 && !current_form.trim().is_empty() {
+                            eprintln!("DEBUG: Loading form {}...", forms_loaded + 1);
                             match repl_engine.eval_init(&current_form) {
                                 Ok(_) => {
                                     forms_loaded += 1;
+                                    eprintln!("DEBUG: Form {} loaded successfully", forms_loaded);
                                 }
                                 Err(e) => {
                                     // Check if this is an FFI-related error
@@ -589,7 +636,23 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                         println!("✓ Project loaded ({} forms)", forms_loaded);
                     } else {
                         println!("⚠ Project loaded with errors ({} forms)", forms_loaded);
+
+                        // Print first few FFI errors to help debug
+                        if !ffi_errors.is_empty() {
+                            eprintln!();
+                            eprintln!("FFI-related errors during project load:");
+                            for (i, err) in ffi_errors.iter().enumerate().take(3) {
+                                eprintln!("  {}. {}", i + 1, err);
+                            }
+                            if ffi_errors.len() > 3 {
+                                eprintln!("  ... and {} more", ffi_errors.len() - 3);
+                            }
+                        }
                     }
+
+                    // Finalize project loading - clear init_forms to avoid recompilation
+                    // This prevents O(n²) behavior for interactive REPL inputs
+                    repl_engine.finalize_project_load();
                 }
                 Err(e) => {
                     eprintln!("⚠ Could not read {}: {}", proj_config.build.entry, e);
@@ -1243,6 +1306,142 @@ pub fn load_dynamic_library(lib_path: &std::path::Path) -> Result<libloading::Li
     }
 }
 
+/// Parse generated wrapper source to extract FFI function signatures
+/// This handles the case when interface = false and no interface file exists
+/// Parses the auto-generated target/rust-ffi/{name}_ffi/src/lib.rs file
+pub fn parse_wrapper_source(content: &str, lib_name: &str) -> Result<clorus::codegen::RustLibrary, String> {
+    use clorus::codegen::{RustLibrary, RustFunction, RustParam};
+
+    let mut functions = Vec::new();
+
+    // Parse Rust source for #[no_mangle] pub extern "C" fn declarations
+    // Example: pub extern "C" fn clorus_draw_rect(handle: *mut u8, x: f64, y: f64, w: f64, h: f64, color: f64) -> ()
+
+    let lines: Vec<&str> = content.lines().collect();
+    let mut i = 0;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+
+        // Look for #[no_mangle]
+        if line == "#[no_mangle]" && i + 1 < lines.len() {
+            let next_line = lines[i + 1].trim();
+
+            // Check if next line is a function declaration
+            if next_line.starts_with("pub extern \"C\" fn ") {
+                // Extract function signature
+                // Format: pub extern "C" fn clorus_func_name(params...) -> return_type
+
+                if let Some(fn_start) = next_line.find(" fn ") {
+                    if let Some(paren_start) = next_line.find('(') {
+                        // Extract function name (clorus_func_name)
+                        let full_fn_name = next_line[fn_start + 4..paren_start].trim();
+
+                        // Convert clorus_func_name to func-name for Clorus
+                        let fn_name = if full_fn_name.starts_with("clorus_") {
+                            full_fn_name[7..].replace('_', "-")
+                        } else {
+                            full_fn_name.replace('_', "-")
+                        };
+
+                        // Extract parameters (simplified - just count them as Value*)
+                        // For now, assume all params are Value* (we can improve this later)
+                        let params_end = if let Some(paren_end) = next_line.find(')') {
+                            paren_end
+                        } else {
+                            next_line.len()
+                        };
+
+                        let params_str = &next_line[paren_start + 1..params_end];
+                        let mut params = Vec::new();
+
+                        // Split by comma to get individual parameters
+                        if !params_str.trim().is_empty() {
+                            for param in params_str.split(',') {
+                                let param = param.trim();
+                                if !param.is_empty() {
+                                    // Extract parameter name and type (name: type)
+                                    if let Some(colon_pos) = param.find(':') {
+                                        let param_name = param[..colon_pos].trim();
+                                        let param_type = param[colon_pos + 1..].trim();
+
+                                        // Map Rust types to Clorus FFI types
+                                        let clorus_type = match param_type {
+                                            "*mut u8" => "*mut u8",  // Keep as-is for opaque pointers
+                                            "*mut c_char" => "String",
+                                            "f64" => "f64",
+                                            "f32" => "f32",
+                                            "i64" => "i64",
+                                            "i32" => "i32",
+                                            "bool" => "bool",
+                                            "u32" => "u32",
+                                            "u64" => "u64",
+                                            _ => param_type, // Keep unknown types as-is
+                                        };
+
+                                        params.push(RustParam {
+                                            name: param_name.to_string(),
+                                            type_name: clorus_type.to_string(),
+                                        });
+                                    }
+                                }
+                            }
+                        }
+
+                        // Extract return type
+                        let return_type = if let Some(arrow_pos) = next_line.find("-> ") {
+                            let return_str = next_line[arrow_pos + 3..].trim();
+                            // Remove trailing { if present
+                            let clean_return = if let Some(brace_pos) = return_str.find('{') {
+                                return_str[..brace_pos].trim()
+                            } else {
+                                return_str
+                            };
+
+                            // Map Rust return types to Clorus FFI types
+                            match clean_return {
+                                "()" => "()",  // Keep as-is for void
+                                "*mut u8" => "*mut u8",  // Keep as-is for opaque pointers
+                                "*mut c_char" => "String",
+                                "bool" => "bool",
+                                "f64" => "f64",
+                                "f32" => "f32",
+                                "i64" => "i64",
+                                "i32" => "i32",
+                                "u32" => "u32",
+                                "u64" => "u64",
+                                _ => clean_return,
+                            }.to_string()
+                        } else {
+                            "()".to_string()  // Default to void, not "void"
+                        };
+
+                        functions.push(RustFunction {
+                            name: fn_name.clone(),
+                            params,
+                            return_type,
+                        });
+
+                        // DEBUG: Print first 5 functions
+                        if functions.len() <= 5 {
+                            eprintln!("DEBUG: Registered FFI function: {} (from {})", fn_name, full_fn_name);
+                        }
+                    }
+                }
+            }
+
+            i += 2; // Skip the #[no_mangle] and function declaration lines
+        } else {
+            i += 1;
+        }
+    }
+
+    Ok(RustLibrary {
+        name: lib_name.to_string(),
+        functions,
+    })
+}
+
 /// Parse a .clorus-ffi interface file and create a RustLibrary
 /// Format: (interface lib-name (fn func-name [param :type ...] :return-type "doc"))
 pub fn parse_interface_file(content: &str, lib_name: &str) -> Result<clorus::codegen::RustLibrary, String> {
@@ -1760,6 +1959,12 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
     #[cfg(target_os = "macos")]
     {
         link_cmd.arg("-dynamiclib");
+
+        // Ensure init function is not stripped by the linker
+        // We export all symbols (default for dylib) but explicitly keep the init function
+        let init_symbol = format!("_clorus_{}_init", package.name.replace('-', "_"));
+        link_cmd.arg(format!("-Wl,-u,{}", init_symbol));
+
         // Always link CoreFoundation and Security (base macOS requirements)
         link_cmd.arg("-framework").arg("CoreFoundation");
         link_cmd.arg("-framework").arg("Security");

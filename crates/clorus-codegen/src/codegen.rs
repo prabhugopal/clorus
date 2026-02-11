@@ -3683,9 +3683,92 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(self.box_number(self.context.f64_type().const_float(0.0)))
             }
 
-            Expr::Defrecord { name, fields } => {
-                // Generate constructor function: ->RecordName
+            Expr::Defrecord { name, fields, protocols } => {
+                // Defrecord combines constructor + optional inline protocol implementations
+                // 1. Generate constructor function: ->RecordName
                 self.generate_record_constructor(name, fields)?;
+
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+                // 2. Generate protocol method implementations (if any)
+                for (protocol_name, methods) in protocols {
+                    // Extract protocol simple name (after / if qualified)
+                    // E.g., "p/IComponent" -> "IComponent"
+                    let protocol_simple_name: &str = if protocol_name.contains('/') {
+                        protocol_name.split('/').last().unwrap()
+                    } else {
+                        protocol_name.as_str()
+                    };
+
+                    for method in methods {
+                        let func_name = format!("{}_{}_{}", name, protocol_name, method.name);
+
+                        let param_types: Vec<_> = method.params.iter()
+                            .map(|_| value_ptr_type.into())
+                            .collect();
+
+                        let fn_type = value_ptr_type.fn_type(&param_types, false);
+                        let function = self.module.add_function(&func_name, fn_type, None);
+                        self.functions.insert(func_name.clone(), function);
+
+                        // Save state
+                        let saved_vars = self.variables.clone();
+                        let saved_block = self.builder.get_insert_block();
+
+                        // Create entry block
+                        let entry = self.context.append_basic_block(function, "entry");
+                        self.builder.position_at_end(entry);
+                        self.variables.clear();
+
+                        // Bind parameters
+                        for (i, param_pattern) in method.params.iter().enumerate() {
+                            let param_val = function.get_nth_param(i as u32).unwrap().into_pointer_value();
+                            self.destructure_pattern(param_pattern, param_val)?;
+                        }
+
+                        // Compile method body
+                        let result = self.compile_expr(&method.body)?;
+                        self.builder.build_return(Some(&result)).unwrap();
+
+                        // Restore state
+                        self.variables = saved_vars;
+                        if let Some(block) = saved_block {
+                            self.builder.position_at_end(block);
+                            eprintln!("[CODEGEN] Restored block for defrecord '{}' method '{}'", name, method.name);
+                        } else {
+                            eprintln!("[CODEGEN] WARNING: No saved block for defrecord '{}' method '{}' - will use current block", name, method.name);
+                        }
+
+                        // Register protocol method in runtime registry
+                        let register_fn = self.module.get_function("clorus_register_protocol_method")
+                            .ok_or("clorus_register_protocol_method not declared")?;
+
+                        // Create string constants for registration
+                        let type_name_str = self.builder.build_global_string_ptr(name, "type_name_str").unwrap();
+                        let proto_name_str = self.builder.build_global_string_ptr(protocol_simple_name, "proto_name_str").unwrap();
+                        let method_name_str = self.builder.build_global_string_ptr(&method.name, "method_name_str").unwrap();
+
+                        // Get function pointer as i64
+                        let fn_ptr = function.as_global_value().as_pointer_value();
+                        let fn_ptr_int = self.builder.build_ptr_to_int(
+                            fn_ptr,
+                            self.context.i64_type(),
+                            "fn_ptr_int"
+                        ).unwrap();
+
+                        // Call registration function
+                        self.builder.build_call(
+                            register_fn,
+                            &[
+                                type_name_str.as_pointer_value().into(),
+                                proto_name_str.as_pointer_value().into(),
+                                method_name_str.as_pointer_value().into(),
+                                fn_ptr_int.into(),
+                            ],
+                            "register_protocol"
+                        ).unwrap();
+                    }
+                }
 
                 // defrecord returns nil (like defn)
                 let nil_fn = self.module.get_function("clorus_value_nil")
@@ -3906,6 +3989,13 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // 2. Generate protocol method implementations
                 for (protocol_name, methods) in protocols {
+                    // Extract protocol simple name (after / if qualified)
+                    let protocol_simple_name: &str = if protocol_name.contains('/') {
+                        protocol_name.split('/').last().unwrap()
+                    } else {
+                        protocol_name.as_str()
+                    };
+
                     for method in methods {
                         let func_name = format!("{}_{}_{}", name, protocol_name, method.name);
 
@@ -3949,7 +4039,7 @@ impl<'ctx> CodeGen<'ctx> {
 
                         // Create string constants for registration
                         let type_name_str = self.builder.build_global_string_ptr(name, "type_name_str").unwrap();
-                        let proto_name_str = self.builder.build_global_string_ptr(protocol_name, "proto_name_str").unwrap();
+                        let proto_name_str = self.builder.build_global_string_ptr(protocol_simple_name, "proto_name_str").unwrap();
                         let method_name_str = self.builder.build_global_string_ptr(&method.name, "method_name_str").unwrap();
 
                         // Get function pointer as i64
@@ -3986,6 +4076,13 @@ impl<'ctx> CodeGen<'ctx> {
                 // Generate functions for each protocol method implementation
                 // Function names are mangled: TypeName_ProtocolName_methodName
                 // Example: Point_Drawable_draw
+
+                // Extract protocol simple name (after / if qualified)
+                let protocol_simple_name: &str = if protocol_name.contains('/') {
+                    protocol_name.split('/').last().unwrap()
+                } else {
+                    protocol_name.as_str()
+                };
 
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
 
@@ -4040,7 +4137,7 @@ impl<'ctx> CodeGen<'ctx> {
 
                     // Create string constants
                     let type_name_str = self.builder.build_global_string_ptr(type_name, "type_name_str").unwrap();
-                    let proto_name_str = self.builder.build_global_string_ptr(protocol_name, "proto_name_str").unwrap();
+                    let proto_name_str = self.builder.build_global_string_ptr(protocol_simple_name, "proto_name_str").unwrap();
                     let method_name_str = self.builder.build_global_string_ptr(&method.name, "method_name_str").unwrap();
 
                     // Get function pointer as i64
@@ -4423,23 +4520,34 @@ impl<'ctx> CodeGen<'ctx> {
 
                     // Not found block: error
                     self.builder.position_at_end(not_found_block);
-                    let error_msg = format!("No implementation of protocol method {}.{} found for type", protocol_name, func);
-                    let error_str = self.builder.build_global_string_ptr(&error_msg, "dispatch_error").unwrap();
-                    let println_fn = self.module.get_function("clorus_println")
-                        .ok_or("clorus_println not declared")?;
 
-                    // Print error message
+                    // Build error message that includes the actual type name
+                    let println_fn = self.module.get_function("clorus_println_variadic")
+                        .ok_or("clorus_println_variadic not declared")?;
                     let str_fn = self.module.get_function("clorus_value_string")
                         .ok_or("clorus_value_string not declared")?;
-                    let error_val = self.builder.build_call(
+                    let vector_fn = self.module.get_function("clorus_vector")
+                        .ok_or("clorus_vector not declared")?;
+
+                    // Create error message parts
+                    let error_msg1 = format!("No implementation of protocol method {}.{} found for type: ", protocol_name, func);
+                    let error_str1 = self.builder.build_global_string_ptr(&error_msg1, "dispatch_error1").unwrap();
+                    let error_val1 = self.builder.build_call(
                         str_fn,
-                        &[error_str.as_pointer_value().into()],
-                        "error_val"
+                        &[error_str1.as_pointer_value().into()],
+                        "error_val1"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Create vector with error message and type name
+                    let vec_val = self.builder.build_call(
+                        vector_fn,
+                        &[error_val1.into(), type_name_val.into()],
+                        "error_vec"
                     ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
 
                     self.builder.build_call(
                         println_fn,
-                        &[error_val.into()],
+                        &[vec_val.into()],
                         "print_error"
                     ).unwrap();
 

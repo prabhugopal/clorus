@@ -129,7 +129,11 @@ pub extern "C" fn clorus_lookup_protocol_method(
 
         match PROTOCOL_REGISTRY.read() {
             Ok(registry) => {
-                registry.lookup_method(type_str, protocol_str, method_str).unwrap_or(0)
+                let result = registry.lookup_method(type_str, protocol_str, method_str).unwrap_or(0);
+                if result == 0 {
+                    eprintln!("[PROTOCOL] Lookup FAILED: type='{}', protocol='{}', method='{}'", type_str, protocol_str, method_str);
+                }
+                result
             }
             Err(_) => 0,
         }

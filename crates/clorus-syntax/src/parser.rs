@@ -501,6 +501,11 @@ impl Parser {
 
     fn parse_defrecord(&mut self) -> Result<Expr, String> {
         // (defrecord Person [name age email])
+        // Can also have inline protocol implementations like deftype:
+        // (defrecord Card [props bounds]
+        //   IComponent
+        //   (render [this ctx] ...))
+
         // Already saw 'defrecord', consume it
         if let Token::Symbol(s, _) = self.current_token() {
             if s == "defrecord" {
@@ -540,11 +545,67 @@ impl Parser {
         }
 
         self.expect(Token::RBracket(Span::dummy()))?; // consume ]
-        self.expect(Token::RParen(Span::dummy()))?;   // consume )
+
+        // Parse protocol implementations (optional, same as deftype)
+        let mut protocols: Vec<(String, Vec<ProtocolMethodImpl>)> = Vec::new();
+
+        while !matches!(self.current_token(), Token::RParen(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed defrecord form".to_string());
+            }
+
+            // Expect protocol name (symbol)
+            let protocol_name = match self.current_token() {
+                Token::Symbol(s, _) => s.clone(),
+                _ => return Err("Expected protocol name in defrecord".to_string()),
+            };
+            self.advance();
+
+            // Parse method implementations for this protocol
+            let mut methods = Vec::new();
+            while matches!(self.current_token(), Token::LParen(_)) {
+                self.advance(); // consume (
+
+                // Method name
+                let method_name = match self.current_token() {
+                    Token::Symbol(s, _) => s.clone(),
+                    _ => return Err("Expected method name".to_string()),
+                };
+                self.advance();
+
+                // Parameters
+                if !matches!(self.current_token(), Token::LBracket(_)) {
+                    return Err("Method requires parameter vector".to_string());
+                }
+                self.advance(); // consume [
+
+                let mut params = Vec::new();
+                while !matches!(self.current_token(), Token::RBracket(_)) {
+                    params.push(self.parse_pattern()?);
+                }
+                self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+
+                // Method body (single expression)
+                let body = Box::new(self.parse_expr()?);
+
+                self.expect(Token::RParen(Span::dummy()))?; // consume )
+
+                methods.push(ProtocolMethodImpl {
+                    name: method_name,
+                    params,
+                    body,
+                });
+            }
+
+            protocols.push((protocol_name, methods));
+        }
+
+        self.expect(Token::RParen(Span::dummy()))?; // consume closing )
 
         Ok(Expr::Defrecord {
             name,
             fields,
+            protocols,
         })
     }
 

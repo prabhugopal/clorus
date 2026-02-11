@@ -231,9 +231,11 @@ pub enum Expr {
     /// Creates a constructor: (->Person "Alice" 30 "alice@example.com")
     /// Supports keyword field access: (:name person-instance)
     /// Supports assoc/dissoc operations
+    /// Can also have inline protocol implementations like deftype
     Defrecord {
-        name: String,        // Record type name, e.g., "Person"
-        fields: Vec<String>, // Field names, e.g., ["name", "age", "email"]
+        name: String,                           // Record type name, e.g., "Person"
+        fields: Vec<String>,                    // Field names, e.g., ["name", "age", "email"]
+        protocols: Vec<(String, Vec<ProtocolMethodImpl>)>, // Inline protocol implementations (optional)
     },
 
     /// Deftype: Type with fields and inline protocol implementations

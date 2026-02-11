@@ -144,6 +144,7 @@ fn load_module_recursive(
 /// Convert namespace to file path
 /// coral.widgets → src/coral/widgets.clrs
 /// coral.core → src/coral/core.clrs
+/// clorus.core → $CLORUS_HOME/stdlib/core.clr or ~/.clorus/stdlib/core.clr (global stdlib)
 fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, String> {
     let parts: Vec<&str> = namespace.split('.').collect();
 
@@ -151,7 +152,43 @@ fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, Strin
         return Err(format!("Invalid namespace: {}", namespace));
     }
 
-    // Build path: src/coral/widgets.clrs
+    // Check if this is a clorus.* namespace (stdlib)
+    if parts[0] == "clorus" {
+        // Try to load from global stdlib directories (like Clojure does with clojure.core)
+        // Try CLORUS_HOME/stdlib first, then ~/.clorus/stdlib
+        let stdlib_paths = vec![
+            std::env::var("CLORUS_HOME").ok().map(|home| PathBuf::from(home).join("stdlib")),
+            std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".clorus/stdlib")),
+        ];
+
+        // Convert clorus.core → core.clr
+        let stdlib_file = if parts.len() == 2 {
+            format!("{}.clr", parts[1])
+        } else {
+            // For nested namespaces like clorus.string.utils → string/utils.clr
+            let mut subpath = PathBuf::new();
+            for part in &parts[1..parts.len()-1] {
+                subpath = subpath.join(part);
+            }
+            subpath = subpath.join(format!("{}.clr", parts[parts.len()-1]));
+            subpath.to_string_lossy().to_string()
+        };
+
+        for stdlib_dir in stdlib_paths.into_iter().flatten() {
+            let stdlib_path = stdlib_dir.join(&stdlib_file);
+            if stdlib_path.exists() {
+                return Ok(stdlib_path);
+            }
+        }
+
+        // Stdlib not found
+        return Err(format!(
+            "Stdlib module not found: {} (looking for {} in CLORUS_HOME/stdlib or ~/.clorus/stdlib)",
+            namespace, stdlib_file
+        ));
+    }
+
+    // Regular project module: src/coral/widgets.clrs
     let mut path = base_path.join("src");
 
     // Add directory components
@@ -567,6 +604,33 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
         function_names.push(fn_name);
     }
 
+    // For libraries, create an initialization function that calls all expr functions
+    // This ensures protocol registrations and other top-level code executes
+    if lib_mode {
+        let init_fn_name = format!("clorus_{}_init", manifest.package.name.replace('-', "_"));
+        let value_ptr_type = context.i8_type().ptr_type(inkwell::AddressSpace::default());
+        let init_fn_type = value_ptr_type.fn_type(&[], false);
+        let init_fn = codegen.get_module().add_function(&init_fn_name, init_fn_type, None);
+
+        let entry_block = context.append_basic_block(init_fn, "entry");
+        let builder = codegen.get_builder();
+        builder.position_at_end(entry_block);
+
+        // Call each expr function to execute top-level forms
+        for fn_name in &function_names {
+            if let Some(func) = codegen.get_module().get_function(fn_name) {
+                builder.build_call(func, &[], "init_call").unwrap();
+            }
+        }
+
+        // Return nil
+        let nil_fn = codegen.get_module().get_function("clorus_value_nil")
+            .expect("clorus_value_nil should be declared");
+        let nil_val = builder.build_call(nil_fn, &[], "init_nil").unwrap()
+            .try_as_basic_value().left().unwrap().into_pointer_value();
+        builder.build_return(Some(&nil_val)).unwrap();
+    }
+
     // Only create main() for executables, not for libraries
     if !lib_mode {
         // Create a C-compatible main function that calls our expressions
@@ -605,6 +669,28 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
 
     let i8_ptr_type = context.i8_type().ptr_type(inkwell::AddressSpace::default());
     let main_fn_type = i8_ptr_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
+
+    // First, call initialization functions of all loaded .clip packages
+    // This ensures protocol registrations and other top-level code executes
+    for package in &clip_packages {
+        let init_fn_name = format!("clorus_{}_init", package.name.replace('-', "_"));
+
+        // Declare the init function (it's external from the .clip package)
+        let value_ptr_type = context.i8_type().ptr_type(inkwell::AddressSpace::default());
+        let init_fn_type = value_ptr_type.fn_type(&[], false);
+
+        if codegen.get_module().get_function(&init_fn_name).is_none() {
+            codegen.get_module().add_function(&init_fn_name, init_fn_type, None);
+        }
+
+        // Call the init function
+        if let Some(init_fn) = codegen.get_module().get_function(&init_fn_name) {
+            if debug {
+                println!("   [DEBUG] Calling {} init function", package.name);
+            }
+            builder.build_call(init_fn, &[], "init_clip").unwrap();
+        }
+    }
 
     // Call each compiled expression (defines functions, globals, etc.)
     let mut last_result: Option<inkwell::values::PointerValue> = None;
@@ -1592,6 +1678,33 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
     let engine = codegen.get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .map_err(|e| format!("JIT error: {}", e))?;
+
+    // First, call initialization functions of all loaded .clip packages
+    // This ensures protocol registrations and other top-level code executes
+    for package in &successfully_loaded_clip {
+        let init_fn_name = format!("clorus_{}_init", package.replace('-', "_"));
+
+        if debug {
+            println!("   [DEBUG] Calling {} init function in JIT mode", package);
+        }
+
+        unsafe {
+            type InitFunc = unsafe extern "C" fn() -> *mut u8;
+            match engine.get_function::<InitFunc>(&init_fn_name) {
+                Ok(init_fn) => {
+                    init_fn.call();
+                    if debug {
+                        println!("   [DEBUG] Successfully called {} init", package);
+                    }
+                }
+                Err(e) => {
+                    if debug {
+                        println!("   [DEBUG] Warning: Could not find init function {}: {}", init_fn_name, e);
+                    }
+                }
+            }
+        }
+    }
 
     // Execute expressions that define globals/functions (def, defn)
     // Then execute all expressions and print the last result

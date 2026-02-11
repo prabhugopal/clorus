@@ -559,11 +559,21 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
             }
         },
 
-        Expr::Defrecord { name, fields } => {
-            // Records have no expressions to expand, just field names
+        Expr::Defrecord { name, fields, protocols } => {
+            // Expand protocol method bodies but keep fields as-is
+            let expanded_protocols = protocols.iter().map(|(protocol_name, methods)| {
+                let expanded_methods = methods.iter().map(|method| {
+                    let mut method_impl = method.clone();
+                    method_impl.body = Box::new(expand_macros_with_registry(&method.body, registry));
+                    method_impl
+                }).collect();
+                (protocol_name.clone(), expanded_methods)
+            }).collect();
+
             Expr::Defrecord {
                 name: name.clone(),
                 fields: fields.clone(),
+                protocols: expanded_protocols,
             }
         },
 

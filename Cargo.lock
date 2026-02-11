@@ -396,6 +396,9 @@ dependencies = [
 [[package]]
 name = "clorus-runtime"
 version = "0.1.0"
+dependencies = [
+ "once_cell",
+]
 
 [[package]]
 name = "clorus-std"
