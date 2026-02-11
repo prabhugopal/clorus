@@ -682,6 +682,32 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_i32_fn("clorus_is_fn");      // fn? predicate
         self.declare_value2_to_i32_fn("clorus_starts_with");
         self.declare_value2_to_i32_fn("clorus_ends_with");
+
+        // ===== Protocol Dispatch =====
+        // clorus_register_protocol_method(type_name: *const c_char, protocol_name: *const c_char,
+        //                                  method_name: *const c_char, fn_ptr: usize) -> void
+        let register_proto_type = self.context.void_type().fn_type(
+            &[
+                i8_ptr_type.into(),  // type_name
+                i8_ptr_type.into(),  // protocol_name
+                i8_ptr_type.into(),  // method_name
+                self.context.i64_type().into(),  // fn_ptr
+            ],
+            false
+        );
+        self.module.add_function("clorus_register_protocol_method", register_proto_type, None);
+
+        // clorus_lookup_protocol_method(type_name: *const c_char, protocol_name: *const c_char,
+        //                                method_name: *const c_char) -> usize
+        let lookup_proto_type = self.context.i64_type().fn_type(
+            &[
+                i8_ptr_type.into(),  // type_name
+                i8_ptr_type.into(),  // protocol_name
+                i8_ptr_type.into(),  // method_name
+            ],
+            false
+        );
+        self.module.add_function("clorus_lookup_protocol_method", lookup_proto_type, None);
         self.declare_value2_to_i32_fn("clorus_includes");
         self.declare_value2_to_i64_fn("clorus_compare_strings");
 
@@ -1969,6 +1995,32 @@ impl<'ctx> CodeGen<'ctx> {
                 &format!("record_map_{}", i)
             ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
         }
+
+        // Add __type__ field for runtime protocol dispatch
+        // This lets the runtime identify what type an instance is
+        let type_keyword_str = self.builder.build_global_string_ptr("__type__", "type_keyword_name").unwrap();
+        let type_keyword = self.builder.build_call(
+            keyword_fn,
+            &[type_keyword_str.as_pointer_value().into()],
+            "type_keyword"
+        ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+        // Create string value for type name
+        let type_name_str = self.builder.build_global_string_ptr(type_name, "type_name_str").unwrap();
+        let string_fn = self.module.get_function("clorus_value_string")
+            .ok_or("clorus_value_string not declared")?;
+        let type_name_val = self.builder.build_call(
+            string_fn,
+            &[type_name_str.as_pointer_value().into()],
+            "type_name_val"
+        ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+        // Add __type__ -> "TypeName" to map
+        map_val = self.builder.build_call(
+            map_assoc_fn,
+            &[map_val.into(), type_keyword.into(), type_name_val.into()],
+            "record_with_type"
+        ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
 
         // Return the constructed record (map)
         self.builder.build_return(Some(&map_val)).unwrap();
@@ -3685,6 +3737,36 @@ impl<'ctx> CodeGen<'ctx> {
                         if let Some(block) = saved_block {
                             self.builder.position_at_end(block);
                         }
+
+                        // PHASE 4.3: Register protocol method in runtime registry
+                        // This enables automatic protocol dispatch at runtime
+                        let register_fn = self.module.get_function("clorus_register_protocol_method")
+                            .ok_or("clorus_register_protocol_method not declared")?;
+
+                        // Create string constants for registration
+                        let type_name_str = self.builder.build_global_string_ptr(name, "type_name_str").unwrap();
+                        let proto_name_str = self.builder.build_global_string_ptr(protocol_name, "proto_name_str").unwrap();
+                        let method_name_str = self.builder.build_global_string_ptr(&method.name, "method_name_str").unwrap();
+
+                        // Get function pointer as i64
+                        let fn_ptr = function.as_global_value().as_pointer_value();
+                        let fn_ptr_int = self.builder.build_ptr_to_int(
+                            fn_ptr,
+                            self.context.i64_type(),
+                            "fn_ptr_int"
+                        ).unwrap();
+
+                        // Call registration function
+                        self.builder.build_call(
+                            register_fn,
+                            &[
+                                type_name_str.as_pointer_value().into(),
+                                proto_name_str.as_pointer_value().into(),
+                                method_name_str.as_pointer_value().into(),
+                                fn_ptr_int.into(),
+                            ],
+                            "register_protocol"
+                        ).unwrap();
                     }
                 }
 
@@ -3747,6 +3829,35 @@ impl<'ctx> CodeGen<'ctx> {
                     if let Some(block) = saved_block {
                         self.builder.position_at_end(block);
                     }
+
+                    // PHASE 4.3: Register protocol method in runtime registry
+                    let register_fn = self.module.get_function("clorus_register_protocol_method")
+                        .ok_or("clorus_register_protocol_method not declared")?;
+
+                    // Create string constants
+                    let type_name_str = self.builder.build_global_string_ptr(type_name, "type_name_str").unwrap();
+                    let proto_name_str = self.builder.build_global_string_ptr(protocol_name, "proto_name_str").unwrap();
+                    let method_name_str = self.builder.build_global_string_ptr(&method.name, "method_name_str").unwrap();
+
+                    // Get function pointer as i64
+                    let fn_ptr = function.as_global_value().as_pointer_value();
+                    let fn_ptr_int = self.builder.build_ptr_to_int(
+                        fn_ptr,
+                        self.context.i64_type(),
+                        "fn_ptr_int"
+                    ).unwrap();
+
+                    // Call registration function
+                    self.builder.build_call(
+                        register_fn,
+                        &[
+                            type_name_str.as_pointer_value().into(),
+                            proto_name_str.as_pointer_value().into(),
+                            method_name_str.as_pointer_value().into(),
+                            fn_ptr_int.into(),
+                        ],
+                        "register_protocol"
+                    ).unwrap();
                 }
 
                 // extend-type returns nil

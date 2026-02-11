@@ -3,16 +3,50 @@
 ;; Test 1: Define a simple type without protocols
 (deftype Person [name age])
 
-;; Test 2: Create an instance and access fields
-(defn test-constructor []
-  (let [alice (->Person "Alice" 30)
-        bob (->Person "Bob" 25)]
-    (println "Testing deftype constructor...")
-    (println (str "Alice name: " (:name alice)))
-    (println (str "Alice age: " (:age alice)))
-    (println (str "Bob name: " (:name bob)))
-    (println (str "Bob age: " (:age bob)))
-    (println "Constructor test passed!")))
+;; Test 2: Create an instance and verify type metadata
+(defn test-type-metadata []
+  (let [alice (->Person "Alice" 30)]
+    (println "Testing deftype with type metadata...")
+    (println (str "  Alice name: " (:name alice)))
+    (println (str "  Alice age: " (:age alice)))
+    (println (str "  Alice type: " (:__type__ alice)))
 
-;; Run test
-(test-constructor)
+    (if (= (:__type__ alice) "Person")
+      (println "✓ Type metadata correctly set!")
+      (println "✗ Type metadata FAILED!"))
+
+    alice))
+
+;; Test 3: Define a protocol and implement it with deftype
+(defprotocol Greetable
+  (greet [this] "Greet the entity"))
+
+(deftype Dog [name breed]
+  Greetable
+  (greet [this]
+    (str "Woof! I'm " (:name this) ", a " (:breed this))))
+
+(deftype Cat [name color]
+  Greetable
+  (greet [this]
+    (str "Meow! I'm " (:name this) ", a " (:color this) " cat")))
+
+;; Test 4: Test protocol method calls (manual dispatch for now)
+(defn test-protocol-methods []
+  (let [dog (->Dog "Rex" "Golden Retriever")
+        cat (->Cat "Whiskers" "orange")]
+    (println "\nTesting protocol methods...")
+
+    (println (str "  Dog: " (:name dog)))
+    (println (str "  Dog type: " (:__type__ dog)))
+    (println (str "  Greeting: " (Dog_Greetable_greet dog)))
+
+    (println (str "  Cat: " (:name cat)))
+    (println (str "  Cat type: " (:__type__ cat)))
+    (println (str "  Greeting: " (Cat_Greetable_greet cat)))
+
+    (println "✓ Protocol methods executed for multiple types!")))
+
+;; Run tests
+(test-type-metadata)
+(test-protocol-methods)
