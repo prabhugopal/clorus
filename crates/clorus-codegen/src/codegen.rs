@@ -5832,7 +5832,16 @@ impl<'ctx> CodeGen<'ctx> {
                         &[result_ptr.into()],
                         "is_nil_check"
                     ).unwrap();
-                    let is_nil = is_nil_result.try_as_basic_value().left().unwrap().into_int_value();
+                    let is_nil_i32 = is_nil_result.try_as_basic_value().left().unwrap().into_int_value();
+
+                    // Convert i32 to i1 for branch condition
+                    let zero = self.context.i32_type().const_zero();
+                    let is_nil = self.builder.build_int_compare(
+                        IntPredicate::NE,
+                        is_nil_i32,
+                        zero,
+                        "is_nil_bool"
+                    ).unwrap();
 
                     // If nil, return default
                     let current_fn = self.builder.get_insert_block().unwrap().get_parent().unwrap();
