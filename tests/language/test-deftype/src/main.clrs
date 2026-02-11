@@ -51,6 +51,14 @@
 (test-type-metadata)
 (test-protocol-methods)
 
+;; Test variadic println
+(println "\n=== Testing variadic println ===")
+(println "Single" "argument")
+(println "Multiple" "arguments" "with" "spaces")
+(println "Numbers:" 1 2 3)
+(println "Mixed:" "text" 42 true nil)
+(println)  ; Empty println
+
 ;; ============================================================================
 ;; Test 5: CORAL-style UI Component Protocol
 ;; ============================================================================

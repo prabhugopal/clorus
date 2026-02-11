@@ -72,6 +72,35 @@ pub extern "C" fn clorus_println(val: *mut Value) -> *mut Value {
     }
 }
 
+/// Print multiple values with spaces between them and a newline (variadic)
+/// Takes a vector of values
+#[no_mangle]
+pub extern "C" fn clorus_println_variadic(args: *mut Value) -> *mut Value {
+    unsafe {
+        if args.is_null() {
+            println!();
+            return Value::nil();
+        }
+
+        // Get vector count
+        let count = crate::collections::clorus_count(args);
+
+        for i in 0..count {
+            if i > 0 {
+                print!(" ");
+            }
+            let idx_fn = std::mem::transmute::<_, extern "C" fn(*mut Value, i64) -> *mut Value>(
+                crate::collections::clorus_nth as *const ()
+            );
+            let val = idx_fn(args, i as i64);
+            let s = value_to_display_string(val);
+            print!("{}", s);
+        }
+        println!();
+        Value::nil()
+    }
+}
+
 /// Print multiple values with spaces between them, no newline
 /// Takes a vector of values
 #[no_mangle]

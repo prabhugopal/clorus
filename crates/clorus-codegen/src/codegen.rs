@@ -910,6 +910,10 @@ impl<'ctx> CodeGen<'ctx> {
         // clorus_println(val: *mut Value) -> *mut Value
         let println_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
         self.module.add_function("clorus_println", println_type, None);
+
+        // clorus_println_variadic(args: *mut Value) -> *mut Value (takes vector of args)
+        let println_variadic_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_println_variadic", println_variadic_type, None);
     }
 
     /// Helper: Create a Value from an f64
@@ -7344,22 +7348,67 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "println" => {
-                // println takes 1 arg: value to print
-                if args.len() != 1 {
-                    return Err("println requires 1 argument: value".to_string());
+                // println is variadic - takes any number of arguments
+                if args.is_empty() {
+                    // No arguments - just print newline
+                    let println_fn = self.module.get_function("clorus_println_variadic")
+                        .ok_or("clorus_println_variadic not declared")?;
+
+                    // Pass null for empty args
+                    let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let null_ptr = i8_ptr_type.const_null();
+
+                    let result = self.builder.build_call(
+                        println_fn,
+                        &[null_ptr.into()],
+                        "println_call"
+                    ).unwrap();
+                    return Ok(result.try_as_basic_value().left().unwrap().into_pointer_value());
+                } else if args.len() == 1 {
+                    // Single argument - use optimized single-arg version
+                    let val = self.compile_expr(&args[0])?;
+                    let println_fn = self.module.get_function("clorus_println")
+                        .ok_or("clorus_println not declared")?;
+                    let result = self.builder.build_call(
+                        println_fn,
+                        &[val.into()],
+                        "println_call"
+                    ).unwrap();
+                    return Ok(result.try_as_basic_value().left().unwrap().into_pointer_value());
+                } else {
+                    // Multiple arguments - use variadic version
+                    // Create a vector of the arguments (like str does)
+                    let vec_empty_fn = self.module.get_function("clorus_vector_empty")
+                        .ok_or("clorus_vector_empty not declared")?;
+                    let mut vec_val = self.builder.build_call(
+                        vec_empty_fn,
+                        &[],
+                        "println_vec"
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    // Add each argument to the vector
+                    let vec_conj_fn = self.module.get_function("clorus_vector_conj")
+                        .ok_or("clorus_vector_conj not declared")?;
+                    for arg in args {
+                        let arg_val = self.compile_expr(arg)?;
+                        vec_val = self.builder.build_call(
+                            vec_conj_fn,
+                            &[vec_val.into(), arg_val.into()],
+                            "println_vec_conj"
+                        ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+                    }
+
+                    // Call variadic println with the vector
+                    let println_fn = self.module.get_function("clorus_println_variadic")
+                        .ok_or("clorus_println_variadic not declared")?;
+                    let result = self.builder.build_call(
+                        println_fn,
+                        &[vec_val.into()],
+                        "println_call"
+                    ).unwrap();
+
+                    return Ok(result.try_as_basic_value().left().unwrap().into_pointer_value());
                 }
-
-                let val = self.compile_expr(&args[0])?;
-
-                let println_fn = self.module.get_function("clorus_println")
-                    .ok_or("clorus_println not declared")?;
-                let result = self.builder.build_call(
-                    println_fn,
-                    &[val.into()],
-                    "println_call"
-                ).unwrap();
-
-                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             "string?" => {
