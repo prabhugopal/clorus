@@ -226,11 +226,26 @@ pub enum Expr {
     /// Record type definition: (defrecord Person [name age email])
     /// Creates a named data structure with fields
     /// Generates constructor function ->RecordName and map->RecordName
+    /// Defrecord: Immutable record type with fields
+    /// (defrecord Person [name age email])
+    /// Creates a constructor: (->Person "Alice" 30 "alice@example.com")
     /// Supports keyword field access: (:name person-instance)
     /// Supports assoc/dissoc operations
     Defrecord {
         name: String,        // Record type name, e.g., "Person"
         fields: Vec<String>, // Field names, e.g., ["name", "age", "email"]
+    },
+
+    /// Deftype: Type with fields and inline protocol implementations
+    /// (deftype Button [props state]
+    ///   IComponent
+    ///   (render [this ctx] ...)
+    ///   (layout [this bounds] ...))
+    /// Like defrecord but allows implementing protocols inline
+    Deftype {
+        name: String,                           // Type name, e.g., "Button"
+        fields: Vec<String>,                    // Field names, e.g., ["props", "state"]
+        protocols: Vec<(String, Vec<ProtocolMethodImpl>)>,  // (protocol_name, methods)
     },
 
     /// Protocol definition: (defprotocol Drawable (draw [this]) (bounds [this]))

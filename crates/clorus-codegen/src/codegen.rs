@@ -3633,6 +3633,120 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(nil_val)
             }
 
+            Expr::Deftype { name, fields, protocols } => {
+                // Deftype combines defrecord + inline protocol implementations
+                // 1. Generate constructor like defrecord
+                // 2. Generate protocol method implementations like extend-type
+
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+                // 1. Generate constructor: ->TypeName
+                let constructor_name = format!("->{}", name);
+                let param_types: Vec<_> = fields.iter()
+                    .map(|_| value_ptr_type.into())
+                    .collect();
+
+                let fn_type = value_ptr_type.fn_type(&param_types, false);
+                let constructor_fn = self.module.add_function(&constructor_name, fn_type, None);
+                self.functions.insert(constructor_name.clone(), constructor_fn);
+
+                // Save current state for constructor
+                let saved_vars = self.variables.clone();
+                let saved_block = self.builder.get_insert_block();
+
+                // Create constructor entry block
+                let entry = self.context.append_basic_block(constructor_fn, "entry");
+                self.builder.position_at_end(entry);
+                self.variables.clear();
+
+                // Create record map
+                let empty_map_fn = self.module.get_function("clorus_map_empty")
+                    .ok_or("clorus_map_empty not declared")?;
+                let mut record_val = self.builder.build_call(empty_map_fn, &[], "empty_map").unwrap()
+                    .try_as_basic_value().left().unwrap().into_pointer_value();
+
+                let assoc_fn = self.module.get_function("clorus_map_assoc")
+                    .ok_or("clorus_map_assoc not declared")?;
+                let keyword_fn = self.module.get_function("clorus_keyword")
+                    .ok_or("clorus_keyword not declared")?;
+
+                // Add each field to the map
+                for (i, field_name) in fields.iter().enumerate() {
+                    let field_val = constructor_fn.get_nth_param(i as u32).unwrap().into_pointer_value();
+
+                    // Create keyword for field name
+                    let field_c_str = self.builder.build_global_string_ptr(field_name, "field_name").unwrap();
+                    let keyword_val = self.builder.build_call(
+                        keyword_fn,
+                        &[field_c_str.as_pointer_value().into()],
+                        &format!("field_keyword_{}", i)
+                    ).unwrap().try_as_basic_value().left().unwrap().into_pointer_value();
+
+                    record_val = self.builder.build_call(
+                        assoc_fn,
+                        &[record_val.into(), keyword_val.into(), field_val.into()],
+                        "assoc"
+                    ).unwrap()
+                        .try_as_basic_value().left().unwrap().into_pointer_value();
+                }
+
+                // Return the record
+                self.builder.build_return(Some(&record_val)).unwrap();
+
+                // Restore state
+                self.variables = saved_vars;
+                if let Some(block) = saved_block {
+                    self.builder.position_at_end(block);
+                }
+
+                // 2. Generate protocol method implementations
+                for (protocol_name, methods) in protocols {
+                    for method in methods {
+                        let func_name = format!("{}_{}_{}", name, protocol_name, method.name);
+
+                        let param_types: Vec<_> = method.params.iter()
+                            .map(|_| value_ptr_type.into())
+                            .collect();
+
+                        let fn_type = value_ptr_type.fn_type(&param_types, false);
+                        let function = self.module.add_function(&func_name, fn_type, None);
+                        self.functions.insert(func_name.clone(), function);
+
+                        // Save state
+                        let saved_vars = self.variables.clone();
+                        let saved_block = self.builder.get_insert_block();
+
+                        // Create entry block
+                        let entry = self.context.append_basic_block(function, "entry");
+                        self.builder.position_at_end(entry);
+                        self.variables.clear();
+
+                        // Bind parameters
+                        for (i, param_pattern) in method.params.iter().enumerate() {
+                            let param_val = function.get_nth_param(i as u32).unwrap().into_pointer_value();
+                            self.destructure_pattern(param_pattern, param_val)?;
+                        }
+
+                        // Compile method body
+                        let result = self.compile_expr(&method.body)?;
+                        self.builder.build_return(Some(&result)).unwrap();
+
+                        // Restore state
+                        self.variables = saved_vars;
+                        if let Some(block) = saved_block {
+                            self.builder.position_at_end(block);
+                        }
+                    }
+                }
+
+                // Return nil for the deftype form itself
+                let nil_fn = self.module.get_function("clorus_value_nil")
+                    .ok_or("clorus_value_nil not declared")?;
+                let nil_val = self.builder.build_call(nil_fn, &[], "deftype_nil").unwrap()
+                    .try_as_basic_value().left().unwrap().into_pointer_value();
+                Ok(nil_val)
+            }
+
             Expr::ExtendType { type_name, protocol_name, methods } => {
                 // Generate functions for each protocol method implementation
                 // Function names are mangled: TypeName_ProtocolName_methodName
@@ -4465,6 +4579,10 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 } else if module == "clorus.core" {
                     self.declare_core_functions();
+                } else if self.is_clip_namespace(module) {
+                    // Module is from a .clip package or registered local module
+                    // Functions from these modules are available at runtime via FFI
+                    // No need to declare anything here
                 } else {
                     return Err(format!("Unknown module: {}", module));
                 }

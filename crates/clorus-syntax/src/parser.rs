@@ -1,5 +1,5 @@
 /// Parser for S-expressions
-use crate::ast::Expr;
+use crate::ast::{Expr, ProtocolMethodImpl};
 use crate::lexer::{Lexer, Token, Span};
 use std::cell::Cell;
 
@@ -201,6 +201,7 @@ impl Parser {
                 "defn" => return self.parse_defn(),
                 "defmacro" => return self.parse_defmacro(),
                 "defrecord" => return self.parse_defrecord(),
+                "deftype" => return self.parse_deftype(),
                 "defprotocol" => return self.parse_defprotocol(),
                 "extend-type" => return self.parse_extend_type(),
                 "defmulti" => return self.parse_defmulti(),
@@ -544,6 +545,112 @@ impl Parser {
         Ok(Expr::Defrecord {
             name,
             fields,
+        })
+    }
+
+    fn parse_deftype(&mut self) -> Result<Expr, String> {
+        // (deftype Button [props state]
+        //   IComponent
+        //   (render [this ctx] ...)
+        //   (layout [this bounds] ...))
+
+        // Already saw 'deftype', consume it
+        if let Token::Symbol(s, _) = self.current_token() {
+            if s == "deftype" {
+                self.advance();
+            }
+        }
+
+        // Get type name
+        let name = match self.current_token() {
+            Token::Symbol(s, _) => s.clone(),
+            _ => return Err("deftype requires a type name".to_string()),
+        };
+        self.advance();
+
+        // Expect field vector: [field1 field2]
+        if !matches!(self.current_token(), Token::LBracket(_)) {
+            return Err(format!("deftype requires a field vector [...], found {:?}", self.current_token()));
+        }
+        self.advance(); // consume [
+
+        // Parse field names (all must be symbols)
+        let mut fields = Vec::new();
+        while !matches!(self.current_token(), Token::RBracket(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed field vector in deftype".to_string());
+            }
+
+            let field = match self.current_token() {
+                Token::Symbol(s, _) => s.clone(),
+                _ => return Err("deftype field name must be a symbol".to_string()),
+            };
+            self.advance();
+            fields.push(field);
+        }
+        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+
+        // Parse protocol implementations
+        // Format: ProtocolName (method [params] body) (method [params] body) ...
+        let mut protocols: Vec<(String, Vec<ProtocolMethodImpl>)> = Vec::new();
+
+        while !matches!(self.current_token(), Token::RParen(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed deftype form".to_string());
+            }
+
+            // Expect protocol name (symbol)
+            let protocol_name = match self.current_token() {
+                Token::Symbol(s, _) => s.clone(),
+                _ => return Err("Expected protocol name in deftype".to_string()),
+            };
+            self.advance();
+
+            // Parse method implementations for this protocol
+            let mut methods = Vec::new();
+            while matches!(self.current_token(), Token::LParen(_)) {
+                self.advance(); // consume (
+
+                // Method name
+                let method_name = match self.current_token() {
+                    Token::Symbol(s, _) => s.clone(),
+                    _ => return Err("Expected method name".to_string()),
+                };
+                self.advance();
+
+                // Parameters
+                if !matches!(self.current_token(), Token::LBracket(_)) {
+                    return Err("Method requires parameter vector".to_string());
+                }
+                self.advance(); // consume [
+
+                let mut params = Vec::new();
+                while !matches!(self.current_token(), Token::RBracket(_)) {
+                    params.push(self.parse_pattern()?);
+                }
+                self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+
+                // Method body (single expression)
+                let body = Box::new(self.parse_expr()?);
+
+                self.expect(Token::RParen(Span::dummy()))?; // consume )
+
+                methods.push(ProtocolMethodImpl {
+                    name: method_name,
+                    params,
+                    body,
+                });
+            }
+
+            protocols.push((protocol_name, methods));
+        }
+
+        self.expect(Token::RParen(Span::dummy()))?; // consume closing )
+
+        Ok(Expr::Deftype {
+            name,
+            fields,
+            protocols,
         })
     }
 
@@ -1951,6 +2058,11 @@ impl Parser {
             Expr::Defrecord { .. } => {
                 // Don't recurse into record definitions for shorthand param collection
                 // Records are just field declarations, no expressions
+            }
+
+            Expr::Deftype { .. } => {
+                // Don't recurse into type definitions for shorthand param collection
+                // Types are field + protocol declarations handled separately
             }
 
             Expr::Defprotocol { .. } => {
