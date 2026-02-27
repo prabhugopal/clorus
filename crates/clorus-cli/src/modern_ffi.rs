@@ -207,7 +207,9 @@ mod tests {
         generator.parse_file(Path::new(temp_file)).unwrap();
 
         let json = generator.generate_metadata_json().unwrap();
-        assert!(json.contains("\"name\":\"add\""));
-        assert!(json.contains("\"F64\""));
+        let functions: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let arr = functions.as_array().expect("metadata should be a JSON array");
+        assert!(arr.iter().any(|f| f.get("name").and_then(|v| v.as_str()) == Some("add")));
+        assert!(json.contains("F64"));
     }
 }

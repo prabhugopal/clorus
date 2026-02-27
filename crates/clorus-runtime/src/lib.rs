@@ -25,6 +25,7 @@ pub mod io;
 pub mod var;  // Var support for dynamic bindings
 pub mod arithmetic;  // Type-aware arithmetic operations
 pub mod protocols;  // Protocol dispatch for deftype/defrecord
+pub mod hash;  // Structural hashing helpers
 
 // Re-export main types
 pub use value::{Value, ValueTag};

@@ -9,6 +9,11 @@ use clorus_syntax::{Expr, RequireSpec};
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
 use std::collections::{HashSet, HashMap};
+use std::env;
+
+fn repl_debug_enabled() -> bool {
+    env::var("CLORUS_DEBUG_REPL").is_ok()
+}
 
 /// Result of evaluating an expression in the REPL
 pub struct EvalResult {
@@ -139,6 +144,48 @@ impl<'ctx> ReplEngine<'ctx> {
         self.loaded_modules.insert("clorus.core".to_string());
 
         // After stdlib is loaded, refresh user namespace to get core symbols
+        self.set_namespace("user");
+
+        Ok(symbols_registered)
+    }
+
+    /// Load stdlib symbols only (no JIT compilation).
+    /// Useful when clorus-core dylib provides implementations.
+    pub fn load_stdlib_symbols_only(&mut self, stdlib_source: String) -> Result<usize, String> {
+        if self.stdlib_loaded {
+            return Ok(0);
+        }
+
+        let exprs = parse(&stdlib_source)?;
+        if exprs.is_empty() {
+            return Ok(0);
+        }
+
+        let mut current_ns = "clorus.core".to_string();
+        let mut symbols_registered = 0;
+
+        for expr in &exprs {
+            let expanded_expr = expand_macros(expr);
+
+            if let Expr::Ns { name, .. } = &expanded_expr {
+                current_ns = name.clone();
+                continue;
+            }
+
+            let symbol_name = match &expanded_expr {
+                Expr::Def { name, .. } => Some(name.clone()),
+                Expr::Defn { name, .. } => Some(name.clone()),
+                _ => None,
+            };
+
+            if let Some(name) = symbol_name {
+                self.register_symbol(&current_ns, &name);
+                symbols_registered += 1;
+            }
+        }
+
+        self.stdlib_loaded = true;
+        self.loaded_modules.insert("clorus.core".to_string());
         self.set_namespace("user");
 
         Ok(symbols_registered)
@@ -324,11 +371,15 @@ impl<'ctx> ReplEngine<'ctx> {
     fn load_module_recursive(&mut self, namespace: &str) -> Result<Vec<(String, HashMap<String, String>, Expr)>, String> {
         use std::fs;
 
-        eprintln!("DEBUG load_module_recursive: Loading {}", namespace);
+        if repl_debug_enabled() {
+            eprintln!("DEBUG load_module_recursive: Loading {}", namespace);
+        }
 
         // Skip if already loaded
         if self.loaded_modules.contains(namespace) {
-            eprintln!("DEBUG load_module_recursive: {} already loaded, skipping", namespace);
+            if repl_debug_enabled() {
+                eprintln!("DEBUG load_module_recursive: {} already loaded, skipping", namespace);
+            }
             return Ok(Vec::new());
         }
 
@@ -337,7 +388,9 @@ impl<'ctx> ReplEngine<'ctx> {
             namespace.starts_with(prefix)
         });
         if is_clip {
-            eprintln!("DEBUG load_module_recursive: {} is from .clip package, skipping source load", namespace);
+            if repl_debug_enabled() {
+                eprintln!("DEBUG load_module_recursive: {} is from .clip package, skipping source load", namespace);
+            }
             return Ok(Vec::new());
         }
 
@@ -460,7 +513,9 @@ impl<'ctx> ReplEngine<'ctx> {
     /// Finalize project loading (no-op for now)
     pub fn finalize_project_load(&mut self) {
         // No-op - init_forms is already empty
-        eprintln!("DEBUG: Project loading finalized");
+        if repl_debug_enabled() {
+            eprintln!("DEBUG: Project loading finalized");
+        }
     }
 
     /// Evaluate an expression and add it to history (for interactive REPL)
@@ -670,7 +725,9 @@ impl<'ctx> ReplEngine<'ctx> {
         // Compile executed init forms (from project loading)
         // These are forms that have already been executed once
         // We recompile them (without re-executing) so their symbols are available
-        eprintln!("DEBUG eval_internal: Compiling {} executed init forms", self.executed_init_exprs.len());
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Compiling {} executed init forms", self.executed_init_exprs.len());
+        }
         for (init_idx, init_expr) in self.executed_init_exprs.iter().enumerate() {
             let expanded = expand_macros(init_expr);
 
@@ -693,15 +750,8 @@ impl<'ctx> ReplEngine<'ctx> {
             codegen.wrap_in_function(&expanded, &fn_name)?;
         }
 
-        // Re-declare all loaded modules in this fresh CodeGen
-        // This ensures functions like slurp/spit are available
-        for module in &self.loaded_modules {
-            let use_expr = Expr::Use {
-                module: module.clone(),
-                imports: vec![],
-            };
-            let _ = codegen.compile_expr(&use_expr)?;
-        }
+        // Loaded modules are already registered in the CodeGen above.
+        // Avoid compiling (use ...) here to prevent emitting extra IR into prior functions.
 
         // Compile all forms in order:
         // 1. Init forms (from project files) - compile always, execute only if !init_executed
@@ -720,9 +770,13 @@ impl<'ctx> ReplEngine<'ctx> {
         // Clone init_forms to avoid borrow checker issues when updating self.namespace
         let init_forms_clone = self.init_forms.clone();
 
-        eprintln!("DEBUG eval_internal: Processing {} init forms", init_forms_clone.len());
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Processing {} init forms", init_forms_clone.len());
+        }
         for (form_idx, init_input) in init_forms_clone.iter().enumerate() {
-            eprintln!("DEBUG eval_internal: Processing init form {}: {} chars", form_idx, init_input.len());
+            if repl_debug_enabled() {
+                eprintln!("DEBUG eval_internal: Processing init form {}: {} chars", form_idx, init_input.len());
+            }
             let init_exprs = parse(init_input)?;
             if init_exprs.is_empty() {
                 continue;
@@ -858,32 +912,49 @@ impl<'ctx> ReplEngine<'ctx> {
         }
 
         // Now compile the CURRENT expression (the new one we're evaluating)
-        eprintln!("DEBUG eval_internal: Compiling current expression...");
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Compiling current expression...");
+        }
         let current_expr = &exprs[0];
         let expanded_current = expand_macros(current_expr);
         let fn_name = format!("eval_{}", self.expr_count);
         self.expr_count += 1;
-        eprintln!("DEBUG eval_internal: Wrapping in function {}...", fn_name);
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Wrapping in function {}...", fn_name);
+        }
         codegen.wrap_in_function(&expanded_current, &fn_name)?;
         latest_fn_name = fn_name.clone();
 
-        eprintln!("DEBUG eval_internal: Verifying LLVM module...");
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Verifying LLVM module...");
+        }
+        codegen.finalize_global_init();
         // Verify LLVM module before JIT
         if let Err(e) = codegen.get_module().verify() {
+            if std::env::var("CLORUS_DEBUG_IR").is_ok() {
+                let ir = codegen.get_module().print_to_string().to_string();
+                let _ = std::fs::write("/tmp/clorus_repl_ir.ll", ir);
+            }
             return Err(format!("LLVM module verification failed: {:?}", e));
         }
 
-        eprintln!("DEBUG eval_internal: Creating JIT engine...");
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Creating JIT engine...");
+        }
         // Create JIT engine
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
             .map_err(|e| format!("JIT error: {}", e))?;
 
-        eprintln!("DEBUG eval_internal: Executing {} def/defn statements...", def_fn_names.len());
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Executing {} def/defn statements...", def_fn_names.len());
+        }
 
         // Execute historical def/defn statements to initialize globals and functions
         for (idx, fn_name) in def_fn_names.iter().enumerate() {
-            eprintln!("DEBUG eval_internal: Executing def/defn {} of {}: {}...", idx + 1, def_fn_names.len(), fn_name);
+            if repl_debug_enabled() {
+                eprintln!("DEBUG eval_internal: Executing def/defn {} of {}: {}...", idx + 1, def_fn_names.len(), fn_name);
+            }
             unsafe {
                 type EvalFunc = unsafe extern "C" fn() -> *mut u8;
                 match engine.get_function::<EvalFunc>(fn_name) {
@@ -898,14 +969,20 @@ impl<'ctx> ReplEngine<'ctx> {
         }
 
         // Execute the latest expression and return its result
-        eprintln!("DEBUG eval_internal: Executing current expression {}...", latest_fn_name);
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Executing current expression {}...", latest_fn_name);
+        }
         unsafe {
             type EvalFunc = unsafe extern "C" fn() -> *mut u8;
             let jit_fn = engine.get_function::<EvalFunc>(&latest_fn_name)
                 .map_err(|e| format!("Function not found: {}", e))?;
-            eprintln!("DEBUG eval_internal: Calling JIT function...");
+            if repl_debug_enabled() {
+                eprintln!("DEBUG eval_internal: Calling JIT function...");
+            }
             let value = jit_fn.call();
-            eprintln!("DEBUG eval_internal: JIT function returned successfully");
+            if repl_debug_enabled() {
+                eprintln!("DEBUG eval_internal: JIT function returned successfully");
+            }
 
             // Only add to history after successful evaluation
             if add_to_history {

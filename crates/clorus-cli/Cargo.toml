@@ -24,3 +24,6 @@ serde_json = "1.0"
 libloading = "0.8"
 zip = "0.6"
 glob = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

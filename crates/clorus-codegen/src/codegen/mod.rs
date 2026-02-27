@@ -1,4 +1,6 @@
 /// LLVM Code Generation for Clorus
+mod closures;
+
 use clorus_syntax::{Expr, Pattern, MapPatternKey};
 use clorus_types::{FfiFunction, FfiType};
 use inkwell::context::Context;
@@ -80,6 +82,9 @@ pub struct CodeGen<'ctx> {
     /// Protocol methods for automatic dispatch
     /// Maps method_name -> (protocol_name, param_count)
     protocol_methods: HashMap<String, (String, usize)>,
+    /// Lazy global init function for top-level defs in REPL/JIT
+    global_init_fn: Option<FunctionValue<'ctx>>,
+    global_init_block: Option<BasicBlock<'ctx>>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -105,6 +110,8 @@ impl<'ctx> CodeGen<'ctx> {
             compile_timeout: Duration::from_secs(60), // 60 second default timeout
             expr_count: 0,
             protocol_methods: HashMap::new(),
+            global_init_fn: None,
+            global_init_block: None,
         };
 
         // Declare runtime functions
@@ -114,6 +121,67 @@ impl<'ctx> CodeGen<'ctx> {
         codegen.declare_core_functions();
 
         codegen
+    }
+
+    /// Ensure a valid insertion block for top-level expressions (REPL/JIT).
+    fn ensure_global_init_block(&mut self) {
+        if self.builder.get_insert_block().is_some() {
+            return;
+        }
+
+        if self.global_init_fn.is_none() {
+            let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+            let fn_type = value_ptr_type.fn_type(&[], false);
+            let func = self.module.add_function("__clorus_global_init", fn_type, None);
+            let entry = self.context.append_basic_block(func, "entry");
+            self.global_init_fn = Some(func);
+            self.global_init_block = Some(entry);
+        }
+
+        if let Some(block) = self.global_init_block {
+            self.builder.position_at_end(block);
+        }
+    }
+
+    /// Finalize the lazy global init block by adding a return if needed.
+    pub fn finalize_global_init(&mut self) {
+        if let Some(block) = self.global_init_block {
+            if block.get_terminator().is_none() {
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                self.builder.position_at_end(block);
+                let _ = self.builder.build_return(Some(&value_ptr_type.const_null()));
+            }
+        }
+    }
+
+    fn is_core_function(&self, func: &str) -> bool {
+        const CORE_FUNCTIONS: &[&str] = &[
+            "slurp", "spit", "get", "nth", "first", "rest", "last", "count", "empty?",
+            "reduce", "apply", "conj", "cons", "disj", "contains?", "concat", "assoc", "dissoc",
+            // Agent operations
+            "agent", "send", "await", "await-for", "agent-error",
+            // Atom operations
+            "atom", "reset!", "swap!", "deref", "compare-and-set!",
+            // Channel operations (CSP)
+            "chan", ">!!", "<!!", "close!", "alts!!",
+            // Go blocks
+            "go",
+            // String operations
+            "str", "subs", "split", "join",
+            "upper-case", "lower-case",
+            "trim", "trim-left", "trim-right",
+            "replace", "replace-first",
+            "string?", "starts-with?", "ends-with?", "includes?",
+            // Type predicates
+            "vector?", "map?", "seq?", "coll?", "fn?",
+            // Collection helpers
+            "keys", "vals", "merge", "get-in", "assoc-in",
+            "interleave", "interpose", "distinct", "dedupe", "flatten",
+            // I/O operations
+            "print", "println"
+        ];
+
+        CORE_FUNCTIONS.contains(&func)
     }
 
     /// Set the namespace context
@@ -1234,6 +1302,42 @@ impl<'ctx> CodeGen<'ctx> {
         )
     }
 
+    /// Helper: Compile simple core calls from a mapping table.
+    fn compile_simple_mapped_call(
+        &mut self,
+        func: &str,
+        args: &[Expr],
+    ) -> Option<Result<PointerValue<'ctx>, String>> {
+        const SIMPLE_BUILTINS: &[(&str, &str, usize)] = &[
+            ("first", "clorus_first", 1),
+            ("rest", "clorus_rest", 1),
+            ("last", "clorus_last", 1),
+            ("keys", "clorus_map_keys", 1),
+            ("vals", "clorus_map_vals", 1),
+            ("merge", "clorus_map_merge", 1),
+            ("distinct", "clorus_distinct", 1),
+            ("dedupe", "clorus_dedupe", 1),
+            ("flatten", "clorus_flatten", 1),
+            ("interleave", "clorus_interleave", 1),
+            ("interpose", "clorus_interpose", 2),
+            ("get-in", "clorus_map_get_in", 2),
+            ("assoc-in", "clorus_map_assoc_in", 3),
+        ];
+
+        for (name, runtime_fn, arity) in SIMPLE_BUILTINS {
+            if func == *name {
+                return Some(match arity {
+                    1 => self.compile_simple_1arg_call(name, runtime_fn, args),
+                    2 => self.compile_simple_2arg_call(name, runtime_fn, args),
+                    3 => self.compile_simple_3arg_call(name, runtime_fn, args),
+                    _ => Err(format!("{} has unsupported arity {}", name, arity)),
+                });
+            }
+        }
+
+        None
+    }
+
     /// Helper: Compile a quoted expression (returns data, not evaluated)
     fn compile_quoted(&mut self, expr: &Expr) -> Result<PointerValue<'ctx>, String> {
         match expr {
@@ -1679,134 +1783,6 @@ impl<'ctx> CodeGen<'ctx> {
         builder.build_alloca(value_ptr_type, name).unwrap()
     }
 
-    /// Find free variables in an expression
-    /// Returns a list of variable names that are referenced but not locally bound
-    fn find_free_variables(&self, expr: &Expr) -> Vec<String> {
-        use std::collections::HashSet;
-        let mut free_vars = Vec::new();
-        let mut seen = HashSet::new();
-        self.collect_free_vars(expr, &mut free_vars, &mut seen, &HashSet::new());
-        free_vars
-    }
-
-    /// Helper to recursively collect free variables
-    fn collect_free_vars(
-        &self,
-        expr: &Expr,
-        free_vars: &mut Vec<String>,
-        seen: &mut std::collections::HashSet<String>,
-        bound: &std::collections::HashSet<String>,
-    ) {
-        use std::collections::HashSet;
-
-        match expr {
-            Expr::Symbol(name) => {
-                // If it's not bound locally and not already collected, it's free
-                // Check both local variables and parameter context (for nested closures)
-                if !bound.contains(name) && !seen.contains(name) &&
-                   (self.variables.contains_key(name) || self.parameter_context.contains_key(name)) {
-                    free_vars.push(name.clone());
-                    seen.insert(name.clone());
-                }
-            }
-            Expr::Let { bindings, body } => {
-                // Variables bound in let are not free within the body
-                let mut new_bound = bound.clone();
-                for (pattern, value_expr) in bindings {
-                    // Value expression can reference outer variables
-                    self.collect_free_vars(value_expr, free_vars, seen, bound);
-                    // Extract variable names from pattern (simplified - only handles Symbol patterns)
-                    if let clorus_syntax::ast::Pattern::Symbol(name) = pattern {
-                        new_bound.insert(name.clone());
-                    }
-                }
-                self.collect_free_vars(body, free_vars, seen, &new_bound);
-            }
-            Expr::Letfn { bindings, body } => {
-                // Functions bound in letfn can reference each other (mutual recursion)
-                let mut new_bound = bound.clone();
-                // First, add all function names to bound set
-                for (name, _params, _rest, _body) in bindings {
-                    new_bound.insert(name.clone());
-                }
-                // Then collect free vars from all function bodies with all names bound
-                for (_name, _params, _rest, fn_body) in bindings {
-                    self.collect_free_vars(fn_body, free_vars, seen, &new_bound);
-                }
-                // Collect free vars from letfn body
-                self.collect_free_vars(body, free_vars, seen, &new_bound);
-            }
-            Expr::Call { func, args } => {
-                // func is a String (function name) - check if it's a free variable
-                // Check both local variables and parameter context (for nested closures)
-                if !bound.contains(func) && !seen.contains(func) &&
-                   (self.variables.contains_key(func) || self.parameter_context.contains_key(func)) {
-                    free_vars.push(func.clone());
-                    seen.insert(func.clone());
-                }
-                // Check arguments for free variables
-                for arg in args {
-                    self.collect_free_vars(arg, free_vars, seen, bound);
-                }
-            }
-            Expr::If { condition, then_branch, else_branch } => {
-                self.collect_free_vars(condition, free_vars, seen, bound);
-                self.collect_free_vars(then_branch, free_vars, seen, bound);
-                self.collect_free_vars(else_branch, free_vars, seen, bound);
-            }
-            Expr::Vector(elements) => {
-                for elem in elements {
-                    self.collect_free_vars(elem, free_vars, seen, bound);
-                }
-            }
-            Expr::List(elements) => {
-                for elem in elements {
-                    self.collect_free_vars(elem, free_vars, seen, bound);
-                }
-            }
-            Expr::Map(pairs) => {
-                for (key, val) in pairs {
-                    self.collect_free_vars(key, free_vars, seen, bound);
-                    self.collect_free_vars(val, free_vars, seen, bound);
-                }
-            }
-            Expr::Fn { params, rest_param, body } => {
-                // Nested function - parameters are bound within the function body
-                let mut new_bound = bound.clone();
-                for param in params {
-                    if let Pattern::Symbol(name) = param {
-                        new_bound.insert(name.clone());
-                    }
-                }
-                if let Some(rest_name) = rest_param {
-                    new_bound.insert(rest_name.clone());
-                }
-                // Collect free vars from body with new bound set
-                self.collect_free_vars(body, free_vars, seen, &new_bound);
-            }
-            Expr::FnMulti { arities } => {
-                // Multi-arity nested function - parameters from all arities are bound
-                let mut new_bound = bound.clone();
-                for arity in arities {
-                    for param in &arity.params {
-                        if let Pattern::Symbol(name) = param {
-                            new_bound.insert(name.clone());
-                        }
-                    }
-                    if let Some(rest_name) = &arity.rest_param {
-                        new_bound.insert(rest_name.clone());
-                    }
-                }
-                // Collect free vars from all arity bodies
-                for arity in arities {
-                    self.collect_free_vars(&arity.body, free_vars, seen, &new_bound);
-                }
-            }
-            // Literals and other non-recursive cases
-            _ => {}
-        }
-    }
-
     /// Set up exception handling personality function for a function
     fn set_personality_function(&self, function: FunctionValue<'ctx>) {
         let personality_fn = self.module.get_function("__gxx_personality_v0")
@@ -2055,6 +2031,9 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Increment expression counter for progress tracking
         self.expr_count += 1;
+
+        // Ensure we have an insertion point for top-level expressions (REPL/JIT).
+        self.ensure_global_init_block();
 
         // Show progress every 100 expressions (disabled for cleaner output)
         // Uncomment for debugging large compilations
@@ -2988,7 +2967,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Find free variables in body
-                let mut free_vars = Vec::new();
+                let mut free_vars: Vec<String> = Vec::new();
                 let mut seen = HashSet::new();
                 self.collect_free_vars(body, &mut free_vars, &mut seen, &bound);
 
@@ -3187,7 +3166,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Collect free variables from ALL arities
-                let mut free_vars = Vec::new();
+                let mut free_vars: Vec<String> = Vec::new();
                 let mut seen = HashSet::new();
                 for arity in arities {
                     self.collect_free_vars(&arity.body, &mut free_vars, &mut seen, &all_bound);
@@ -4740,28 +4719,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Check if this is a clorus.core function call
-                let core_functions = [
-                    "slurp", "spit", "get", "nth", "first", "rest", "last", "count", "empty?",
-                    "reduce", "apply", "conj", "cons", "disj", "contains?", "concat", "assoc", "dissoc",
-                    "atom", "reset!", "swap!",
-                    // Agent operations
-                    "agent", "send", "await", "await-for", "agent-error",
-                    // Channel operations (CSP)
-                    "chan", ">!!", "<!!", "close!", "alts!!",
-                    // Go blocks
-                    "go",
-                    // String operations
-                    "str", "subs", "split", "join",
-                    "upper-case", "lower-case",
-                    "trim", "trim-left", "trim-right",
-                    "replace", "replace-first",
-                    "string?", "starts-with?", "ends-with?", "includes?",
-                    // Type predicates
-                    "vector?", "map?", "seq?", "coll?", "fn?",
-                    // I/O operations
-                    "print", "println"
-                ];
-                if core_functions.contains(&func.as_str()) {
+                if self.is_core_function(func) {
                     return self.compile_core_call(func, args);
                 }
 
@@ -6042,6 +6000,10 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Compile clorus.core function calls (Clojure-style convenience functions)
     fn compile_core_call(&mut self, func: &str, args: &[Expr]) -> Result<PointerValue<'ctx>, String> {
+        if let Some(result) = self.compile_simple_mapped_call(func, args) {
+            return result;
+        }
+
         match func {
             "slurp" => {
                 // slurp takes 1 arg: path (string)
@@ -6192,12 +6154,6 @@ impl<'ctx> CodeGen<'ctx> {
 
                 Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
-
-            "first" => self.compile_simple_1arg_call("first", "clorus_first", args),
-
-            "rest" => self.compile_simple_1arg_call("rest", "clorus_rest", args),
-
-            "last" => self.compile_simple_1arg_call("last", "clorus_last", args),
 
             "count" => {
                 // count takes 1 arg: collection
@@ -7282,16 +7238,6 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
-            "keys" => self.compile_simple_1arg_call("keys", "clorus_map_keys", args),
-
-            "vals" => self.compile_simple_1arg_call("vals", "clorus_map_vals", args),
-
-            "merge" => self.compile_simple_1arg_call("merge", "clorus_map_merge", args),
-
-            "get-in" => self.compile_simple_2arg_call("get-in", "clorus_map_get_in", args),
-
-            "assoc-in" => self.compile_simple_3arg_call("assoc-in", "clorus_map_assoc_in", args),
-
             "concat" => {
                 if args.is_empty() {
                     // (concat) with no args returns empty vector
@@ -7346,16 +7292,6 @@ impl<'ctx> CodeGen<'ctx> {
                     Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
                 }
             }
-
-            "interleave" => self.compile_simple_1arg_call("interleave", "clorus_interleave", args),
-
-            "interpose" => self.compile_simple_2arg_call("interpose", "clorus_interpose", args),
-
-            "distinct" => self.compile_simple_1arg_call("distinct", "clorus_distinct", args),
-
-            "dedupe" => self.compile_simple_1arg_call("dedupe", "clorus_dedupe", args),
-
-            "flatten" => self.compile_simple_1arg_call("flatten", "clorus_flatten", args),
 
             // String operations
             "str" => {
@@ -8093,7 +8029,23 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(entry);
 
         let result = self.compile_expr(expr)?;  // Returns Value*
-        self.builder.build_return(Some(&result)).unwrap();
+        // Ensure the entry block has a terminator. If compile_expr moved the builder,
+        // link entry to the current block and return from there.
+        let current_block = self.builder.get_insert_block();
+        if let Some(block) = current_block {
+            if entry.get_terminator().is_none() && entry != block {
+                self.builder.position_at_end(entry);
+                self.builder.build_unconditional_branch(block).unwrap();
+            }
+            if block.get_terminator().is_none() {
+                self.builder.position_at_end(block);
+                self.builder.build_return(Some(&result)).unwrap();
+            }
+        } else if entry.get_terminator().is_none() {
+            // Fallback: if compile_expr cleared the insertion point, return from entry.
+            self.builder.position_at_end(entry);
+            self.builder.build_return(Some(&result)).unwrap();
+        }
 
         Ok(function)
     }

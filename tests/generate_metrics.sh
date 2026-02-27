@@ -5,7 +5,7 @@
 
 set -e
 
-CLORUS_BIN="./target/release/clorus"
+CLORUS_BIN="${CLORUS_BIN:-./target/release/clorus}"
 TEST_DIR="./tests"
 METRICS_DIR="./test-metrics"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)

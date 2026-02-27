@@ -54,21 +54,18 @@ impl ClorusAtom {
     }
 
     /// Update the atom by applying a function (swap!)
-    /// This is a simplified version - full version would need retry loop
     pub unsafe fn swap(&self, func_ptr: *mut u8, arg: *mut Value) -> *mut Value {
-        // Load current value
-        let current_val = self.current.load(Ordering::Acquire);
-
-        // Call the function: func(current_val, arg) -> new_val
-        // For now, we'll use a simple approach
-        // In production, this needs a compare-and-swap retry loop
-
         type SwapFn = extern "C" fn(*mut Value, *mut Value) -> *mut Value;
         let func: SwapFn = std::mem::transmute(func_ptr);
-        let new_val = func(current_val, arg);
 
-        // Update atomically
-        self.reset(new_val)
+        loop {
+            let current_val = self.current.load(Ordering::Acquire);
+            let new_val = func(current_val, arg);
+
+            if self.compare_and_set(current_val, new_val) {
+                return new_val;
+            }
+        }
     }
 
     /// Compare and set (CAS operation)

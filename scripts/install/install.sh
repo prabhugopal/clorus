@@ -25,7 +25,14 @@ mkdir -p "$STDLIB_DIR"
 # Check if release build exists
 if [ ! -f "target/release/clorus" ]; then
     echo "❌ Release build not found. Building..."
-    cargo build --release --bin clorus
+    if [ -f "scripts/build/build.sh" ]; then
+        scripts/build/build.sh
+    else
+        cargo build --release --bin clorus
+        cargo build --release -p clorus-runtime
+        cargo build --release -p clorus-core
+        cargo build --release -p clorus-std
+    fi
 fi
 
 echo "📦 Copying binaries..."
@@ -38,7 +45,7 @@ find target/release -name "libclorus_runtime.*" -exec cp {} "$LIB_DIR/" \;
 find target/release/deps -name "libclorus_runtime.*" -exec cp {} "$LIB_DIR/" \; 2>/dev/null || true
 
 # Copy other essential libraries
-for lib in libclorus_core.dylib libclorus_std.dylib; do
+for lib in libclorus_core.* libclorus_std.*; do
     if [ -f "target/release/$lib" ]; then
         cp "target/release/$lib" "$LIB_DIR/"
     fi

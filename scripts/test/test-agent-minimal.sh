@@ -9,4 +9,10 @@ cat > /tmp/test-agent.clr <<'EOF'
 (println "Created agent with value:" x)
 EOF
 
-./target/debug/repl < /tmp/test-agent.clr
+if [ -n "$REPL_BIN" ]; then
+    REPL_CMD=("$REPL_BIN")
+else
+    REPL_CMD=(cargo run -p clorus-repl --bin repl-dev --quiet)
+fi
+
+"${REPL_CMD[@]}" < /tmp/test-agent.clr

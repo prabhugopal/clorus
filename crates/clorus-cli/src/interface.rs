@@ -1,6 +1,7 @@
 /// Interface file (.clri or .clorus-ffi) parser
 /// Preferred extension: .clri, Legacy: .clorus-ffi
-use clorus_syntax::{Expr, parse};
+use clorus_syntax::{Lexer, Token};
+use clorus_syntax::lexer::Span;
 use std::fs;
 use std::path::Path;
 
@@ -27,6 +28,155 @@ pub struct InterfaceParam {
     pub type_name: String,
 }
 
+struct InterfaceTokenParser {
+    tokens: Vec<Token>,
+    pos: usize,
+}
+
+impl InterfaceTokenParser {
+    fn new(tokens: Vec<Token>) -> Self {
+        Self { tokens, pos: 0 }
+    }
+
+    fn current(&self) -> Token {
+        self.tokens
+            .get(self.pos)
+            .cloned()
+            .unwrap_or(Token::Eof(Span::dummy()))
+    }
+
+    fn advance(&mut self) {
+        if self.pos < self.tokens.len() {
+            self.pos += 1;
+        }
+    }
+
+    fn expect_lparen(&mut self) -> Result<(), String> {
+        match self.current() {
+            Token::LParen(_) => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err("Expected '('".to_string()),
+        }
+    }
+
+    fn expect_rparen(&mut self) -> Result<(), String> {
+        match self.current() {
+            Token::RParen(_) => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err("Expected ')'".to_string()),
+        }
+    }
+
+    fn expect_lbracket(&mut self) -> Result<(), String> {
+        match self.current() {
+            Token::LBracket(_) => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err("Expected '['".to_string()),
+        }
+    }
+
+    fn expect_rbracket(&mut self) -> Result<(), String> {
+        match self.current() {
+            Token::RBracket(_) => {
+                self.advance();
+                Ok(())
+            }
+            _ => Err("Expected ']'".to_string()),
+        }
+    }
+
+    fn expect_symbol(&mut self) -> Result<String, String> {
+        match self.current() {
+            Token::Symbol(s, _) => {
+                let out = s;
+                self.advance();
+                Ok(out)
+            }
+            _ => Err("Expected symbol".to_string()),
+        }
+    }
+
+    fn expect_keyword(&mut self) -> Result<String, String> {
+        match self.current() {
+            Token::Keyword(k, _) => {
+                let out = k;
+                self.advance();
+                Ok(out)
+            }
+            _ => Err("Expected keyword".to_string()),
+        }
+    }
+
+    fn parse_interface(&mut self) -> Result<InterfaceFile, String> {
+        self.expect_lparen()?;
+
+        let head = self.expect_symbol()?;
+        if head != "interface" {
+            return Err("Interface file must start with (interface ...)".to_string());
+        }
+
+        let name = self.expect_symbol()?;
+        let mut functions = Vec::new();
+
+        while !matches!(self.current(), Token::RParen(_)) {
+            functions.push(self.parse_function()?);
+        }
+
+        self.expect_rparen()?;
+        Ok(InterfaceFile { name, functions })
+    }
+
+    fn parse_function(&mut self) -> Result<InterfaceFunction, String> {
+        self.expect_lparen()?;
+        let head = self.expect_symbol()?;
+        if head != "fn" && head != "defn" {
+            return Err("Function declaration must start with (fn ...) or (defn ...)".to_string());
+        }
+
+        let name = self.expect_symbol()?;
+        let params = self.parse_params()?;
+        let return_type = map_type_keyword(&self.expect_keyword()?);
+
+        let doc = match self.current() {
+            Token::String(s, _) => {
+                let out = s;
+                self.advance();
+                Some(out)
+            }
+            _ => None,
+        };
+
+        self.expect_rparen()?;
+
+        Ok(InterfaceFunction {
+            name,
+            params,
+            return_type,
+            doc,
+        })
+    }
+
+    fn parse_params(&mut self) -> Result<Vec<InterfaceParam>, String> {
+        self.expect_lbracket()?;
+        let mut params = Vec::new();
+
+        while !matches!(self.current(), Token::RBracket(_)) {
+            let name = self.expect_symbol()?;
+            let type_name = map_type_keyword(&self.expect_keyword()?);
+            params.push(InterfaceParam { name, type_name });
+        }
+
+        self.expect_rbracket()?;
+        Ok(params)
+    }
+}
+
 /// Parse a .clri or .clorus-ffi interface file
 pub fn parse_interface_file(path: &Path) -> Result<InterfaceFile, String> {
 
@@ -34,222 +184,18 @@ pub fn parse_interface_file(path: &Path) -> Result<InterfaceFile, String> {
         .map_err(|e| format!("Failed to read interface file {}: {}", path.display(), e))?;
 
 
-    let exprs = match parse(&source) {
-        Ok(exprs) => exprs,
-        Err(e) => {
-            return Err(format!("Failed to parse interface file {}: {}", path.display(), e));
-        }
-    };
+    // Interface files use a simplified grammar (fn/defn with explicit return type).
+    // The main Clorus parser treats fn/defn as special forms, so use a custom token parser here.
+    let mut lexer = Lexer::new(&source);
+    let tokens = lexer.tokenize()
+        .map_err(|e| format!("Failed to tokenize interface file {}: {}", path.display(), e))?;
 
-
-    // Expect (interface name ...)
-    if exprs.is_empty() {
-        return Err("Interface file is empty".to_string());
-    }
-
-    match &exprs[0] {
-        Expr::Call { func, args } => {
-
-            if func == "interface" {
-                return parse_interface_from_call(args);
-            }
-
-            Err("Interface file must start with (interface ...)".to_string())
-        }
-        Expr::List(items) => {
-
-            if items.is_empty() {
-                return Err("Empty interface declaration".to_string());
-            }
-
-            // Check for (interface ...)
-            if let Expr::Symbol(s) = &items[0] {
-                if s == "interface" {
-                    return Ok(parse_interface_declaration(&items[1..])?);
-                }
-            }
-
-            Err("Interface file must start with (interface ...)".to_string())
-        }
-        other => {
-            Err("Interface file must start with (interface ...)".to_string())
-        }
-    }
+    let mut parser = InterfaceTokenParser::new(tokens);
+    parser.parse_interface()
 }
 
 /// Parse interface from a Call expression
-fn parse_interface_from_call(args: &[Expr]) -> Result<InterfaceFile, String> {
-    if args.is_empty() {
-        return Err("Interface declaration missing name".to_string());
-    }
-
-    // Get interface name
-    let name = match &args[0] {
-        Expr::Symbol(s) => s.clone(),
-        _ => return Err("Interface name must be a symbol".to_string()),
-    };
-
-
-    // Parse function declarations from remaining args
-    let mut functions = Vec::new();
-    for arg in &args[1..] {
-        if let Some(func) = parse_function_from_call(arg)? {
-            functions.push(func);
-        }
-    }
-
-    Ok(InterfaceFile { name, functions })
-}
-
-/// Parse function from a Call expression
-fn parse_function_from_call(expr: &Expr) -> Result<Option<InterfaceFunction>, String> {
-    match expr {
-        Expr::Call { func, args } => {
-            if func == "fn" || func == "defn" {
-                return parse_fn(args).map(Some);
-            }
-            Ok(None)
-        }
-        _ => Ok(None)
-    }
-}
-
-/// Parse the contents of an (interface name ...) declaration
-fn parse_interface_declaration(items: &[Expr]) -> Result<InterfaceFile, String> {
-    if items.is_empty() {
-        return Err("Interface declaration missing name".to_string());
-    }
-
-    // Get interface name
-    let name = match &items[0] {
-        Expr::Symbol(s) => s.clone(),
-        _ => return Err("Interface name must be a symbol".to_string()),
-    };
-
-    // Parse function declarations
-    let mut functions = Vec::new();
-    for item in &items[1..] {
-        if let Some(func) = parse_function_declaration(item)? {
-            functions.push(func);
-        }
-    }
-
-    Ok(InterfaceFile { name, functions })
-}
-
-/// Parse a function declaration: (fn name [params...] return-type "doc")
-fn parse_function_declaration(expr: &Expr) -> Result<Option<InterfaceFunction>, String> {
-    match expr {
-        Expr::List(items) => {
-            if items.is_empty() {
-                return Ok(None);
-            }
-
-            // Check for (fn ...)
-            if let Expr::Symbol(s) = &items[0] {
-                if s == "fn" || s == "defn" {
-                    return parse_fn(&items[1..]).map(Some);
-                }
-            }
-
-            // Ignore other forms (comments, etc.)
-            Ok(None)
-        }
-        _ => Ok(None), // Ignore non-list forms
-    }
-}
-
-/// Parse (fn name [params...] return-type "doc")
-fn parse_fn(items: &[Expr]) -> Result<InterfaceFunction, String> {
-    for (idx, item) in items.iter().enumerate() {
-    }
-
-    if items.len() < 3 {
-        return Err("defn requires at least name, params, and return type".to_string());
-    }
-
-    // Get function name
-    let name = match &items[0] {
-        Expr::Symbol(s) => {
-            s.clone()
-        }
-        other => {
-            return Err("Function name must be a symbol".to_string());
-        }
-    };
-
-    // Get parameters
-    let params = match &items[1] {
-        Expr::Vector(param_list) => {
-            parse_params(param_list)?
-        }
-        other => {
-            return Err("Function parameters must be a vector [...]".to_string());
-        }
-    };
-
-    // Get return type
-    let return_type = match &items[2] {
-        Expr::Keyword(k) => {
-            map_type_keyword(k)
-        }
-        other => {
-            return Err("Return type must be a keyword like :f64 or :string".to_string());
-        }
-    };
-
-    // Get optional docstring
-    let doc = if items.len() > 3 {
-        match &items[3] {
-            Expr::String(s) => Some(s.clone()),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    Ok(InterfaceFunction {
-        name,
-        params,
-        return_type,
-        doc,
-    })
-}
-
-/// Parse function parameters: [name :type name :type ...]
-fn parse_params(param_list: &[Expr]) -> Result<Vec<InterfaceParam>, String> {
-    let mut params = Vec::new();
-    let mut i = 0;
-
-    for (idx, expr) in param_list.iter().enumerate() {
-    }
-
-    while i < param_list.len() {
-        // Expect: name :type
-        if i + 1 >= param_list.len() {
-            return Err("Parameter must have both name and type".to_string());
-        }
-
-        let name = match &param_list[i] {
-            Expr::Symbol(s) => s.clone(),
-            other => {
-                return Err("Parameter name must be a symbol".to_string());
-            }
-        };
-
-        let type_name = match &param_list[i + 1] {
-            Expr::Keyword(k) => map_type_keyword(k),
-            other => {
-                return Err("Parameter type must be a keyword like :f64 or :string".to_string());
-            }
-        };
-
-        params.push(InterfaceParam { name, type_name });
-        i += 2;
-    }
-
-    Ok(params)
-}
+// Old Expr-based interface parsing removed in favor of the token parser above.
 
 /// Map Clorus type keywords to Rust type strings
 fn map_type_keyword(keyword: &str) -> String {

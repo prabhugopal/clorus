@@ -17,7 +17,7 @@ pub mod macros;
 pub use ast::{Expr, RequireSpec, RustImport, Pattern, MapPatternKey};
 pub use lexer::{Lexer, Token};
 pub use parser::{parse_str, Parser};
-pub use macros::expand_macros;
+pub use macros::{expand_macros, expand_macros_sequence};
 
 /// Convenience function to parse source code
 pub fn parse(source: &str) -> Result<Vec<Expr>, String> {
@@ -27,7 +27,7 @@ pub fn parse(source: &str) -> Result<Vec<Expr>, String> {
 /// Convenience function to parse and expand macros
 pub fn parse_and_expand(source: &str) -> Result<Vec<Expr>, String> {
     let exprs = parse_str(source)?;
-    Ok(exprs.into_iter().map(|e| expand_macros(&e)).collect())
+    Ok(expand_macros_sequence(&exprs))
 }
 
 #[cfg(test)]

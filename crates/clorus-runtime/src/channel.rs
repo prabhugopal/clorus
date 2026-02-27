@@ -171,6 +171,12 @@ impl ClorusChannel {
         // Take value from buffer
         let value = buffer.pop_front().unwrap();
 
+        // Transfer ownership to caller: retain for caller, release channel's ref
+        unsafe {
+            crate::value::clorus_retain(value);
+            crate::value::clorus_release(value);
+        }
+
         // Notify waiting putters
         self.not_full.notify_one();
 
@@ -207,6 +213,10 @@ impl ClorusChannel {
         }
 
         let value = buffer.pop_front().unwrap();
+        unsafe {
+            crate::value::clorus_retain(value);
+            crate::value::clorus_release(value);
+        }
         self.not_full.notify_one();
 
         value
@@ -250,6 +260,10 @@ impl ClorusChannel {
 
         if !buffer.is_empty() {
             let value = buffer.pop_front().unwrap();
+            unsafe {
+                crate::value::clorus_retain(value);
+                crate::value::clorus_release(value);
+            }
             self.not_full.notify_one();
             Some(value)
         } else if self.is_closed() {

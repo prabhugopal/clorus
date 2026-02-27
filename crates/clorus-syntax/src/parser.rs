@@ -2379,7 +2379,7 @@ mod tests {
     fn test_parse_atoms() {
         let exprs = parse_str("42 \"hello\" true nil :keyword").unwrap();
         assert_eq!(exprs.len(), 5);
-        assert_eq!(exprs[0], Expr::Number(42.0));
+        assert_eq!(exprs[0], Expr::Long(42));
         assert_eq!(exprs[1], Expr::String("hello".to_string()));
         assert_eq!(exprs[2], Expr::Bool(true));
         assert_eq!(exprs[3], Expr::Nil);
@@ -2394,8 +2394,8 @@ mod tests {
         if let Expr::List(list) = &exprs[0] {
             assert_eq!(list.len(), 3);
             assert_eq!(list[0], Expr::Symbol("+".to_string()));
-            assert_eq!(list[1], Expr::Number(1.0));
-            assert_eq!(list[2], Expr::Number(2.0));
+            assert_eq!(list[1], Expr::Long(1));
+            assert_eq!(list[2], Expr::Long(2));
         } else {
             panic!("Expected list");
         }
@@ -2612,7 +2612,7 @@ mod tests {
 
         if let Expr::Fn { params, body, .. } = &exprs[0] {
             assert_eq!(params.len(), 0);
-            assert!(matches!(**body, Expr::Number(_)));
+            assert!(matches!(**body, Expr::Long(_)));
         } else {
             panic!("Expected Fn expression");
         }
@@ -2628,7 +2628,7 @@ mod tests {
 
         if let Expr::Do { exprs } = &exprs[0] {
             assert_eq!(exprs.len(), 1);
-            assert!(matches!(exprs[0], Expr::Number(42.0)));
+            assert!(matches!(exprs[0], Expr::Long(42)));
         } else {
             panic!("Expected Do expression, got: {:?}", exprs[0]);
         }
@@ -2673,13 +2673,22 @@ mod tests {
         if let Expr::Fn { params, body, .. } = &exprs[0] {
             assert_eq!(params, &vec![crate::ast::Pattern::Symbol("%".to_string())]);
             // Body should be a list (* % 2)
-            if let Expr::List(elements) = &**body {
-                assert_eq!(elements.len(), 3);
-                assert_eq!(elements[0], Expr::Symbol("*".to_string()));
-                assert_eq!(elements[1], Expr::Symbol("%".to_string()));
-                assert_eq!(elements[2], Expr::Number(2.0));
-            } else {
-                panic!("Expected list body");
+            match &**body {
+                Expr::List(elements) => {
+                    assert_eq!(elements.len(), 3);
+                    assert_eq!(elements[0], Expr::Symbol("*".to_string()));
+                    assert_eq!(elements[1], Expr::Symbol("%".to_string()));
+                    assert!(matches!(elements[2], Expr::Long(2)) || matches!(elements[2], Expr::Double(2.0)));
+                }
+                Expr::Call { func, args } => {
+                    assert_eq!(func, "*");
+                    assert_eq!(args.len(), 2);
+                    assert_eq!(args[0], Expr::Symbol("%".to_string()));
+                    assert!(matches!(args[1], Expr::Long(2)) || matches!(args[1], Expr::Double(2.0)));
+                }
+                _ => {
+                    panic!("Expected list or call body");
+                }
             }
         } else {
             panic!("Expected Fn expression, got: {:?}", exprs[0]);

@@ -236,6 +236,12 @@ These tests embody true test-oriented development:
 ### Run all tests:
 ```bash
 ./tests/run_all_tests.sh
+
+To run **all** tests (Rust + Clorus + REPL):
+
+```bash
+./scripts/test/run-all.sh
+```
 ```
 
 ### Run specific stress test:

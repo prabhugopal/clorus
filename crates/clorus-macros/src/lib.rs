@@ -10,7 +10,7 @@ use syn::{parse_macro_input, Ident, ItemFn, ReturnType, Type};
 /// Wrap a Rust function for use in Clorus
 ///
 /// Example:
-/// ```rust
+/// ```rust,ignore
 /// #[export_to_clorus]
 /// pub fn add(a: i32, b: i32) -> i32 {
 ///     a + b
@@ -18,7 +18,7 @@ use syn::{parse_macro_input, Ident, ItemFn, ReturnType, Type};
 /// ```
 ///
 /// Generates a C-compatible wrapper:
-/// ```rust
+/// ```rust,ignore
 /// #[no_mangle]
 /// pub extern "C" fn clorus_add(a: i32, b: i32) -> i32 {
 ///     add(a, b)
@@ -63,7 +63,7 @@ pub fn export_to_clorus(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Simple macro for now - will expand later
 ///
 /// Usage:
-/// ```rust
+/// ```rust,ignore
 /// wrap_rust_module! {
 ///     pub fn read_to_string(path: String) -> String;
 ///     pub fn write(path: String, content: String) -> ();

@@ -225,7 +225,7 @@ cat > tests/README.md <<EOF
 ## Running Tests
 \`\`\`bash
 # All tests
-../scripts/test/run_all_tests.sh
+./scripts/test/run-all.sh
 
 # Specific category
 clorus build && ./target/test-name

@@ -4,13 +4,11 @@
 
 use crate::value::Value;
 use std::collections::HashMap as StdHashMap;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
 
 /// Simple wrapper for Clorus hash maps
 /// TODO: Replace with persistent HAMT for immutability
 pub struct ClorusHashMap {
-    entries: StdHashMap<u64, (*mut Value, *mut Value)>,
+    entries: StdHashMap<u64, Vec<(*mut Value, *mut Value)>>,
 }
 
 impl ClorusHashMap {
@@ -23,19 +21,33 @@ impl ClorusHashMap {
     /// Create a new map by adding/updating a key-value pair
     /// For now, this mutates - will be persistent in Phase C
     pub unsafe fn assoc(&mut self, key: *mut Value, val: *mut Value) {
-        // Compute hash of key
         let hash = hash_value(key);
 
-        // Retain the value
+        if let Some(bucket) = self.entries.get_mut(&hash) {
+            for (existing_key, existing_val) in bucket.iter_mut() {
+                if crate::value::clorus_equals(*existing_key, key) {
+                    // Replace existing entry
+                    crate::value::clorus_retain(key);
+                    crate::value::clorus_retain(val);
+                    crate::value::clorus_release(*existing_key);
+                    crate::value::clorus_release(*existing_val);
+                    *existing_key = key;
+                    *existing_val = val;
+                    return;
+                }
+            }
+
+            // Not found in bucket - insert new
+            crate::value::clorus_retain(key);
+            crate::value::clorus_retain(val);
+            bucket.push((key, val));
+            return;
+        }
+
+        // No bucket yet - create one
         crate::value::clorus_retain(key);
         crate::value::clorus_retain(val);
-
-        // Insert into map
-        if let Some((old_key, old_val)) = self.entries.insert(hash, (key, val)) {
-            // Release old values
-            crate::value::clorus_release(old_key);
-            crate::value::clorus_release(old_val);
-        }
+        self.entries.insert(hash, vec![(key, val)]);
     }
 
     /// Get a value by key, returns nil if not found
@@ -44,65 +56,49 @@ impl ClorusHashMap {
     /// The caller is responsible for releasing it when done.
     pub fn get(&self, key: *mut Value) -> *mut Value {
         let hash = hash_value(key);
-        match self.entries.get(&hash) {
-            Some((_, val)) => {
-                // Retain the value before returning (same pattern as vector nth)
-                unsafe {
-                    if !val.is_null() {
-                        (**val).header().retain();
+        if let Some(bucket) = self.entries.get(&hash) {
+            for (bucket_key, bucket_val) in bucket {
+                if crate::value::clorus_equals(*bucket_key, key) {
+                    unsafe {
+                        if !bucket_val.is_null() {
+                            (**bucket_val).header().retain();
+                        }
                     }
+                    return *bucket_val;
                 }
-                *val
-            },
-            None => Value::nil(),
+            }
         }
+
+        Value::nil()
+    }
+
+    /// Get a value by key without retaining (internal use)
+    pub fn get_entry(&self, key: *mut Value) -> Option<*mut Value> {
+        let hash = hash_value(key);
+        if let Some(bucket) = self.entries.get(&hash) {
+            for (bucket_key, bucket_val) in bucket {
+                if crate::value::clorus_equals(*bucket_key, key) {
+                    return Some(*bucket_val);
+                }
+            }
+        }
+        None
     }
 
     pub fn count(&self) -> u64 {
-        self.entries.len() as u64
+        self.entries.values().map(|bucket| bucket.len() as u64).sum()
     }
 
     /// Get an iterator over entries (for dissoc, keys, vals)
-    pub fn entries_iter(&self) -> impl Iterator<Item = (&u64, &(*mut Value, *mut Value))> {
-        self.entries.iter()
+    pub fn entries_iter(&self) -> impl Iterator<Item = &(*mut Value, *mut Value)> {
+        self.entries.values().flat_map(|bucket| bucket.iter())
     }
 }
 
 /// Hash a Value pointer for map lookups
 /// For now, uses a simple hash - will be improved in Phase C
 fn hash_value(val: *mut Value) -> u64 {
-    if val.is_null() {
-        return 0;
-    }
-
-    unsafe {
-        match (*val).header().tag() {
-            crate::value::ValueTag::Long => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_long().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::Double => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_double().to_bits().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::String => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_string().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::Bool => {
-                if (*val).as_bool() { 1 } else { 0 }
-            }
-            crate::value::ValueTag::Nil => 0,
-            _ => {
-                // For complex types, use pointer address as hash
-                // This is temporary - proper structural hashing in Phase C
-                val as u64
-            }
-        }
-    }
+    crate::hash::clorus_hash(val)
 }
 
 /// Public version of hash_value for use in collections module
@@ -117,9 +113,11 @@ pub unsafe fn release_map(map: *mut ClorusHashMap) {
     }
 
     // Release all keys and values
-    for (key, val) in (*map).entries.values() {
-        crate::value::clorus_release(*key);
-        crate::value::clorus_release(*val);
+    for bucket in (*map).entries.values() {
+        for (key, val) in bucket {
+            crate::value::clorus_release(*key);
+            crate::value::clorus_release(*val);
+        }
     }
 
     // Free the map itself
@@ -151,7 +149,9 @@ pub extern "C" fn clorus_map_assoc(
         // TODO: In Phase C, create a new persistent map
         (*map_ptr).assoc(key, val);
 
-        // Return the same map (will be new persistent copy in Phase C)
+        // Return the same map (will be new persistent copy in Phase C).
+        // Retain to allow caller to release both old and "new" maps safely.
+        crate::value::clorus_retain(map_val);
         map_val
     }
 }

@@ -375,35 +375,66 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         }
     }
 
-    if let Some(core_path) = core_stdlib_path {
-        // TEMP: Disable stdlib auto-loading in REPL due to JIT compilation bugs
-        // Stdlib works perfectly in compiled mode (clorus build)
-        // TODO: Fix REPL JIT compilation of stdlib expressions
-        println!("⚠ clorus.core auto-loading disabled in REPL (use compiled mode)");
-        core_loaded = false;
+    let mut _core_lib: Option<libloading::Library> = None;
+    if let Some(core_path) = core_stdlib_path.as_ref() {
+        let enable_stdlib = std::env::var("CLORUS_REPL_LOAD_STDLIB")
+            .ok()
+            .map(|v| v != "0")
+            .unwrap_or(false);
+        let enable_core_lib = std::env::var("CLORUS_REPL_USE_CORE_LIB")
+            .ok()
+            .map(|v| v != "0")
+            .unwrap_or(false);
 
-        /*
-        match std::fs::read_to_string(&core_path) {
-            Ok(source) => {
-                // Use new batch loader - compiles stdlib ONCE, never recompiled
-                match repl_engine.load_stdlib_batch(source) {
-                    Ok(count) => {
-                        println!("✓ Loaded clorus.core ({} functions)", count);
-                        core_loaded = true;
-                    }
-                    Err(e) => {
-                        eprintln!("⚠ Error loading stdlib: {}", e);
+        if enable_core_lib {
+            match load_core_library() {
+                Ok(lib) => {
+                    _core_lib = Some(lib);
+                    match std::fs::read_to_string(core_path) {
+                        Ok(source) => match repl_engine.load_stdlib_symbols_only(source) {
+                            Ok(count) => {
+                                println!("✓ Loaded clorus.core symbols ({} functions) via clorus-core dylib", count);
+                                core_loaded = true;
+                            }
+                            Err(e) => {
+                                eprintln!("⚠ Error loading stdlib symbols: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("⚠ Could not read stdlib: {}", e);
+                        }
                     }
                 }
+                Err(e) => {
+                    eprintln!("⚠ Failed to load clorus-core dylib: {}", e);
+                }
             }
-            Err(e) => {
-                eprintln!("⚠ Could not read stdlib: {}", e);
+        } else if enable_stdlib {
+            match std::fs::read_to_string(core_path) {
+                Ok(source) => {
+                    // Use new batch loader - compiles stdlib ONCE, never recompiled
+                    match repl_engine.load_stdlib_batch(source) {
+                        Ok(count) => {
+                            println!("✓ Loaded clorus.core ({} functions)", count);
+                            core_loaded = true;
+                        }
+                        Err(e) => {
+                            eprintln!("⚠ Error loading stdlib: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠ Could not read stdlib: {}", e);
+                }
             }
+        } else {
+            // Default: keep stdlib disabled in REPL due to historical JIT issues.
+            println!("⚠ clorus.core auto-loading disabled in REPL (set CLORUS_REPL_USE_CORE_LIB=1 or CLORUS_REPL_LOAD_STDLIB=1)");
+            core_loaded = false;
         }
-        */
     }
 
-    if !core_loaded {
+    if !core_loaded && core_stdlib_path.is_none() {
         println!("⚠ clorus.core not loaded (stdlib not found)");
     }
     println!();
@@ -469,7 +500,9 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                                                 println!("  → Registered {} functions from {}", rust_lib.functions.len(), dep_name);
 
                                                 // DEBUG: Print all functions
-                                                eprintln!("DEBUG: Functions in rust.{}:", dep_name.replace('-', "_"));
+                                                if std::env::var("CLORUS_DEBUG_REPL").is_ok() {
+                                                    eprintln!("DEBUG: Functions in rust.{}:", dep_name.replace('-', "_"));
+                                                }
                                                 for (i, func) in rust_lib.functions.iter().enumerate() {
                                                     if i < 10 {
                                                         eprintln!("  - {}", func.name);
@@ -612,11 +645,15 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
 
                         // When we have a complete form (paren_depth returns to 0)
                         if paren_depth == 0 && !current_form.trim().is_empty() {
-                            eprintln!("DEBUG: Loading form {}...", forms_loaded + 1);
+                            if std::env::var("CLORUS_DEBUG_REPL").is_ok() {
+                                eprintln!("DEBUG: Loading form {}...", forms_loaded + 1);
+                            }
                             match repl_engine.eval_init(&current_form) {
                                 Ok(_) => {
                                     forms_loaded += 1;
-                                    eprintln!("DEBUG: Form {} loaded successfully", forms_loaded);
+                                    if std::env::var("CLORUS_DEBUG_REPL").is_ok() {
+                                        eprintln!("DEBUG: Form {} loaded successfully", forms_loaded);
+                                    }
                                 }
                                 Err(e) => {
                                     // Check if this is an FFI-related error
@@ -1424,7 +1461,9 @@ pub fn parse_wrapper_source(content: &str, lib_name: &str) -> Result<clorus::cod
 
                         // DEBUG: Print first 5 functions
                         if functions.len() <= 5 {
-                            eprintln!("DEBUG: Registered FFI function: {} (from {})", fn_name, full_fn_name);
+                            if std::env::var("CLORUS_DEBUG_REPL").is_ok() {
+                                eprintln!("DEBUG: Registered FFI function: {} (from {})", fn_name, full_fn_name);
+                            }
                         }
                     }
                 }
@@ -1986,7 +2025,32 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
 }
 
 fn find_runtime_lib() -> Result<String, String> {
-    // First, try relative to clorus executable (same directory)
+    let debug = std::env::var("CLORUS_DEBUG_RUNTIME").is_ok();
+    // First, try CLORUS_HOME/lib (installed layout)
+    if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
+        let lib_dir = std::path::Path::new(&clorus_home).join("lib");
+        let candidates = [
+            lib_dir.join("libclorus_runtime.a"),
+            lib_dir.join("libclorus_runtime.dylib"),
+            lib_dir.join("libclorus_runtime.rlib"),
+        ];
+        if debug {
+            eprintln!("   [DEBUG] CLORUS_HOME/lib = {}", lib_dir.display());
+        }
+        for path in candidates {
+            if debug {
+                eprintln!("   [DEBUG] Checking {}", path.display());
+            }
+            if path.exists() {
+                if debug {
+                    eprintln!("   [DEBUG] Found runtime: {}", path.display());
+                }
+                return Ok(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Next, try relative to clorus executable (same directory)
     if let Ok(exe_path) = std::env::current_exe() {
         // Resolve symlinks
         let exe_path = if let Ok(canonical) = exe_path.canonicalize() {
@@ -2016,20 +2080,61 @@ fn find_runtime_lib() -> Result<String, String> {
         }
     }
 
-    // Search for libclorus_runtime.a in common build locations
+    // Try CLORUS_HOME/lib (installed layout)
+    if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
+        let lib_dir = std::path::Path::new(&clorus_home).join("lib");
+        let candidates = [
+            lib_dir.join("libclorus_runtime.a"),
+            lib_dir.join("libclorus_runtime.dylib"),
+            lib_dir.join("libclorus_runtime.rlib"),
+        ];
+        for path in candidates {
+            if path.exists() {
+                return Ok(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Search for libclorus_runtime.* in common build locations
     let search_paths = vec![
+        "target/release/deps/libclorus_runtime.a",
         "target/release/libclorus_runtime.a",
+        "target/debug/deps/libclorus_runtime.a",
         "target/debug/libclorus_runtime.a",
+        "../target/release/deps/libclorus_runtime.a",
         "../target/release/libclorus_runtime.a",
+        "../target/debug/deps/libclorus_runtime.a",
         "../target/debug/libclorus_runtime.a",
+        "../../target/release/deps/libclorus_runtime.a",
         "../../target/release/libclorus_runtime.a",
+        "../../target/debug/deps/libclorus_runtime.a",
         "../../target/debug/libclorus_runtime.a",
+        "../../../target/release/deps/libclorus_runtime.a",
         "../../../target/release/libclorus_runtime.a",
+        "../../../target/debug/deps/libclorus_runtime.a",
         "../../../target/debug/libclorus_runtime.a",
+        "target/release/deps/libclorus_runtime.dylib",
+        "target/release/libclorus_runtime.dylib",
+        "target/debug/deps/libclorus_runtime.dylib",
+        "target/debug/libclorus_runtime.dylib",
+        "../target/release/deps/libclorus_runtime.dylib",
+        "../target/release/libclorus_runtime.dylib",
+        "../target/debug/deps/libclorus_runtime.dylib",
+        "../target/debug/libclorus_runtime.dylib",
+        "../../target/release/deps/libclorus_runtime.dylib",
+        "../../target/release/libclorus_runtime.dylib",
+        "../../target/debug/deps/libclorus_runtime.dylib",
+        "../../target/debug/libclorus_runtime.dylib",
     ];
 
     for path in search_paths {
+        if debug {
+            eprintln!("   [DEBUG] Checking {}", path);
+        }
         if std::path::Path::new(path).exists() {
+            if debug {
+                eprintln!("   [DEBUG] Found runtime: {}", path);
+            }
             return Ok(path.to_string());
         }
     }

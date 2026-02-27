@@ -200,6 +200,9 @@ impl PersistentVector {
                 // Need new root level
                 let new_root = VectorNode::new();
                 (*new_root).children[0] = vec_ref.root as *mut u8;
+                if !vec_ref.root.is_null() {
+                    (*vec_ref.root).refcount.fetch_add(1, Ordering::Relaxed);
+                }
                 (*new_root).children[1] = Self::tail_to_node(vec_ref.tail);
                 new_root
             } else {
@@ -274,6 +277,16 @@ impl PersistentVector {
                 (*new_node).children[subidx] = new_child as *mut u8;
                 new_node
             } else {
+                // Retain shared children (excluding the branch we overwrite)
+                for i in 0..BRANCHING_FACTOR {
+                    if i == subidx {
+                        continue;
+                    }
+                    let child = (*new_node).children[i] as *mut VectorNode;
+                    if !child.is_null() {
+                        (*child).refcount.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
                 // Clone existing node and recurse into child
                 let child = (*node).children[subidx] as *mut VectorNode;
                 let new_child = Self::push_tail(child, level - SHIFT_INCREMENT, count, tail);
@@ -434,6 +447,16 @@ impl PersistentVector {
         if level == SHIFT_INCREMENT {
             // Leaf level - update value
             (*new_node).children[child_index] = value as *mut u8;
+            // Retain other values since we're sharing them from the old node
+            for i in 0..BRANCHING_FACTOR {
+                if i == child_index {
+                    continue;
+                }
+                let child_val = (*new_node).children[i] as *mut Value;
+                if !child_val.is_null() {
+                    (*child_val).header().retain();
+                }
+            }
         } else {
             // Internal level - recurse
             let child = (*node).children[child_index] as *mut VectorNode;
@@ -486,6 +509,13 @@ unsafe fn release_node(node: *mut VectorNode, level: u8) {
 
 pub(crate) unsafe fn release_vector(vec: *mut PersistentVector) {
     if vec.is_null() {
+        return;
+    }
+
+    if std::env::var("CLORUS_SAFE_VECTOR").is_ok() {
+        // Temporary safety valve: avoid freeing shared nodes/values to prevent corruption.
+        // This intentionally leaks vector internals but keeps the process stable.
+        drop(Box::from_raw(vec));
         return;
     }
 

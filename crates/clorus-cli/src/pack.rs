@@ -95,7 +95,22 @@ pub fn build_dylib_for_repl(package: &ClipPackage) -> Result<PathBuf, String> {
 
 /// Find runtime library for linking
 fn find_runtime_library() -> Result<String, String> {
-    // First, try relative to clorus executable (same directory)
+    // First, try CLORUS_HOME/lib (installed layout)
+    if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
+        let lib_dir = PathBuf::from(clorus_home).join("lib");
+        let candidates = [
+            lib_dir.join("libclorus_runtime.a"),
+            lib_dir.join("libclorus_runtime.dylib"),
+            lib_dir.join("libclorus_runtime.rlib"),
+        ];
+        for path in candidates {
+            if path.exists() {
+                return Ok(path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Next, try relative to clorus executable (same directory)
     if let Ok(exe_path) = std::env::current_exe() {
         // Resolve symlinks
         let exe_path = if let Ok(canonical) = exe_path.canonicalize() {
@@ -151,7 +166,7 @@ fn find_runtime_library() -> Result<String, String> {
         }
     }
 
-    Err("Runtime library not found. Run: cargo build -p clorus-runtime --release".to_string())
+    Err("Runtime library not found. Expected $CLORUS_HOME/lib/libclorus_runtime.*".to_string())
 }
 
 /// Extract and parse a .clip package to a temporary directory

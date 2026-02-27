@@ -14,6 +14,12 @@ Comprehensive testing, metrics, and visualization system for the Clorus programm
 ### Run All Tests
 ```bash
 ./tests/run_all_tests.sh
+
+To run **all** tests (Rust + Clorus + REPL):
+
+```bash
+./scripts/test/run-all.sh
+```
 ```
 
 ### Generate Metrics & Dashboard
@@ -150,6 +156,12 @@ Format:
 ## 🔧 Scripts Reference
 
 ### `tests/run_all_tests.sh`
+
+To run **all** tests (Rust + Clorus + REPL):
+
+```bash
+./scripts/test/run-all.sh
+```
 Simple test runner - runs all tests and reports pass/fail counts.
 
 **Usage:**

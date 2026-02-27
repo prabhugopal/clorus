@@ -1,6 +1,11 @@
 /// Integration test for Value* system
 use clorus::*;
-use clorus_runtime::value::{clorus_value_as_long, clorus_value_long, clorus_release, Value};
+use clorus_runtime::arithmetic::{clorus_add, clorus_gt, clorus_gte, clorus_lt, clorus_lte};
+use clorus_runtime::value::{
+    clorus_is_truthy, clorus_value_as_long, clorus_value_as_number, clorus_value_bool,
+    clorus_value_double, clorus_value_long, clorus_value_string, clorus_release, clorus_retain,
+    Value,
+};
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
 
@@ -10,6 +15,32 @@ fn ensure_runtime_symbols() {
     unsafe {
         let _test_val = clorus_value_long(42);
         clorus_release(_test_val);
+    }
+}
+
+fn map_runtime_symbols(engine: &inkwell::execution_engine::ExecutionEngine, codegen: &CodeGen) {
+    // Map required runtime functions for JIT (avoids unresolved symbol calls on macOS).
+    let module = codegen.get_module();
+    let mappings: &[(&str, usize)] = &[
+        ("clorus_value_long", clorus_value_long as usize),
+        ("clorus_value_double", clorus_value_double as usize),
+        ("clorus_value_string", clorus_value_string as usize),
+        ("clorus_value_bool", clorus_value_bool as usize),
+        ("clorus_value_as_number", clorus_value_as_number as usize),
+        ("clorus_retain", clorus_retain as usize),
+        ("clorus_release", clorus_release as usize),
+        ("clorus_add", clorus_add as usize),
+        ("clorus_lt", clorus_lt as usize),
+        ("clorus_lte", clorus_lte as usize),
+        ("clorus_gt", clorus_gt as usize),
+        ("clorus_gte", clorus_gte as usize),
+        ("clorus_is_truthy", clorus_is_truthy as usize),
+    ];
+
+    for (name, addr) in mappings {
+        if let Some(func) = module.get_function(name) {
+            unsafe { engine.add_global_mapping(&func, *addr); }
+        }
     }
 }
 
@@ -34,6 +65,7 @@ fn test_value_star_arithmetic() {
     let engine = codegen.get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
+    map_runtime_symbols(&engine, &codegen);
 
     unsafe {
         type TestFunc = unsafe extern "C" fn() -> *mut u8;
@@ -65,6 +97,7 @@ fn test_value_star_string_literal() {
     let engine = codegen.get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
+    map_runtime_symbols(&engine, &codegen);
 
     unsafe {
         type TestFunc = unsafe extern "C" fn() -> *mut u8;
@@ -90,6 +123,7 @@ fn test_value_star_let_binding() {
     let engine = codegen.get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
+    map_runtime_symbols(&engine, &codegen);
 
     unsafe {
         type TestFunc = unsafe extern "C" fn() -> *mut u8;
@@ -116,6 +150,7 @@ fn test_value_star_if_expression() {
     let engine = codegen.get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
+    map_runtime_symbols(&engine, &codegen);
 
     unsafe {
         type TestFunc = unsafe extern "C" fn() -> *mut u8;

@@ -5,8 +5,24 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::fmt;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+static RELEASE_SEQ: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone)]
+struct FreedInfo {
+    seq: u64,
+    tag: ValueTag,
+    ts_ms: u128,
+    backtrace: Option<String>,
+}
+
+static FREED_PTRS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
+static FREED_INFO: OnceLock<Mutex<HashMap<usize, FreedInfo>>> = OnceLock::new();
 
 /// Type tags for different kinds of values
 #[repr(u8)]
@@ -302,9 +318,86 @@ pub extern "C" fn clorus_release(val: *mut Value) {
         return;
     }
 
+    if std::env::var("CLORUS_SAFE_VALUE").is_ok() {
+        // Debug safety valve: skip all deallocation to avoid UAF/double-free crashes.
+        // This leaks memory but keeps the process alive for debugging.
+        return;
+    }
+
+    let debug_release = std::env::var("CLORUS_DEBUG_RELEASE").is_ok();
+    if debug_release {
+        let freed = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new()));
+        let freed_info = FREED_INFO.get_or_init(|| Mutex::new(HashMap::new()));
+        let ptr = val as usize;
+        if let Ok(mut set) = freed.lock() {
+            if set.contains(&ptr) {
+                let info = freed_info.lock().ok().and_then(|m| m.get(&ptr).cloned());
+                if let Some(info) = info {
+                    eprintln!(
+                        "[clorus] double free detected: {:p} (first free seq={} tag={:?} ts={}ms)",
+                        val, info.seq, info.tag, info.ts_ms
+                    );
+                    if let Some(bt) = info.backtrace {
+                        eprintln!("[clorus] first free backtrace:\n{}", bt);
+                    }
+                } else {
+                    eprintln!("[clorus] double free detected: {:p}", val);
+                }
+                return;
+            }
+        }
+
+        let seq = RELEASE_SEQ.fetch_add(1, Ordering::Relaxed);
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|d| d.as_millis()).unwrap_or(0);
+        // Read tag/refcount after double-free guard to avoid deref on freed memory.
+        let tag = unsafe { (*val).header.tag() };
+        let rc_before = unsafe { (*val).header.refcount() };
+        eprintln!(
+            "[clorus] release seq={} ts={} ptr={:p} tag={:?} rc_before={}",
+            seq, ts, val, tag, rc_before
+        );
+    }
+
     unsafe {
+        if (*val).header.tag() == ValueTag::Keyword {
+            // Keywords are interned and live for program lifetime.
+            return;
+        }
         if (*val).header.release() {
             // Last reference - deallocate
+            if debug_release {
+                let seq = RELEASE_SEQ.fetch_add(1, Ordering::Relaxed);
+                let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0);
+                let rc_after = (*val).header.refcount();
+                let tag = (*val).header.tag();
+                eprintln!(
+                    "[clorus] release -> deallocate ptr={:p} tag={:?} rc_after={}",
+                    val, tag, rc_after
+                );
+                let freed = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new()));
+                let freed_info = FREED_INFO.get_or_init(|| Mutex::new(HashMap::new()));
+                let bt = if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
+                    Some(std::backtrace::Backtrace::force_capture().to_string())
+                } else {
+                    None
+                };
+                if let Ok(mut set) = freed.lock() {
+                    set.insert(val as usize);
+                }
+                if let Ok(mut info_map) = freed_info.lock() {
+                    let info = FreedInfo {
+                        seq,
+                        tag,
+                        ts_ms: ts,
+                        backtrace: bt,
+                    };
+                    info_map.insert(val as usize, info);
+                }
+            }
             deallocate_value(val);
         }
     }
@@ -965,15 +1058,70 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                 (*left).as_ptr() == (*right).as_ptr()
             }
 
-            // For collections, atoms, and other complex types:
-            // Use pointer equality for now (same object)
-            // TODO: Implement deep equality for collections
-            ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet |
+            ValueTag::Vector => {
+                let left_ptr = (*left).as_ptr() as *mut crate::vector::PersistentVector;
+                let right_ptr = (*right).as_ptr() as *mut crate::vector::PersistentVector;
+                let left_count = (*left_ptr).count();
+                let right_count = (*right_ptr).count();
+                if left_count != right_count {
+                    return false;
+                }
+                for i in 0..left_count {
+                    let left_elem = crate::vector::PersistentVector::nth(left_ptr, i);
+                    let right_elem = crate::vector::PersistentVector::nth(right_ptr, i);
+                    let eq = clorus_equals(left_elem, right_elem);
+                    if !left_elem.is_null() {
+                        crate::value::clorus_release(left_elem);
+                    }
+                    if !right_elem.is_null() {
+                        crate::value::clorus_release(right_elem);
+                    }
+                    if !eq {
+                        return false;
+                    }
+                }
+                true
+            }
+            ValueTag::List => {
+                let left_ptr = (*left).as_ptr() as *mut crate::list::PersistentList;
+                let right_ptr = (*right).as_ptr() as *mut crate::list::PersistentList;
+                crate::list::list_equals(left_ptr, right_ptr)
+            }
+            ValueTag::HashMap => {
+                let left_ptr = (*left).as_ptr() as *mut crate::map::ClorusHashMap;
+                let right_ptr = (*right).as_ptr() as *mut crate::map::ClorusHashMap;
+                if (*left_ptr).count() != (*right_ptr).count() {
+                    return false;
+                }
+                for (key, value) in (*left_ptr).entries_iter() {
+                    match (*right_ptr).get_entry(*key) {
+                        Some(other_val) => {
+                            if !clorus_equals(*value, other_val) {
+                                return false;
+                            }
+                        }
+                        None => return false,
+                    }
+                }
+                true
+            }
+            ValueTag::HashSet => {
+                let left_ptr = (*left).as_ptr() as *mut crate::set::ClorusHashSet;
+                let right_ptr = (*right).as_ptr() as *mut crate::set::ClorusHashSet;
+                if (*left_ptr).count() != (*right_ptr).count() {
+                    return false;
+                }
+                for value in (*left_ptr).values().iter() {
+                    if !(*right_ptr).contains(*value) {
+                        return false;
+                    }
+                }
+                true
+            }
+
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer => {
-                (*left).as_ptr() == (*right).as_ptr()
-            }
+            ValueTag::OpaquePointer => (*left).as_ptr() == (*right).as_ptr(),
         }
     }
 }
@@ -1128,5 +1276,73 @@ mod tests {
 
         // Final release (will deallocate)
         clorus_release(val);
+    }
+
+    #[test]
+    fn test_vector_structural_equals_and_hash() {
+        unsafe {
+            let vec1 = crate::vector::clorus_vector_empty();
+            let vec2 = crate::vector::clorus_vector_empty();
+
+            let v1 = Value::long(1);
+            let v2 = Value::long(2);
+
+            let vec1 = crate::vector::clorus_vector_conj(vec1, v1);
+            let vec1 = crate::vector::clorus_vector_conj(vec1, v2);
+
+            let v1b = Value::long(1);
+            let v2b = Value::long(2);
+
+            let vec2 = crate::vector::clorus_vector_conj(vec2, v1b);
+            let vec2 = crate::vector::clorus_vector_conj(vec2, v2b);
+
+            assert!(clorus_equals(vec1, vec2));
+            assert_eq!(crate::hash::clorus_hash(vec1), crate::hash::clorus_hash(vec2));
+
+            clorus_release(vec1);
+            clorus_release(vec2);
+            clorus_release(v1);
+            clorus_release(v2);
+            clorus_release(v1b);
+            clorus_release(v2b);
+        }
+    }
+
+    #[test]
+    fn test_map_structural_equals_and_hash() {
+        unsafe {
+            let map1 = crate::map::clorus_map_empty();
+            let map2 = crate::map::clorus_map_empty();
+
+            let k1 = Value::string("a");
+            let v1 = Value::long(1);
+            let k2 = Value::string("b");
+            let v2 = Value::long(2);
+
+            let map1 = crate::map::clorus_map_assoc(map1, k1, v1);
+            let map1 = crate::map::clorus_map_assoc(map1, k2, v2);
+
+            let k1b = Value::string("a");
+            let v1b = Value::long(1);
+            let k2b = Value::string("b");
+            let v2b = Value::long(2);
+
+            let map2 = crate::map::clorus_map_assoc(map2, k1b, v1b);
+            let map2 = crate::map::clorus_map_assoc(map2, k2b, v2b);
+
+            assert!(clorus_equals(map1, map2));
+            assert_eq!(crate::hash::clorus_hash(map1), crate::hash::clorus_hash(map2));
+
+            clorus_release(map1);
+            clorus_release(map2);
+            clorus_release(k1);
+            clorus_release(v1);
+            clorus_release(k2);
+            clorus_release(v2);
+            clorus_release(k1b);
+            clorus_release(v1b);
+            clorus_release(k2b);
+            clorus_release(v2b);
+        }
     }
 }

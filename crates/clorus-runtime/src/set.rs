@@ -3,22 +3,20 @@
 /// persistent hash set in future for full immutability
 
 use crate::value::Value;
-use std::collections::HashSet as StdHashSet;
-use std::hash::{Hash, Hasher};
-use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap as StdHashMap;
 
 /// Simple wrapper for Clorus hash sets
 /// TODO: Replace with persistent hash set for immutability
 pub struct ClorusHashSet {
-    entries: StdHashSet<u64>,
-    // Store actual values separately for proper reference counting
+    entries: StdHashMap<u64, Vec<*mut Value>>,
+    // Store actual values separately for iteration/reference counting
     values: Vec<*mut Value>,
 }
 
 impl ClorusHashSet {
     pub fn empty() -> *mut Self {
         Box::into_raw(Box::new(ClorusHashSet {
-            entries: StdHashSet::new(),
+            entries: StdHashMap::new(),
             values: Vec::new(),
         }))
     }
@@ -29,24 +27,38 @@ impl ClorusHashSet {
         let hash = hash_value(val);
 
         // Only add if not already present
-        if self.entries.insert(hash) {
-            // Retain the value
+        if let Some(bucket) = self.entries.get_mut(&hash) {
+            for existing in bucket.iter() {
+                if crate::value::clorus_equals(*existing, val) {
+                    return;
+                }
+            }
             crate::value::clorus_retain(val);
+            bucket.push(val);
             self.values.push(val);
+            return;
         }
+
+        crate::value::clorus_retain(val);
+        self.entries.insert(hash, vec![val]);
+        self.values.push(val);
     }
 
     /// Remove a value from the set
     pub unsafe fn disj(&mut self, val: *mut Value) {
         let hash = hash_value(val);
 
-        if self.entries.remove(&hash) {
-            // Find and remove the value, then release it
-            if let Some(index) = self.values.iter().position(|&v| {
-                hash_value(v) == hash
-            }) {
-                let old_val = self.values.remove(index);
-                crate::value::clorus_release(old_val);
+        if let Some(bucket) = self.entries.get_mut(&hash) {
+            if let Some(pos) = bucket.iter().position(|&v| crate::value::clorus_equals(v, val)) {
+                let removed = bucket.remove(pos);
+                if bucket.is_empty() {
+                    self.entries.remove(&hash);
+                }
+
+                if let Some(index) = self.values.iter().position(|&v| crate::value::clorus_equals(v, removed)) {
+                    let old_val = self.values.remove(index);
+                    crate::value::clorus_release(old_val);
+                }
             }
         }
     }
@@ -54,11 +66,18 @@ impl ClorusHashSet {
     /// Check if a value is in the set
     pub fn contains(&self, val: *mut Value) -> bool {
         let hash = hash_value(val);
-        self.entries.contains(&hash)
+        if let Some(bucket) = self.entries.get(&hash) {
+            for existing in bucket.iter() {
+                if crate::value::clorus_equals(*existing, val) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn count(&self) -> u64 {
-        self.entries.len() as u64
+        self.values.len() as u64
     }
 
     /// Get all values in the set (for iteration)
@@ -70,43 +89,7 @@ impl ClorusHashSet {
 /// Hash a Value pointer for set lookups
 /// Reuses logic from map.rs
 fn hash_value(val: *mut Value) -> u64 {
-    if val.is_null() {
-        return 0;
-    }
-
-    unsafe {
-        match (*val).header().tag() {
-            crate::value::ValueTag::Long => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_long().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::Double => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_double().to_bits().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::String => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_string().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::Keyword => {
-                let mut hasher = DefaultHasher::new();
-                (*val).as_keyword().hash(&mut hasher);
-                hasher.finish()
-            }
-            crate::value::ValueTag::Bool => {
-                if (*val).as_bool() { 1 } else { 0 }
-            }
-            crate::value::ValueTag::Nil => 0,
-            _ => {
-                // For complex types, use pointer address as hash
-                // This is temporary - proper structural hashing in future
-                val as u64
-            }
-        }
-    }
+    crate::hash::clorus_hash(val)
 }
 
 /// Release a hash set and all its contents

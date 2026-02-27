@@ -355,6 +355,9 @@ pub struct Build {
     /// Multiple source directories (like deps.edn src = ["src" "resources"])
     #[serde(default)]
     pub src: Vec<String>,
+    /// Whether to auto-load stdlib (core.clr + transducers.clr) during compile
+    #[serde(default = "default_true")]
+    pub stdlib: bool,
 }
 
 impl Default for Build {
@@ -362,8 +365,13 @@ impl Default for Build {
         Build {
             entry: None,  // Applications: use entry, Libraries: use src/lib.clrs
             src: Vec::new(),
+            stdlib: true,
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Manifest {

@@ -364,72 +364,74 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
-    // Load and parse stdlib/core.clr first (provides inc, dec, range, for, doseq, etc.)
-    let stdlib_path = Path::new("stdlib/core.clr");
+    // Load and parse stdlib/core.clr and stdlib/transducers.clr (optional)
     let mut all_exprs = Vec::new();
+    if manifest.build.stdlib {
+        let stdlib_path = Path::new("stdlib/core.clr");
+        if stdlib_path.exists() {
+            let stdlib_source = fs::read_to_string(stdlib_path)
+                .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
 
-    if stdlib_path.exists() {
-        let stdlib_source = fs::read_to_string(stdlib_path)
-            .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+            let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
+                .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
 
-        let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
-            .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+            if debug {
+                println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
+            }
+            all_exprs.extend(stdlib_exprs);
+        } else {
+            // Try relative to compiler location
+            let compiler_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
 
-        if debug {
-            println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
-        }
-        all_exprs.extend(stdlib_exprs);
-    } else {
-        // Try relative to compiler location
-        let compiler_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
+            if let Some(compiler_dir) = compiler_dir {
+                let alt_stdlib = compiler_dir.join("stdlib/core.clr");
+                if alt_stdlib.exists() {
+                    let stdlib_source = fs::read_to_string(&alt_stdlib)
+                        .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
 
-        if let Some(compiler_dir) = compiler_dir {
-            let alt_stdlib = compiler_dir.join("stdlib/core.clr");
-            if alt_stdlib.exists() {
-                let stdlib_source = fs::read_to_string(&alt_stdlib)
-                    .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+                    let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
+                        .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
 
-                let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
-                    .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
-
-                all_exprs.extend(stdlib_exprs);
+                    all_exprs.extend(stdlib_exprs);
+                }
             }
         }
-    }
 
-    // Load and parse stdlib/transducers.clr (provides transducer support)
-    let transducers_path = Path::new("stdlib/transducers.clr");
-    if transducers_path.exists() {
-        let transducers_source = fs::read_to_string(transducers_path)
-            .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+        let transducers_path = Path::new("stdlib/transducers.clr");
+        if transducers_path.exists() {
+            let transducers_source = fs::read_to_string(transducers_path)
+                .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
 
-        let transducers_exprs = clorus::parse_and_expand(&transducers_source)
-            .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+            let transducers_exprs = clorus::parse_and_expand(&transducers_source)
+                .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
 
-        if debug {
-            println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
-        }
-        all_exprs.extend(transducers_exprs);
-    } else {
-        // Try relative to compiler location
-        let compiler_dir = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
+            if debug {
+                println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+            }
+            all_exprs.extend(transducers_exprs);
+        } else {
+            // Try relative to compiler location
+            let compiler_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
 
-        if let Some(compiler_dir) = compiler_dir {
-            let alt_transducers = compiler_dir.join("stdlib/transducers.clr");
-            if alt_transducers.exists() {
-                let transducers_source = fs::read_to_string(&alt_transducers)
-                    .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+            if let Some(compiler_dir) = compiler_dir {
+                let alt_transducers = compiler_dir.join("stdlib/transducers.clr");
+                if alt_transducers.exists() {
+                    let transducers_source = fs::read_to_string(&alt_transducers)
+                        .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
 
-                let transducers_exprs = clorus::parse_and_expand(&transducers_source)
-                    .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+                    let transducers_exprs = clorus::parse_and_expand(&transducers_source)
+                        .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
 
-                all_exprs.extend(transducers_exprs);
+                    all_exprs.extend(transducers_exprs);
+                }
             }
         }
+    } else if debug {
+        println!("   [DEBUG] Stdlib loading disabled (build.stdlib = false)");
     }
 
     // Load and parse the user's entry file with module resolution
@@ -795,27 +797,44 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     // Link the object file into an executable
     let exe_path = target_dir.join(&manifest.package.name);
 
-    // Find runtime library - search in current dir and workspace root
+    // Find runtime library - prefer CLORUS_HOME/lib, then fall back to local build paths
     let mut runtime_lib: Option<String> = None;
 
+    if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
+        let lib_dir = Path::new(&clorus_home).join("lib");
+        let candidates = [
+            lib_dir.join("libclorus_runtime.a"),
+            lib_dir.join("libclorus_runtime.dylib"),
+            lib_dir.join("libclorus_runtime.rlib"),
+        ];
+        for path in candidates {
+            if path.exists() {
+                runtime_lib = Some(path.to_string_lossy().to_string());
+                break;
+            }
+        }
+    }
+
     // Try current directory first (including deps directories where Cargo places libraries)
-    for path in &[
-        "target/release/deps/libclorus_runtime.a",
-        "target/release/libclorus_runtime.a",
-        "target/debug/deps/libclorus_runtime.a",
-        "target/debug/libclorus_runtime.a",
-        "../target/release/deps/libclorus_runtime.a",
-        "../target/release/libclorus_runtime.a",
-        "../target/debug/deps/libclorus_runtime.a",
-        "../target/debug/libclorus_runtime.a",
-        "../../target/release/deps/libclorus_runtime.a",
-        "../../target/release/libclorus_runtime.a",
-        "../../target/debug/deps/libclorus_runtime.a",
-        "../../target/debug/libclorus_runtime.a",
-    ] {
-        if Path::new(path).exists() {
-            runtime_lib = Some(path.to_string());
-            break;
+    if runtime_lib.is_none() {
+        for path in &[
+            "target/release/deps/libclorus_runtime.a",
+            "target/release/libclorus_runtime.a",
+            "target/debug/deps/libclorus_runtime.a",
+            "target/debug/libclorus_runtime.a",
+            "../target/release/deps/libclorus_runtime.a",
+            "../target/release/libclorus_runtime.a",
+            "../target/debug/deps/libclorus_runtime.a",
+            "../target/debug/libclorus_runtime.a",
+            "../../target/release/deps/libclorus_runtime.a",
+            "../../target/release/libclorus_runtime.a",
+            "../../target/debug/deps/libclorus_runtime.a",
+            "../../target/debug/libclorus_runtime.a",
+        ] {
+            if Path::new(path).exists() {
+                runtime_lib = Some(path.to_string());
+                break;
+            }
         }
     }
 
@@ -886,17 +905,12 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
 
     let runtime_lib = runtime_lib.ok_or_else(|| {
         "Runtime library not found.\n\
-        Searched for libclorus_runtime.a in:\n\
-        - target/release/\n\
-        - target/debug/\n\
-        - ../target/release/\n\
-        - ../target/debug/\n\
-        - ../../target/release/\n\
-        - ../../target/debug/\n\
+        Expected location: $CLORUS_HOME/lib/libclorus_runtime.*\n\
         \n\
         To fix this:\n\
         1. Build the runtime: cargo build -p clorus-runtime --release\n\
-        2. Or copy libclorus_runtime.a to your project's target directory".to_string()
+        2. Install it: scripts/install/install.sh (sets CLORUS_HOME)\n\
+        3. Or set CLORUS_HOME to your Clorus install directory".to_string()
     })?;
 
     // Find example-rust-lib library (optional - only needed if using rust.example)
@@ -1236,40 +1250,42 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
-    // Load and parse stdlib/core.clr first (provides inc, dec, range, for, doseq, etc.)
-    let stdlib_path = Path::new("stdlib/core.clr");
+    // Load and parse stdlib/core.clr + stdlib/transducers.clr (optional)
     let mut all_exprs = Vec::new();
+    if manifest.build.stdlib {
+        let stdlib_path = Path::new("stdlib/core.clr");
+        if stdlib_path.exists() {
+            let stdlib_source = fs::read_to_string(stdlib_path)
+                .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
 
-    if stdlib_path.exists() {
-        let stdlib_source = fs::read_to_string(stdlib_path)
-            .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+            let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
+                .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
 
-        let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
-            .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
-
-        if debug {
-            println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
+            if debug {
+                println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
+            }
+            all_exprs.extend(stdlib_exprs);
+        } else if debug {
+            println!("   [DEBUG] stdlib/core.clr not found, stdlib functions unavailable");
         }
-        all_exprs.extend(stdlib_exprs);
-    } else if debug {
-        println!("   [DEBUG] stdlib/core.clr not found, stdlib functions unavailable");
-    }
 
-    // Load and parse stdlib/transducers.clr (provides transducer support)
-    let transducers_path = Path::new("stdlib/transducers.clr");
-    if transducers_path.exists() {
-        let transducers_source = fs::read_to_string(transducers_path)
-            .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+        let transducers_path = Path::new("stdlib/transducers.clr");
+        if transducers_path.exists() {
+            let transducers_source = fs::read_to_string(transducers_path)
+                .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
 
-        let transducers_exprs = clorus::parse_and_expand(&transducers_source)
-            .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+            let transducers_exprs = clorus::parse_and_expand(&transducers_source)
+                .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
 
-        if debug {
-            println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+            if debug {
+                println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+            }
+            all_exprs.extend(transducers_exprs);
+        } else if debug {
+            println!("   [DEBUG] stdlib/transducers.clr not found, transducers unavailable");
         }
-        all_exprs.extend(transducers_exprs);
     } else if debug {
-        println!("   [DEBUG] stdlib/transducers.clr not found, transducers unavailable");
+        println!("   [DEBUG] Stdlib loading disabled (build.stdlib = false)");
     }
 
     // Load entry file
@@ -1492,34 +1508,26 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     // Compile stdlib expressions FIRST so they're available to modules
     // We need to track how many stdlib expressions there are so modules can use them
-    let mut stdlib_expr_count = if stdlib_path.exists() {
-        if let Ok(stdlib_source) = fs::read_to_string(stdlib_path) {
-            if let Ok(stdlib_exprs) = clorus::parse_and_expand(&stdlib_source) {
-                stdlib_exprs.len()
-            } else {
-                0
+    let mut stdlib_expr_count = 0usize;
+    if manifest.build.stdlib {
+        let stdlib_path = Path::new("stdlib/core.clr");
+        if stdlib_path.exists() {
+            if let Ok(stdlib_source) = fs::read_to_string(stdlib_path) {
+                if let Ok(stdlib_exprs) = clorus::parse_and_expand(&stdlib_source) {
+                    stdlib_expr_count += stdlib_exprs.len();
+                }
             }
-        } else {
-            0
         }
-    } else {
-        0
-    };
 
-    // Add transducers expressions to count
-    stdlib_expr_count += if transducers_path.exists() {
-        if let Ok(transducers_source) = fs::read_to_string(transducers_path) {
-            if let Ok(transducers_exprs) = clorus::parse_and_expand(&transducers_source) {
-                transducers_exprs.len()
-            } else {
-                0
+        let transducers_path = Path::new("stdlib/transducers.clr");
+        if transducers_path.exists() {
+            if let Ok(transducers_source) = fs::read_to_string(transducers_path) {
+                if let Ok(transducers_exprs) = clorus::parse_and_expand(&transducers_source) {
+                    stdlib_expr_count += transducers_exprs.len();
+                }
             }
-        } else {
-            0
         }
-    } else {
-        0
-    };
+    }
 
     if debug {
         println!("   [DEBUG] Compiling {} stdlib expressions before modules", stdlib_expr_count);

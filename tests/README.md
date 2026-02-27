@@ -10,9 +10,11 @@
 ## Running Tests
 
 ```bash
-# Run all tests
-cd ..
-./scripts/test/run_all_tests.sh
+# Run all Clorus language tests
+./tests/run_all_tests.sh
+
+# Run all tests (Rust + Clorus + REPL)
+./scripts/test/run-all.sh
 
 # Run specific test
 clorus build tests/language/test-vectors.clr

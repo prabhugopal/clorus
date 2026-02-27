@@ -188,6 +188,12 @@ These are separate because they're **meta-tests** - they test the testing infras
 ### Run All Tests
 ```bash
 ./tests/run_all_tests.sh
+
+To run **all** tests (Rust + Clorus + REPL):
+
+```bash
+./scripts/test/run-all.sh
+```
 ```
 
 Output:
