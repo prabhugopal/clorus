@@ -12,6 +12,7 @@ pub extern "C" fn clorus_map_dissoc(map_val: *mut Value, key: *mut Value) -> *mu
 
     unsafe {
         if (*map_val).header().tag() != ValueTag::HashMap {
+            (*map_val).header().retain();
             return map_val;
         }
 
@@ -152,12 +153,18 @@ pub extern "C" fn clorus_map_assoc_in(
     value: *mut Value
 ) -> *mut Value {
     if keys.is_null() {
+        unsafe {
+            if !map_val.is_null() {
+                (*map_val).header().retain();
+            }
+        }
         return map_val;
     }
 
     unsafe {
         // Keys should be a vector
         if (*keys).header().tag() != ValueTag::Vector {
+            (*map_val).header().retain();
             return map_val;
         }
 
@@ -165,6 +172,7 @@ pub extern "C" fn clorus_map_assoc_in(
         let count = (*vec_ptr).count();
 
         if count == 0 {
+            (*map_val).header().retain();
             return map_val;
         }
 
@@ -206,6 +214,11 @@ pub extern "C" fn clorus_map_update(
     func: *mut Value
 ) -> *mut Value {
     if map_val.is_null() || func.is_null() {
+        unsafe {
+            if !map_val.is_null() {
+                (*map_val).header().retain();
+            }
+        }
         return map_val;
     }
 
@@ -215,5 +228,10 @@ pub extern "C" fn clorus_map_update(
     // This will be implemented when we have function calling in runtime
     // For now, just return the map unchanged
     // TODO: Implement clorus_call_function in runtime
+    unsafe {
+        if !map_val.is_null() {
+            (*map_val).header().retain();
+        }
+    }
     map_val
 }

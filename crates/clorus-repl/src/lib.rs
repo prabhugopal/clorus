@@ -377,23 +377,27 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
 
     let mut _core_lib: Option<libloading::Library> = None;
     if let Some(core_path) = core_stdlib_path.as_ref() {
-        let enable_stdlib = std::env::var("CLORUS_REPL_LOAD_STDLIB")
+        let enable_jit_stdlib = std::env::var("CLORUS_REPL_LOAD_STDLIB")
             .ok()
             .map(|v| v != "0")
             .unwrap_or(false);
-        let enable_core_lib = std::env::var("CLORUS_REPL_USE_CORE_LIB")
+        let disable_core_lib = std::env::var("CLORUS_REPL_NO_CORE_LIB")
             .ok()
             .map(|v| v != "0")
             .unwrap_or(false);
 
-        if enable_core_lib {
+        // Default path: load clorus-core dylib + register stdlib symbols only (no JIT stdlib).
+        if !disable_core_lib {
             match load_core_library() {
                 Ok(lib) => {
                     _core_lib = Some(lib);
                     match std::fs::read_to_string(core_path) {
                         Ok(source) => match repl_engine.load_stdlib_symbols_only(source) {
                             Ok(count) => {
-                                println!("✓ Loaded clorus.core symbols ({} functions) via clorus-core dylib", count);
+                                println!(
+                                    "✓ Loaded clorus.core symbols ({} functions) via clorus-core dylib",
+                                    count
+                                );
                                 core_loaded = true;
                             }
                             Err(e) => {
@@ -409,28 +413,28 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                     eprintln!("⚠ Failed to load clorus-core dylib: {}", e);
                 }
             }
-        } else if enable_stdlib {
+        }
+
+        // Optional fallback: JIT-compile stdlib (legacy path).
+        if !core_loaded && enable_jit_stdlib {
             match std::fs::read_to_string(core_path) {
-                Ok(source) => {
-                    // Use new batch loader - compiles stdlib ONCE, never recompiled
-                    match repl_engine.load_stdlib_batch(source) {
-                        Ok(count) => {
-                            println!("✓ Loaded clorus.core ({} functions)", count);
-                            core_loaded = true;
-                        }
-                        Err(e) => {
-                            eprintln!("⚠ Error loading stdlib: {}", e);
-                        }
+                Ok(source) => match repl_engine.load_stdlib_batch(source) {
+                    Ok(count) => {
+                        println!("✓ Loaded clorus.core ({} functions) via JIT stdlib", count);
+                        core_loaded = true;
                     }
-                }
+                    Err(e) => {
+                        eprintln!("⚠ Error loading stdlib via JIT: {}", e);
+                    }
+                },
                 Err(e) => {
                     eprintln!("⚠ Could not read stdlib: {}", e);
                 }
             }
-        } else {
-            // Default: keep stdlib disabled in REPL due to historical JIT issues.
-            println!("⚠ clorus.core auto-loading disabled in REPL (set CLORUS_REPL_USE_CORE_LIB=1 or CLORUS_REPL_LOAD_STDLIB=1)");
-            core_loaded = false;
+        }
+
+        if !core_loaded {
+            println!("⚠ clorus.core not loaded (set CLORUS_REPL_NO_CORE_LIB=1 to skip dylib, or CLORUS_REPL_LOAD_STDLIB=1 to JIT)");
         }
     }
 

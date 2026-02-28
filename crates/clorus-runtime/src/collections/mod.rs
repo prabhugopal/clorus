@@ -122,12 +122,13 @@ pub extern "C" fn clorus_first(coll: *mut Value) -> *mut Value {
                 if (*vec_ptr).is_empty() {
                     Value::nil()
                 } else {
+                    // nth retains the element before returning
                     PersistentVector::nth(vec_ptr, 0)
                 }
             }
             ValueTag::List => {
-                let list_ptr = (*coll).as_ptr() as *mut PersistentList;
-                (*list_ptr).first()
+                // Use list helper which retains before returning
+                crate::list::clorus_list_first(coll)
             }
             _ => Value::nil(),
         }
@@ -313,6 +314,9 @@ pub extern "C" fn clorus_drop(coll: *mut Value, n: i64) -> *mut Value {
     }
 
     if n <= 0 {
+        unsafe {
+            (*coll).header().retain();
+        }
         return coll;
     }
 

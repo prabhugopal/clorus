@@ -67,7 +67,7 @@ pub struct ReplEngine<'ctx> {
     module_exprs: Vec<(String, HashMap<String, String>, Expr)>,
     /// Track executed init forms for later reference
     /// Stores parsed expressions that have been successfully compiled and executed
-    executed_init_exprs: Vec<Expr>,
+    executed_init_exprs: Vec<(String, Expr)>,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -499,12 +499,26 @@ impl<'ctx> ReplEngine<'ctx> {
         }
 
         // Evaluate it
-        let result = self.eval_internal(input, false)?;
+        let result = self.eval_internal(input, false, true)?;
 
-        // After successful execution, store the parsed expression
-        // so future forms can reference its symbols
-        if let Some(first_expr) = exprs.first() {
-            self.executed_init_exprs.push(first_expr.clone());
+        // After successful execution, store all parsed expressions
+        // so future forms can reference their symbols. Track namespace changes
+        // within the form to ensure correct re-compilation context.
+        let mut current_ns = self.namespace.current.clone();
+        for expr in &exprs {
+            let expanded = expand_macros(expr);
+
+            if let Expr::Ns { name, .. } = &expanded {
+                current_ns = name.clone();
+                continue;
+            }
+
+            self.executed_init_exprs
+                .push((current_ns.clone(), expr.clone()));
+
+            if let Expr::Def { name, .. } | Expr::Defn { name, .. } = &expanded {
+                self.register_symbol(&current_ns, name);
+            }
         }
 
         Ok(result)
@@ -520,10 +534,10 @@ impl<'ctx> ReplEngine<'ctx> {
 
     /// Evaluate an expression and add it to history (for interactive REPL)
     pub fn eval(&mut self, input: &str) -> Result<EvalResult, String> {
-        self.eval_internal(input, true)
+        self.eval_internal(input, true, true)
     }
 
-    fn eval_internal(&mut self, input: &str, add_to_history: bool) -> Result<EvalResult, String> {
+    fn eval_internal(&mut self, input: &str, add_to_history: bool, execute_init_defs: bool) -> Result<EvalResult, String> {
         // Parse the new input to validate it FIRST (before adding to history)
         let exprs = parse(input)?;
         if exprs.is_empty() {
@@ -532,7 +546,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // During project loading (add_to_history=false), skip re-executing init forms
         // They've already been executed once, we only need to recompile for symbol resolution
-        let skip_init_execution = !add_to_history;
+        let skip_init_execution = !execute_init_defs;
 
         // Determine the kind of expression for output formatting (use first expression)
         let eval_kind = match &exprs[0] {
@@ -722,17 +736,30 @@ impl<'ctx> ReplEngine<'ctx> {
         };
         codegen.set_namespace(user_codegen_ns.clone());
 
+        // Collect init wrappers to execute in the fresh JIT module
+        let mut init_fn_names: Vec<String> = Vec::new();
+        // Collect def/defn wrappers to execute (from init forms + history)
+        let mut def_fn_names: Vec<String> = Vec::new();
+
         // Compile executed init forms (from project loading)
         // These are forms that have already been executed once
         // We recompile them (without re-executing) so their symbols are available
         if repl_debug_enabled() {
             eprintln!("DEBUG eval_internal: Compiling {} executed init forms", self.executed_init_exprs.len());
         }
-        for (init_idx, init_expr) in self.executed_init_exprs.iter().enumerate() {
+        for (init_idx, (init_ns, init_expr)) in self.executed_init_exprs.iter().enumerate() {
+            // Compile each executed init expression in its original namespace
+            let exec_codegen_ns = clorus_codegen::NamespaceContext {
+                current: init_ns.clone(),
+                aliases: self.namespace.aliases.clone(),
+                imports: HashMap::new(),
+            };
+            codegen.set_namespace(exec_codegen_ns);
+
             let expanded = expand_macros(init_expr);
 
-            // Skip namespace declarations
-            if matches!(expanded, Expr::Ns { .. }) {
+            // Skip namespace declarations and compile-time directives
+            if matches!(expanded, Expr::Ns { .. } | Expr::Require { .. } | Expr::Use { .. }) {
                 continue;
             }
 
@@ -748,6 +775,11 @@ impl<'ctx> ReplEngine<'ctx> {
             // This ensures proper builder positioning
             let fn_name = format!("executed_init_{}", init_idx);
             codegen.wrap_in_function(&expanded, &fn_name)?;
+
+            // Re-execute init forms in the fresh JIT module (in order)
+            if !skip_init_execution {
+                init_fn_names.push(fn_name);
+            }
         }
 
         // Loaded modules are already registered in the CodeGen above.
@@ -758,7 +790,6 @@ impl<'ctx> ReplEngine<'ctx> {
         // 2. History forms (interactive) - compile always, execute def/defn always
         // 3. Current expression - compile and execute
         let mut latest_fn_name = String::new();
-        let mut def_fn_names = Vec::new();
 
         // Compile init forms (project files)
         // Note: def/defn MUST execute every time to initialize globals in the new JIT
@@ -945,6 +976,28 @@ impl<'ctx> ReplEngine<'ctx> {
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
             .map_err(|e| format!("JIT error: {}", e))?;
+
+        if repl_debug_enabled() {
+            eprintln!("DEBUG eval_internal: Executing {} init statements...", init_fn_names.len());
+        }
+
+        // Execute init statements to reconstruct program state in the fresh JIT module
+        for (idx, fn_name) in init_fn_names.iter().enumerate() {
+            if repl_debug_enabled() {
+                eprintln!("DEBUG eval_internal: Executing init {} of {}: {}...", idx + 1, init_fn_names.len(), fn_name);
+            }
+            unsafe {
+                type EvalFunc = unsafe extern "C" fn() -> *mut u8;
+                match engine.get_function::<EvalFunc>(fn_name) {
+                    Ok(jit_fn) => {
+                        jit_fn.call();
+                    }
+                    Err(e) => {
+                        return Err(format!("Failed to execute {}: {:?}", fn_name, e));
+                    }
+                }
+            }
+        }
 
         if repl_debug_enabled() {
             eprintln!("DEBUG eval_internal: Executing {} def/defn statements...", def_fn_names.len());

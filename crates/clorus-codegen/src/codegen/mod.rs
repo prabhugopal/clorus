@@ -2115,7 +2115,16 @@ impl<'ctx> CodeGen<'ctx> {
                         *ptr,
                         name
                     ).unwrap();
-                    Ok(val.into_pointer_value())
+                    let val_ptr = val.into_pointer_value();
+                    // Retain on symbol read so the caller owns the value.
+                    let retain_fn = self.module.get_function("clorus_retain")
+                        .ok_or("clorus_retain not declared")?;
+                    self.builder.build_call(
+                        retain_fn,
+                        &[val_ptr.into()],
+                        "retain_symbol_local"
+                    ).unwrap();
+                    Ok(val_ptr)
                 } else if let Some(global) = self.globals.get(&resolved_name) {
                     // Load Value* from global variable (namespace-mangled)
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
@@ -2124,7 +2133,16 @@ impl<'ctx> CodeGen<'ctx> {
                         global.as_pointer_value(),
                         &resolved_name
                     ).unwrap();
-                    Ok(val.into_pointer_value())
+                    let val_ptr = val.into_pointer_value();
+                    // Retain on symbol read so the caller owns the value.
+                    let retain_fn = self.module.get_function("clorus_retain")
+                        .ok_or("clorus_retain not declared")?;
+                    self.builder.build_call(
+                        retain_fn,
+                        &[val_ptr.into()],
+                        "retain_symbol_global"
+                    ).unwrap();
+                    Ok(val_ptr)
                 } else {
                     // Try to find function - check both unmangled and mangled names
                     // Also handle qualified names (namespace/function or alias/function)
@@ -2698,6 +2716,46 @@ impl<'ctx> CodeGen<'ctx> {
                     self.globals.insert(mangled_name.clone(), global);
                     global
                 };
+
+                // Release old value if present
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let old_val = self.builder.build_load(
+                    value_ptr_type,
+                    global.as_pointer_value(),
+                    "old_def_val"
+                ).unwrap().into_pointer_value();
+                let null_ptr = value_ptr_type.const_null();
+                let is_null = self.builder.build_int_compare(
+                    inkwell::IntPredicate::EQ,
+                    old_val,
+                    null_ptr,
+                    "old_def_is_null"
+                ).unwrap();
+                let release_fn = self.module.get_function("clorus_release")
+                    .ok_or("clorus_release not declared")?;
+                let current_fn = self.builder.get_insert_block()
+                    .and_then(|b| b.get_parent())
+                    .ok_or("No current function for def")?;
+                let release_block = self.context.append_basic_block(current_fn, "def_release_old");
+                let cont_block = self.context.append_basic_block(current_fn, "def_store_new");
+                self.builder.build_conditional_branch(is_null, cont_block, release_block).unwrap();
+                self.builder.position_at_end(release_block);
+                self.builder.build_call(
+                    release_fn,
+                    &[old_val.into()],
+                    "release_old_def"
+                ).unwrap();
+                self.builder.build_unconditional_branch(cont_block).unwrap();
+                self.builder.position_at_end(cont_block);
+
+                // Retain new value for global ownership
+                let retain_fn = self.module.get_function("clorus_retain")
+                    .ok_or("clorus_retain not declared")?;
+                self.builder.build_call(
+                    retain_fn,
+                    &[val.into()],
+                    "retain_def_val"
+                ).unwrap();
 
                 // Store the Value* to the global
                 self.builder.build_store(global.as_pointer_value(), val).unwrap();

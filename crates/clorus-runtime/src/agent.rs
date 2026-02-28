@@ -450,11 +450,17 @@ pub extern "C" fn clorus_send(
     args: *mut Value,
 ) -> *mut Value {
     if agent_val.is_null() || func.is_null() {
+        unsafe {
+            if !agent_val.is_null() {
+                (*agent_val).header().retain();
+            }
+        }
         return agent_val;
     }
 
     unsafe {
         if (*agent_val).header().tag() != ValueTag::Agent {
+            (*agent_val).header().retain();
             return agent_val;
         }
 

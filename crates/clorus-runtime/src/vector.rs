@@ -18,6 +18,8 @@
 use crate::value::{Value, ValueTag};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::ptr::null_mut;
+use std::sync::{Mutex, OnceLock};
+use std::collections::HashSet;
 
 /// Branching factor (32 = 2^5)
 const BRANCHING_FACTOR: usize = 32;
@@ -406,21 +408,24 @@ impl PersistentVector {
         // Clone path and update
         let new_root = Self::do_assoc(vec_ref.root, vec_ref.shift, index, value);
 
-        // Create new vector sharing tail
+        // Create new vector with a cloned tail to avoid sharing the tail array
         let new_vec = Box::new(PersistentVector {
             refcount: AtomicU64::new(1),
             count: vec_ref.count,
             shift: vec_ref.shift,
             root: new_root,
-            tail: vec_ref.tail,
+            tail: null_mut(),
             tail_len: vec_ref.tail_len,
         });
         let new_vec_ptr = Box::into_raw(new_vec);
 
-        // Retain tail elements
+        // Clone tail elements
         if !vec_ref.tail.is_null() {
+            let new_tail = Box::into_raw(Box::new([null_mut(); BRANCHING_FACTOR]));
+            (*new_vec_ptr).tail = new_tail;
             for i in 0..vec_ref.tail_len as usize {
                 let elem = (*vec_ref.tail)[i];
+                (*new_tail)[i] = elem;
                 if !elem.is_null() {
                     (*elem).header().retain();
                 }
@@ -512,6 +517,22 @@ pub(crate) unsafe fn release_vector(vec: *mut PersistentVector) {
         return;
     }
 
+    if std::env::var("CLORUS_DEBUG_VECTOR_RELEASE").is_ok() {
+        static FREED_VECS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
+        let freed = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new()));
+        let ptr = vec as usize;
+        if let Ok(mut set) = freed.lock() {
+            if set.contains(&ptr) {
+                eprintln!("[clorus] double free detected (vector ptr={:p})", vec);
+                if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
+                    let bt_now = std::backtrace::Backtrace::force_capture().to_string();
+                    eprintln!("[clorus] vector double free current backtrace:\n{}", bt_now);
+                }
+                return;
+            }
+        }
+    }
+
     if std::env::var("CLORUS_SAFE_VECTOR").is_ok() {
         // Temporary safety valve: avoid freeing shared nodes/values to prevent corruption.
         // This intentionally leaks vector internals but keeps the process stable.
@@ -520,6 +541,13 @@ pub(crate) unsafe fn release_vector(vec: *mut PersistentVector) {
     }
 
     if (*vec).refcount.fetch_sub(1, Ordering::Relaxed) == 1 {
+        if std::env::var("CLORUS_DEBUG_VECTOR_RELEASE").is_ok() {
+            static FREED_VECS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
+            if let Ok(mut set) = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+                set.insert(vec as usize);
+            }
+        }
+
         // Release root
         if !(*vec).root.is_null() {
             release_node((*vec).root, (*vec).shift);
