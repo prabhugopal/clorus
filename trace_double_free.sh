@@ -16,7 +16,7 @@ run_clorus() {
 }
 
 set +e
-run_clorus 2>&1 | tee "$LOG"
+CLORUS_DEBUG_RELEASE=1 CLORUS_GUARD_RELEASE=1 run_clorus 2>&1 | tee "$LOG"
 RUN_RC=${PIPESTATUS[0]}
 set -e
 if [ "$RUN_RC" -ne 0 ]; then
@@ -27,6 +27,13 @@ PTR=$(rg -n "double free detected" "$LOG" | head -n 1 | rg -o "0x[0-9a-fA-F]+" |
 
 if [ -z "$PTR" ]; then
   echo "no double free detected in first run" >&2
+  if [ "$RUN_RC" -ne 0 ]; then
+    LATEST_CRASH=$(ls -t "$HOME"/Library/Logs/DiagnosticReports/clorus-*.ips 2>/dev/null | head -n 1 || true)
+    if [ -n "$LATEST_CRASH" ]; then
+      echo "latest crash report: $LATEST_CRASH" >&2
+      rg -n "nanov2_guard_corruption_detected|malloc_zone_error|clorus_vector_empty|clorus_release|faultingThread|signal" "$LATEST_CRASH" | head -n 20 >&2 || true
+    fi
+  fi
   exit 2
 fi
 

@@ -43,56 +43,57 @@
 (def counter-component
   {:state (atom 0)
    :render (fn [state] (str "Count: " @state))
-   :on-inc #(swap! (:state counter-component) + 1)})
+   :on-inc (fn [state] (reset! state (+ @state 1)))})
 
 (defn -main []
-  (println "===========================================")
-  (println " Testing Functions as Values in Clorus")
-  (println "===========================================")
-  (println "")
+  (do
+    (println "===========================================")
+    (println " Testing Functions as Values in Clorus")
+    (println "===========================================")
+    (println "")
 
-  (println "Test 1: Function in map - PASS")
-  (let [click-fn (:on-click widget-1)]
-    (click-fn))
+    (println "Test 1: Function in map - PASS")
+    (let [click-fn (:on-click widget-1)]
+      (click-fn))
 
-  (println "")
-  (println "Test 2: Shorthand functions in map - PASS")
-  (let [inc-fn (:increment widget-2)]
-    (println "  Increment 5:" (inc-fn 5)))
+    (println "")
+    (println "Test 2: Shorthand functions in map - PASS")
+    (let [inc-fn (:increment widget-2)]
+      (println "  Increment 5:" (inc-fn 5)))
 
-  (println "")
-  (println "Test 3: Functions in vector - PASS")
-  (let [first-handler (first handlers)]
-    (print "  ")
-    (first-handler))
+    (println "")
+    (println "Test 3: Functions in vector - PASS")
+    (let [first-handler (first handlers)]
+      (print "  ")
+      (first-handler))
 
-  (println "")
-  (println "Test 4: Nested structures - PASS")
-  (let [click-handler (get-in component [:handlers :click])]
-    (print "  ")
-    (click-handler))
+    (println "")
+    (println "Test 4: Nested structures - PASS")
+    (let [click-handler (get-in component [:handlers :click])]
+      (print "  ")
+      (click-handler))
 
-  (println "")
-  (println "Test 5: Closure in map - PASS")
-  (let [handler (:on-click widget-3)]
-    (print "  ")
-    (handler))
+    (println "")
+    (println "Test 5: Closure in map - PASS")
+    (let [handler (:on-click widget-3)]
+      (print "  ")
+      (handler))
 
-  (println "")
-  (println "Test 6: Call function from map - PASS")
-  (println "  Result:" (test-call-from-map))
+    (println "")
+    (println "Test 6: Call function from map - PASS")
+    (println "  Result:" (test-call-from-map))
 
-  (println "")
-  (println "Test 7: Reagent-style component - PASS")
-  (let [render-fn (:render counter-component)
-        state-atom (:state counter-component)
-        inc-fn (:on-inc counter-component)]
-    (println "  Initial:" (render-fn state-atom))
-    (inc-fn)
-    (println "  After inc:" (render-fn state-atom)))
+    (println "")
+    (println "Test 7: Reagent-style component - PASS")
+    (let [render-fn (:render counter-component)
+          state-atom (:state counter-component)
+          inc-fn (:on-inc counter-component)]
+      (println "  Initial:" (render-fn state-atom))
+      (inc-fn state-atom)
+      (println "  After inc:" (render-fn state-atom)))
 
-  (println "")
-  (println "===========================================")
-  (println " ALL TESTS PASSED!")
-  (println " Functions as values WORK in Clorus!")
-  (println "==========================================="))
+    (println "")
+    (println "===========================================")
+    (println " ALL TESTS PASSED!")
+    (println " Functions as values WORK in Clorus!")
+    (println "===========================================")))

@@ -1,0 +1,136 @@
+;; Minimal Reproduction of Clorus Codegen Bug
+;; Bug: FFI calls inside let bindings corrupt pointers on Apple Silicon
+;;
+;; To test:
+;;   1. clorus build this file
+;;   2. Run the executable
+;;   3. Observe: test-1 works, test-2 crashes with SIGBUS
+
+(ns codegen-bug-repro
+  (:rust [coral-gfx :as gfx]))
+
+;; ============================================================================
+;; TEST 1: FFI calls OUTSIDE let binding (WORKS)
+;; ============================================================================
+
+(defn test-works [window]
+  (do
+    (println "TEST 1: FFI outside let (should work)")
+    ;; FFI calls before let
+    (gfx/begin-frame window)
+    (gfx/clear-color window 0x2C3E50)
+
+    ;; Pure Clorus computation in let
+    (let [x 100.0
+          y 100.0
+          color 0xFF0000]
+      (println "  - Computed x=" x " y=" y " color=" color))
+
+    ;; FFI calls after let
+    (gfx/draw-rect window 50.0 50.0 100.0 100.0 0xFF0000)
+    (gfx/end-frame window)
+    (println "  - SUCCESS: Test 1 completed without crash")))
+
+;; ============================================================================
+;; TEST 2: FFI calls INSIDE let binding (CRASHES)
+;; ============================================================================
+
+(defn test-crashes [window]
+  (do
+    (println "TEST 2: FFI inside let (will crash)")
+    (let [x 100.0
+          y 100.0
+          color 0xFF0000]
+      ;; FFI calls inside let - CRASHES HERE
+      ;; Window pointer gets corrupted due to codegen bug
+      (gfx/begin-frame window)      ;; CRASH: Pointer authentication failure
+      (gfx/clear-color window 0x2C3E50)
+      (gfx/draw-rect window x y 100.0 100.0 color)
+      (gfx/end-frame window))
+    (println "  - This line never prints (crashes before reaching here)")))
+
+;; ============================================================================
+;; TEST 3: Nested let with FFI (ALSO CRASHES)
+;; ============================================================================
+
+(defn test-nested-crash [window]
+  (do
+    (println "TEST 3: Nested let with FFI (will crash)")
+    ;; Outer let with just constants
+    (let [width 800.0
+          height 600.0]
+      ;; Inner let with FFI calls - CRASHES
+      (let [x 50.0
+            y 50.0]
+        (gfx/begin-frame window)    ;; CRASH: Window pointer corrupted
+        (gfx/draw-rect window x y 100.0 100.0 0x00FF00)
+        (gfx/end-frame window)))
+    (println "  - This line never prints")))
+
+;; ============================================================================
+;; TEST 4: Let with FFI call mixed with pure code (CRASHES)
+;; ============================================================================
+
+(defn test-mixed-crash [window]
+  (do
+    (println "TEST 4: Mixed FFI and pure code in let (will crash)")
+    (let [ctx {:window window}      ;; Create map
+          x 100.0
+          y 100.0]
+      ;; Mix of pure Clorus and FFI
+      (println "  - Created ctx=" ctx)
+      (gfx/begin-frame window)      ;; CRASH: Even with pure code before FFI
+      (gfx/draw-rect window x y 50.0 50.0 0x0000FF)
+      (gfx/end-frame window))
+    (println "  - This line never prints")))
+
+;; ============================================================================
+;; Main: Run tests sequentially
+;; ============================================================================
+
+(defn -main []
+  (do
+    (println "")
+    (println "============================================")
+    (println "Clorus Codegen Bug Minimal Reproduction")
+    (println "============================================")
+    (println "")
+    (println "Creating window...")
+    (let [window (gfx/create-window "Codegen Bug Repro" 800.0 600.0)]
+      (println "Window created: " window)
+      (println "")
+
+      ;; Test 1: Works
+      (test-works window)
+      (println "")
+
+      ;; Test 2: Crashes
+      ;; Uncomment to test:
+      ;; (test-crashes window)
+
+      ;; If you uncomment test-crashes, the program will crash
+      ;; and never reach the cleanup code below
+
+      (println "Cleaning up...")
+      (gfx/destroy-window window)
+      (println "")
+      (println "============================================")
+      (println "All tests completed successfully!")
+      (println "============================================"))
+    0))
+
+;; Expected behavior:
+;;   - Test 1 completes successfully
+;;   - Test 2 crashes with SIGBUS (pointer authentication failure)
+;;   - Tests 3 and 4 also crash if uncommented
+;;
+;; Root cause:
+;;   The Clorus compiler generates incorrect LLVM IR when FFI calls
+;;   occur inside let bindings. The window pointer is corrupted during
+;;   the transition from Clorus calling convention to C FFI convention.
+;;
+;; Fix location:
+;;   Likely in crates/clorus-codegen/src/codegen.rs
+;;   - Either in FFI call emission
+;;   - Or in let binding code generation
+;;   - Or in register allocation around FFI boundaries

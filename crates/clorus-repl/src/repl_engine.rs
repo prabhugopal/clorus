@@ -487,41 +487,56 @@ impl<'ctx> ReplEngine<'ctx> {
 
     /// Evaluate a project initialization form (stores separately, executes once)
     pub fn eval_init(&mut self, input: &str) -> Result<EvalResult, String> {
-        // During project loading, DON'T accumulate init_forms
-        // This prevents O(n²) recompilation and avoids the hang
-        // Instead, track executed forms as parsed expressions
-        // and compile them (without re-executing) for subsequent forms
-
-        // Parse the form first
+        // Parse and register project forms without executing runtime code.
+        // We replay definitions in eval_internal when building the fresh JIT module.
         let exprs = parse(input)?;
         if exprs.is_empty() {
             return Err("No expression to evaluate".to_string());
         }
 
-        // Evaluate it
-        let result = self.eval_internal(input, false, true)?;
-
-        // After successful execution, store all parsed expressions
-        // so future forms can reference their symbols. Track namespace changes
-        // within the form to ensure correct re-compilation context.
         let mut current_ns = self.namespace.current.clone();
-        for expr in &exprs {
-            let expanded = expand_macros(expr);
+        for expr in exprs {
+            let expanded = expand_macros(&expr);
 
-            if let Expr::Ns { name, .. } = &expanded {
-                current_ns = name.clone();
-                continue;
-            }
+            match &expanded {
+                Expr::Ns { name, requires, rust_imports } => {
+                    self.set_namespace(name);
+                    current_ns = name.clone();
 
-            self.executed_init_exprs
-                .push((current_ns.clone(), expr.clone()));
+                    for req_spec in requires {
+                        let module_exprs = self.load_module_recursive(&req_spec.module)?;
+                        self.module_exprs.extend(module_exprs);
+                        self.process_require(req_spec);
+                    }
 
-            if let Expr::Def { name, .. } | Expr::Defn { name, .. } = &expanded {
-                self.register_symbol(&current_ns, name);
+                    for rust_import in rust_imports {
+                        if let Some(alias) = &rust_import.alias {
+                            let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                            self.namespace.aliases.insert(alias.clone(), rust_module);
+                        }
+                    }
+                }
+                Expr::Require { specs } => {
+                    for spec in specs {
+                        let module_exprs = self.load_module_recursive(&spec.module)?;
+                        self.module_exprs.extend(module_exprs);
+                        self.process_require(spec);
+                    }
+                }
+                _ => {
+                    self.executed_init_exprs.push((current_ns.clone(), expr.clone()));
+
+                    if let Expr::Def { name, .. } | Expr::Defn { name, .. } = &expanded {
+                        self.register_symbol(&current_ns, name);
+                    }
+                }
             }
         }
 
-        Ok(result)
+        Ok(EvalResult {
+            value: std::ptr::null_mut(),
+            kind: EvalKind::Value,
+        })
     }
 
     /// Finalize project loading (no-op for now)
@@ -771,14 +786,20 @@ impl<'ctx> ReplEngine<'ctx> {
                 continue;
             }
 
-            // Wrap ALL expressions in functions (even def/defn)
-            // This ensures proper builder positioning
+            // Wrap all expressions in functions so symbol resolution works in the fresh module.
             let fn_name = format!("executed_init_{}", init_idx);
             codegen.wrap_in_function(&expanded, &fn_name)?;
 
-            // Re-execute init forms in the fresh JIT module (in order)
+            // Re-execute ONLY def/defn from executed init forms.
+            // Non-def top-level init expressions often perform global side effects
+            // (e.g. protocol registration) that live in Rust globals and should not
+            // be replayed on every interactive eval.
             if !skip_init_execution {
-                init_fn_names.push(fn_name);
+                let is_def_or_defn =
+                    matches!(expanded, Expr::Def { .. } | Expr::Defn { .. });
+                if is_def_or_defn {
+                    def_fn_names.push(fn_name);
+                }
             }
         }
 

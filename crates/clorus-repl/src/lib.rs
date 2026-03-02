@@ -33,7 +33,7 @@ static FORCE_LINK_ATOM_DEREF: unsafe extern "C" fn(*mut Value) -> *mut Value = c
 #[used]
 static FORCE_LINK_ATOM_RESET: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::atom::clorus_reset;
 #[used]
-static FORCE_LINK_ATOM_SWAP: unsafe extern "C" fn(*mut Value, *mut u8, *mut Value) -> *mut Value = clorus_runtime::atom::clorus_swap;
+static FORCE_LINK_ATOM_SWAP: unsafe extern "C" fn(*mut Value, *mut Value, *mut Value) -> *mut Value = clorus_runtime::atom::clorus_swap;
 
 #[used]
 static FORCE_LINK_AGENT: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::agent::clorus_agent;
@@ -1027,16 +1027,17 @@ fn load_std_library() -> Result<libloading::Library, String> {
         }
     }
 
-    // Try release build in current project
+    // Try local build in current project
     if lib_path.is_none() {
-        let release_path = Path::new("target/release").join(lib_name);
-        if release_path.exists() {
-            lib_path = Some(release_path);
-        } else {
-            // Try debug build
-            let debug_path = Path::new("target/debug").join(lib_name);
-            if debug_path.exists() {
-                lib_path = Some(debug_path);
+        #[cfg(debug_assertions)]
+        let local_candidates = [Path::new("target/debug").join(lib_name), Path::new("target/release").join(lib_name)];
+        #[cfg(not(debug_assertions))]
+        let local_candidates = [Path::new("target/release").join(lib_name), Path::new("target/debug").join(lib_name)];
+
+        for candidate in local_candidates {
+            if candidate.exists() {
+                lib_path = Some(candidate);
+                break;
             }
         }
     }
@@ -1048,15 +1049,18 @@ fn load_std_library() -> Result<libloading::Library, String> {
         // Go up directories to find workspace root
         let mut search_dir = current_dir.as_path();
         for _ in 0..5 {
-            let release_path = search_dir.join("target/release").join(lib_name);
-            if release_path.exists() {
-                lib_path = Some(release_path);
-                break;
-            }
+            #[cfg(debug_assertions)]
+            let search_candidates = [search_dir.join("target/debug").join(lib_name), search_dir.join("target/release").join(lib_name)];
+            #[cfg(not(debug_assertions))]
+            let search_candidates = [search_dir.join("target/release").join(lib_name), search_dir.join("target/debug").join(lib_name)];
 
-            let debug_path = search_dir.join("target/debug").join(lib_name);
-            if debug_path.exists() {
-                lib_path = Some(debug_path);
+            for candidate in search_candidates {
+                if candidate.exists() {
+                    lib_path = Some(candidate);
+                    break;
+                }
+            }
+            if lib_path.is_some() {
                 break;
             }
 
@@ -1953,6 +1957,7 @@ fn scan_directory_for_modules(
 fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, String> {
     use std::fs;
     use std::path::PathBuf;
+    const REPL_DYLIB_CACHE_VERSION: &str = "repl-link-v2-dynamic-lookup";
 
     // Determine cache directory (.repl/ in current directory)
     let cache_dir = PathBuf::from(".repl").join(&package.name);
@@ -1970,10 +1975,15 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
     let dylib_name = format!("{}.dll", package.name.replace('-', "_"));
 
     let dylib_path = cache_dir.join(&dylib_name);
+    let cache_version_path = cache_dir.join(".cache-version");
 
-    // Check if already cached
+    // Check if already cached with current linker strategy.
+    // If version changed, force rebuild to avoid stale dylibs linked with old runtime settings.
     if dylib_path.exists() {
-        return Ok(dylib_path);
+        let cache_version = fs::read_to_string(&cache_version_path).ok();
+        if cache_version.as_deref() == Some(REPL_DYLIB_CACHE_VERSION) {
+            return Ok(dylib_path);
+        }
     }
 
     // Get object file from package
@@ -1982,17 +1992,20 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
 
     println!("   Building {} for REPL...", package.name);
 
-    // Find runtime library
-    let runtime_lib = find_runtime_lib()?;
-
     // Link as dynamic library
     let mut link_cmd = std::process::Command::new("cc");
     link_cmd
         .arg("-shared")
         .arg(object_path)
-        .arg(runtime_lib)
         .arg("-o").arg(&dylib_path)
         .arg("-lc++");
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Non-macOS targets still require an explicit runtime library.
+        let runtime_lib = find_runtime_lib()?;
+        link_cmd.arg(runtime_lib);
+    }
 
     // Add Rust FFI libraries
     for rust_lib in &package.rust_ffi_libs {
@@ -2002,6 +2015,10 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
     #[cfg(target_os = "macos")]
     {
         link_cmd.arg("-dynamiclib");
+        // Important: do NOT statically link clorus runtime into REPL clip dylibs.
+        // We want unresolved clorus_* symbols to bind to the host clorus process
+        // so retain/release/value lifetimes use a single runtime instance.
+        link_cmd.arg("-Wl,-undefined,dynamic_lookup");
 
         // Ensure init function is not stripped by the linker
         // We export all symbols (default for dylib) but explicitly keep the init function
@@ -2024,6 +2041,9 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
     if !status.success() {
         return Err(format!("Failed to link dynamic library for {}", package.name));
     }
+
+    // Record cache strategy/version for future reuse.
+    let _ = fs::write(&cache_version_path, REPL_DYLIB_CACHE_VERSION);
 
     Ok(dylib_path)
 }

@@ -68,6 +68,11 @@ pub extern "C" fn clorus_is_keyword(val: *mut Value) -> bool {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn clorus_is_keyword_i32(val: *mut Value) -> i32 {
+    if clorus_is_keyword(val) { 1 } else { 0 }
+}
+
 /// Get the keyword name as a C string
 /// The returned string must be freed with clorus_free_cstring
 #[no_mangle]

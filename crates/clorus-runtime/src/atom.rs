@@ -53,14 +53,17 @@ impl ClorusAtom {
         new_val
     }
 
-    /// Update the atom by applying a function (swap!)
-    pub unsafe fn swap(&self, func_ptr: *mut u8, arg: *mut Value) -> *mut Value {
-        type SwapFn = extern "C" fn(*mut Value, *mut Value) -> *mut Value;
-        let func: SwapFn = std::mem::transmute(func_ptr);
-
+    /// Update the atom by applying a function value (swap!)
+    pub unsafe fn swap(&self, func_val: *mut Value, arg: *mut Value) -> *mut Value {
         loop {
             let current_val = self.current.load(Ordering::Acquire);
-            let new_val = func(current_val, arg);
+            let new_val = if arg.is_null() {
+                let call_args = [current_val];
+                crate::function::clorus_function_call(func_val, call_args.as_ptr(), 1)
+            } else {
+                let call_args = [current_val, arg];
+                crate::function::clorus_function_call(func_val, call_args.as_ptr(), 2)
+            };
 
             if self.compare_and_set(current_val, new_val) {
                 return new_val;
@@ -182,10 +185,10 @@ pub extern "C" fn clorus_reset(atom_val: *mut Value, new_val: *mut Value) -> *mu
 #[no_mangle]
 pub extern "C" fn clorus_swap(
     atom_val: *mut Value,
-    func_ptr: *mut u8,
+    func_val: *mut Value,
     arg: *mut Value
 ) -> *mut Value {
-    if atom_val.is_null() || func_ptr.is_null() {
+    if atom_val.is_null() || func_val.is_null() {
         return Value::nil();
     }
 
@@ -195,7 +198,7 @@ pub extern "C" fn clorus_swap(
         }
 
         let atom_ptr = (*atom_val).as_ptr() as *mut ClorusAtom;
-        (*atom_ptr).swap(func_ptr, arg)
+        (*atom_ptr).swap(func_val, arg)
     }
 }
 

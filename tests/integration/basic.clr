@@ -1,60 +1,17 @@
-(println "Hello")
-(def tests (atom []))
-(defn add-test [name fn]
-  (swap\! tests conj {:name name :fn fn}))
+;; Basic integration smoke test.
+;; Keep this test fast and deterministic across JIT and legacy engines.
 
-(add-test "test1" (fn [] {:pass true}))
-
-(println @tests)
-;; Test first 50 lines of core.clr
-(defn partial [f & args]
-  (fn [& more-args]
-    (apply f (concat args more-args))))
-
-(defn comp [& fns]
-  (if (empty? fns)
-    identity
-    (fn [x]
-      (reduce (fn [acc f] (f acc))
-              x
-              (reverse fns)))))
-
-(defn identity [x] x)
-
-(defn constantly [x]
-  (fn [& _args] x))
-;; Very simple I/O test
-
-;; Test 1: Simple string
-(println "Hello, World!")
-
-;; Test 2: Number
-(println 42)
-
-;; Test 3: Just confirm we get here
-(def result "Done")
-result
-;; Test I/O functions
-
-;; Test print (no newline)
-(print "Hello")
-(print " ")
-(print "World")
-(println "!")
-
-;; Test println with different types
-(println "String test")
-(println 42)
-(println 3.14)
-(println [1 2 3])
-(println {:a 1 :b 2})
-
-;; Test pr (readable form)
-(pr "string" 123 [1 2 3])
-(println "")
-
-;; Test prn (readable form with newline)
-(prn "string" 123 [1 2 3])
-
-;; Final result
-"I/O tests complete"
+(defn -main [& _args]
+  (let [sum (+ 2 3)
+        vec1 [1 2]
+        vec2 (conj vec1 3)
+        m {:a 1 :b 2}
+        ok (and (= sum 5)
+                (= (count vec2) 3)
+                (= (nth vec2 2) 3)
+                (= (:a m) 1))]
+    (if ok
+      (do
+        (println "basic integration test: PASS")
+        "PASS")
+      (throw "basic integration test: FAIL"))))

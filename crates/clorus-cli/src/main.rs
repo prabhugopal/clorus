@@ -57,12 +57,19 @@ fn main() {
         "run" => {
             // Check for flags
             let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
-            let use_jit = args.iter().any(|arg| arg == "--jit");
+            // JIT is now the default execution path for `clorus run`.
+            // `--legacy-run` forces the pre-JIT compile+execute path.
+            let use_jit = !args.iter().any(|arg| arg == "--legacy-run");
 
             // Collect arguments after "run" (excluding flags)
             let extra_args: Vec<String> = args[2..]
                 .iter()
-                .filter(|arg| *arg != "--debug" && *arg != "-d" && *arg != "--jit")
+                .filter(|arg| {
+                    *arg != "--debug"
+                        && *arg != "-d"
+                        && *arg != "--jit"
+                        && *arg != "--legacy-run"
+                })
                 .map(|s| s.clone())
                 .collect();
 
@@ -154,8 +161,8 @@ fn print_help() {
     println!("    new <name>    Create a new Clorus project");
     println!("    build         Compile the current project");
     println!("                    --workspace  Build all workspace members");
-    println!("    run           Compile and run the current project (like cargo run)");
-    println!("                    --jit       Use JIT mode (faster, but no .clip support)");
+    println!("    run           Run the current project (JIT by default)");
+    println!("                    --legacy-run  Use legacy compile+run path");
     println!("    check         Check syntax without building");
     println!("    clean         Remove build artifacts");
     println!("                    --workspace  Clean all workspace members");
@@ -182,8 +189,8 @@ fn print_help() {
     println!();
     println!("EXAMPLES:");
     println!("    clorus new my-project       Create a new project");
-    println!("    clorus run                  Compile and run the project");
-    println!("    clorus run --jit            Run with JIT (faster, no .clip dependencies)");
+    println!("    clorus run                  Run with JIT (default)");
+    println!("    clorus run --legacy-run     Run with legacy compile+execute path");
     println!("    clorus run arg1 arg2        Run with arguments passed to -main");
     println!("    clorus run --debug          Run with memory tracking");
     println!("    clorus pack                 Package as a .clip library");

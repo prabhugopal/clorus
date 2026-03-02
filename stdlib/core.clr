@@ -124,7 +124,7 @@
 
 ;; nil? - Check if value is nil
 (defn nil? [x]
-  (= x nil))
+  (__clorus_is_nil x))
 
 ;; some? - Check if value is not nil
 (defn some? [x]
@@ -473,8 +473,11 @@
 
 ;; string? - Check if value is a string
 (defn string? [x]
-  ;; TODO: Needs runtime support for type checking
-  true)
+  (__clorus_is_string x))
+
+;; number? - Check if value is a number
+(defn number? [x]
+  (__clorus_is_number x))
 
 ;; char? - Check if value is a character
 (defn char? [x]
@@ -499,43 +502,47 @@
 
 ;; keyword? - Check if value is a keyword
 (defn keyword? [x]
-  ;; TODO: Needs runtime support for type checking
-  false)
+  (__clorus_is_keyword x))
 
 ;; symbol? - Check if value is a symbol
 (defn symbol? [x]
-  ;; TODO: Needs runtime support for type checking
-  false)
+  (__clorus_is_symbol x))
 
 ;; vector? - Check if value is a vector
 (defn vector? [x]
-  ;; TODO: Needs runtime support for type checking
-  true)
+  (__clorus_is_vector x))
+
+;; list? - Check if value is a list
+(defn list? [x]
+  (__clorus_is_list x))
 
 ;; map? - Check if value is a map
 (defn map? [x]
-  ;; TODO: Needs runtime support for type checking
-  false)
+  (__clorus_is_map x))
 
 ;; set? - Check if value is a set
 (defn set? [x]
-  ;; TODO: Needs runtime support for type checking
-  false)
+  (__clorus_is_set x))
 
 ;; seq? - Check if value is a sequence
 (defn seq? [x]
-  ;; TODO: Needs runtime support for type checking
-  false)
+  (__clorus_is_seq x))
 
 ;; coll? - Check if value is a collection
 (defn coll? [x]
-  ;; TODO: Needs runtime support for type checking
-  true)
+  (__clorus_is_coll x))
 
 ;; fn? - Check if value is a function
 (defn fn? [x]
-  ;; TODO: Needs runtime support for type checking
-  false)
+  (__clorus_is_fn x))
+
+;; boolean? - Check if value is boolean
+(defn boolean? [x]
+  (__clorus_is_bool x))
+
+;; bool? - Alias for boolean?
+(defn bool? [x]
+  (boolean? x))
 
 ;; ============================================================================
 ;; Export Notice

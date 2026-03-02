@@ -7,7 +7,7 @@
     ;; Test 1: Simple map transducer
     (println "Test 1: map transducer")
     (def xf1 (map (fn [x] (* x 2))))
-    (def result1 (transduce xf1 + 0 [1 2 3 4 5]))
+    (def result1 (transduce xf1 (fn [acc x] (+ acc x)) 0 [1 2 3 4 5]))
     (println "  (transduce (map * 2) + 0 [1 2 3 4 5]):" result1)
     (println "  Expected: 30, Got:" result1)
 
@@ -15,7 +15,7 @@
     (println "Test 2: composed map and filter")
     (def xf2 (comp (map (fn [x] (+ x 1)))
                    (filter (fn [x] (= (mod x 2) 0)))))
-    (def result2 (transduce xf2 + 0 [1 2 3 4]))
+    (def result2 (transduce xf2 (fn [acc x] (+ acc x)) 0 [1 2 3 4]))
     (println "  Result:" result2)
     (println "  Expected: 6, Got:" result2)
 
@@ -27,7 +27,7 @@
     ;; Test 4: take transducer (early termination)
     (println "Test 4: take with early termination")
     (def xf4 (take 3))
-    (def result4 (transduce xf4 conj [] [1 2 3 4 5 6 7 8 9 10]))
+    (def result4 (transduce xf4 (fn [acc x] (conj acc x)) [] [1 2 3 4 5 6 7 8 9 10]))
     (println "  Result:" result4)
 
     (println "All tests completed!")))

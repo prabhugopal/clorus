@@ -6,6 +6,6 @@
    :fn (fn [] 42)})
 
 (defn -main []
-  (println "Testing functions in data structures...")
-  (println "Test 1: Defined simple-map successfully")
-  )
+  (do
+    (println "Testing functions in data structures...")
+    (println "Test 1: Defined simple-map successfully")))

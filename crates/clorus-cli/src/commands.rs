@@ -307,37 +307,50 @@ pub fn build_lib() -> Result<(), String> {
     build_internal(true, false)
 }
 
+fn get_entry_override() -> Option<String> {
+    std::env::var("CLORUS_ENTRY_FILE")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
 fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
     // Determine entry point: explicit entry, src/lib.clrs, lib.clrs, src/lib.clr, lib.clr, or skip
-    let entry = match &manifest.build.entry {
-        Some(e) => {
-            // Check if explicitly specified entry is a library entry point
-            if e == "src/lib.clrs" || e == "lib.clrs" || e == "src/lib.clr" || e == "lib.clr" {
+    let entry = if let Some(override_entry) = get_entry_override() {
+        // Explicit test/runner override always targets an executable entry.
+        lib_mode = false;
+        override_entry
+    } else {
+        match &manifest.build.entry {
+            Some(e) => {
+                // Check if explicitly specified entry is a library entry point
+                if e == "src/lib.clrs" || e == "lib.clrs" || e == "src/lib.clr" || e == "lib.clr" {
+                    lib_mode = true;
+                }
+                e.clone()
+            },
+            None => {
+                // No explicit entry - check for library entry points
+                // When using implicit lib.clrs, this is a library package
                 lib_mode = true;
-            }
-            e.clone()
-        },
-        None => {
-            // No explicit entry - check for library entry points
-            // When using implicit lib.clrs, this is a library package
-            lib_mode = true;
 
-            if Path::new("src/lib.clrs").exists() {
-                "src/lib.clrs".to_string()
-            } else if Path::new("lib.clrs").exists() {
-                "lib.clrs".to_string()
-            } else if Path::new("src/lib.clr").exists() {
-                "src/lib.clr".to_string()
-            } else if Path::new("lib.clr").exists() {
-                "lib.clr".to_string()
-            } else {
-                // No entry and no lib file - this is a library with no code to compile
-                println!("   Skipping build for library package {} v{}",
-                    manifest.package.name, manifest.package.version);
-                println!("   (No entry point or src/lib.clrs found)");
-                return Ok(());
+                if Path::new("src/lib.clrs").exists() {
+                    "src/lib.clrs".to_string()
+                } else if Path::new("lib.clrs").exists() {
+                    "lib.clrs".to_string()
+                } else if Path::new("src/lib.clr").exists() {
+                    "src/lib.clr".to_string()
+                } else if Path::new("lib.clr").exists() {
+                    "lib.clr".to_string()
+                } else {
+                    // No entry and no lib file - this is a library with no code to compile
+                    println!("   Skipping build for library package {} v{}",
+                        manifest.package.name, manifest.package.version);
+                    println!("   (No entry point or src/lib.clrs found)");
+                    return Ok(());
+                }
             }
         }
     };
@@ -797,27 +810,28 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     // Link the object file into an executable
     let exe_path = target_dir.join(&manifest.package.name);
 
-    // Find runtime library - prefer CLORUS_HOME/lib, then fall back to local build paths
+    // Find runtime library.
+    // Prefer locally built runtime first to keep compiler/runtime symbols in sync
+    // during development and tests, then fall back to CLORUS_HOME installs.
     let mut runtime_lib: Option<String> = None;
 
-    if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
-        let lib_dir = Path::new(&clorus_home).join("lib");
-        let candidates = [
-            lib_dir.join("libclorus_runtime.a"),
-            lib_dir.join("libclorus_runtime.dylib"),
-            lib_dir.join("libclorus_runtime.rlib"),
-        ];
-        for path in candidates {
-            if path.exists() {
-                runtime_lib = Some(path.to_string_lossy().to_string());
-                break;
-            }
-        }
-    }
-
-    // Try current directory first (including deps directories where Cargo places libraries)
-    if runtime_lib.is_none() {
-        for path in &[
+    let local_candidates: Vec<&str> = if debug {
+        vec![
+            "target/debug/deps/libclorus_runtime.a",
+            "target/debug/libclorus_runtime.a",
+            "target/release/deps/libclorus_runtime.a",
+            "target/release/libclorus_runtime.a",
+            "../target/debug/deps/libclorus_runtime.a",
+            "../target/debug/libclorus_runtime.a",
+            "../target/release/deps/libclorus_runtime.a",
+            "../target/release/libclorus_runtime.a",
+            "../../target/debug/deps/libclorus_runtime.a",
+            "../../target/debug/libclorus_runtime.a",
+            "../../target/release/deps/libclorus_runtime.a",
+            "../../target/release/libclorus_runtime.a",
+        ]
+    } else {
+        vec![
             "target/release/deps/libclorus_runtime.a",
             "target/release/libclorus_runtime.a",
             "target/debug/deps/libclorus_runtime.a",
@@ -830,10 +844,29 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
             "../../target/release/libclorus_runtime.a",
             "../../target/debug/deps/libclorus_runtime.a",
             "../../target/debug/libclorus_runtime.a",
-        ] {
-            if Path::new(path).exists() {
-                runtime_lib = Some(path.to_string());
-                break;
+        ]
+    };
+    for path in local_candidates {
+        if Path::new(path).exists() {
+            runtime_lib = Some(path.to_string());
+            break;
+        }
+    }
+
+    // Installed runtime fallback via CLORUS_HOME
+    if runtime_lib.is_none() {
+        if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
+            let lib_dir = Path::new(&clorus_home).join("lib");
+            let candidates = [
+                lib_dir.join("libclorus_runtime.a"),
+                lib_dir.join("libclorus_runtime.dylib"),
+                lib_dir.join("libclorus_runtime.rlib"),
+            ];
+            for path in candidates {
+                if path.exists() {
+                    runtime_lib = Some(path.to_string_lossy().to_string());
+                    break;
+                }
             }
         }
     }
@@ -1099,6 +1132,22 @@ fn load_and_compile_modules<'ctx>(
                 let expected_ns_with_hyphens = module_name.replace('_', "-");
 
                 if name != expected_ns_with_underscores && name != &expected_ns_with_hyphens {
+                    eprintln!(
+                        "Warning: Namespace mismatch in {}:\n\n  \
+                         Expected: (ns {}) or (ns {})\n  \
+                         Found:    (ns {})\n\n  \
+                         Clorus follows Clojure conventions, but does not require namespace/path equality.",
+                        module_file.display(),
+                        expected_ns_with_hyphens,
+                        expected_ns_with_underscores,
+                        name
+                    );
+                    eprintln!(
+                        "  Hint: Rename namespace to {} for consistency.",
+                        expected_ns_with_hyphens
+                    );
+                }
+                /*
                     return Err(format!(
                         "Namespace mismatch in {}:\n\n  \
                          Expected: (ns {}) or (ns {})\n  \
@@ -1117,7 +1166,7 @@ fn load_and_compile_modules<'ctx>(
                         expected_ns_with_underscores,
                         name.replace('.', "/").replace('-', "_")
                     ));
-                }
+                */
 
                 let mut ns_ctx = NamespaceContext::default_namespace();
                 ns_ctx.current = name.clone();
@@ -1158,18 +1207,16 @@ fn load_and_compile_modules<'ctx>(
 
 pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), String> {
     if use_jit {
-        // Use JIT mode (faster but doesn't work with .clip dependencies)
+        // Default path: JIT execution.
         if debug {
-            println!("   Mode: JIT compilation (--jit flag)");
+            println!("   Mode: JIT execution (default)");
             println!();
         }
         run_jit_internal(debug, extra_args)
     } else {
-        // Default: compile + run (like cargo run)
-        // Works with .clip dependencies and all features
+        // Legacy fallback path: compile + run executable
         if debug {
-            println!("   Mode: Compile and run (like cargo run)");
-            println!("   Tip: Use --jit for faster iteration on small projects");
+            println!("   Mode: Legacy compile+run (--legacy-run)");
             println!();
         }
 
@@ -1198,17 +1245,20 @@ pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), St
     }
 }
 
-/// JIT compilation mode - fast but limited
-/// Doesn't work with .clip dependencies due to LLVM bitcode compatibility
+/// JIT execution mode used by `clorus run` default and REPL flows.
 fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
     // For run, we need an explicit entry point (not src/lib.clrs)
     // Libraries with src/lib.clrs shouldn't be run directly
-    let entry = match &manifest.build.entry {
-        Some(e) => e.clone(),
-        None => {
-            return Err("Cannot run library package (no entry point specified)\nLibraries use src/lib.clrs and cannot be run directly. Specify entry in Clorus.toml or create a test/example file.".to_string());
+    let entry = if let Some(override_entry) = get_entry_override() {
+        override_entry
+    } else {
+        match &manifest.build.entry {
+            Some(e) => e.clone(),
+            None => {
+                return Err("Cannot run library package (no entry point specified)\nLibraries use src/lib.clrs and cannot be run directly. Specify entry in Clorus.toml or create a test/example file.".to_string());
+            }
         }
     };
 
@@ -1626,6 +1676,24 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
             let expected_ns_with_hyphens = expected_ns_with_underscores.replace('_', "-");
 
             if name != &expected_ns_with_underscores && name != &expected_ns_with_hyphens {
+                eprintln!(
+                    "Warning: Namespace mismatch in {}:\n\n  \
+                     Expected: (ns {}) or (ns {})\n  \
+                     Found:    (ns {})\n\n  \
+                     Clorus follows Clojure conventions, but does not require namespace/path equality.",
+                    entry_path.display(),
+                    expected_ns_with_hyphens,
+                    expected_ns_with_underscores,
+                    name
+                );
+                if debug {
+                    eprintln!(
+                        "  Hint: Rename namespace to {} for consistency.",
+                        expected_ns_with_hyphens
+                    );
+                }
+            }
+            /*
                 return Err(format!(
                     "Namespace mismatch in {}:\n\n  \
                      Expected: (ns {}) or (ns {})\n  \
@@ -1644,7 +1712,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
                     expected_ns_with_underscores,
                     name.replace('.', "/").replace('-', "_")
                 ));
-            }
+            */
 
             let mut ns_ctx = NamespaceContext::default_namespace();
             ns_ctx.current = name.clone();
@@ -2160,15 +2228,15 @@ fn load_core_library() -> Result<libloading::Library, String> {
     // Try to find the library
     let mut lib_path = None;
 
-    // Try release build first
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
-    } else {
-        // Try debug build
-        let debug_path = Path::new("target/debug").join(lib_name);
-        if debug_path.exists() {
-            lib_path = Some(debug_path);
+    #[cfg(debug_assertions)]
+    let local_candidates = [Path::new("target/debug").join(lib_name), Path::new("target/release").join(lib_name)];
+    #[cfg(not(debug_assertions))]
+    let local_candidates = [Path::new("target/release").join(lib_name), Path::new("target/debug").join(lib_name)];
+
+    for candidate in local_candidates {
+        if candidate.exists() {
+            lib_path = Some(candidate);
+            break;
         }
     }
 
@@ -2179,15 +2247,18 @@ fn load_core_library() -> Result<libloading::Library, String> {
         // Go up directories to find workspace root
         let mut search_dir = current_dir.as_path();
         for _ in 0..5 {
-            let release_path = search_dir.join("target/release").join(lib_name);
-            if release_path.exists() {
-                lib_path = Some(release_path);
-                break;
-            }
+            #[cfg(debug_assertions)]
+            let search_candidates = [search_dir.join("target/debug").join(lib_name), search_dir.join("target/release").join(lib_name)];
+            #[cfg(not(debug_assertions))]
+            let search_candidates = [search_dir.join("target/release").join(lib_name), search_dir.join("target/debug").join(lib_name)];
 
-            let debug_path = search_dir.join("target/debug").join(lib_name);
-            if debug_path.exists() {
-                lib_path = Some(debug_path);
+            for candidate in search_candidates {
+                if candidate.exists() {
+                    lib_path = Some(candidate);
+                    break;
+                }
+            }
+            if lib_path.is_some() {
                 break;
             }
 

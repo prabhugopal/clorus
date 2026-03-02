@@ -25,6 +25,18 @@ use std::collections::HashSet;
 const BRANCHING_FACTOR: usize = 32;
 const SHIFT_INCREMENT: u8 = 5;
 
+static FREED_VECS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
+
+#[inline]
+fn mark_vector_alloc(ptr: *mut PersistentVector) {
+    if ptr.is_null() {
+        return;
+    }
+    if let Ok(mut set) = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+        set.remove(&(ptr as usize));
+    }
+}
+
 /// Vector node - internal node in the trie
 ///
 /// Each node has 32 slots. Can contain either:
@@ -105,7 +117,9 @@ impl PersistentVector {
             tail: null_mut(),
             tail_len: 0,
         });
-        Box::into_raw(vec)
+        let ptr = Box::into_raw(vec);
+        mark_vector_alloc(ptr);
+        ptr
     }
 
     /// Get element count
@@ -155,6 +169,7 @@ impl PersistentVector {
             tail_len: vec_ref.tail_len + 1,
         });
         let new_vec_ptr = Box::into_raw(new_vec);
+        mark_vector_alloc(new_vec_ptr);
 
         // Retain root
         if !vec_ref.root.is_null() {
@@ -234,7 +249,9 @@ impl PersistentVector {
             tail_len: 1,
         });
 
-        Box::into_raw(new_vec)
+        let new_vec_ptr = Box::into_raw(new_vec);
+        mark_vector_alloc(new_vec_ptr);
+        new_vec_ptr
     }
 
     /// Convert tail array to tree node
@@ -343,8 +360,8 @@ impl PersistentVector {
         let vec_ref = &*vec;
 
         if index >= vec_ref.count {
-            // Out of bounds - return nil
-            return Value::nil() as *mut Self;
+            // Out of bounds - caller decides fallback (typically nil at Value boundary).
+            return null_mut();
         }
 
         // Retain new value
@@ -376,6 +393,7 @@ impl PersistentVector {
             tail_len: vec_ref.tail_len,
         });
         let new_vec_ptr = Box::into_raw(new_vec);
+        mark_vector_alloc(new_vec_ptr);
 
         // Retain root
         if !vec_ref.root.is_null() {
@@ -418,6 +436,7 @@ impl PersistentVector {
             tail_len: vec_ref.tail_len,
         });
         let new_vec_ptr = Box::into_raw(new_vec);
+        mark_vector_alloc(new_vec_ptr);
 
         // Clone tail elements
         if !vec_ref.tail.is_null() {
@@ -489,6 +508,12 @@ unsafe fn release_node(node: *mut VectorNode, level: u8) {
         return;
     }
 
+    // Guard against duplicate release attempts on already-released nodes.
+    // This prevents refcount underflow and use-after-free cascades.
+    if (*node).refcount.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+
     if (*node).refcount.fetch_sub(1, Ordering::Relaxed) == 1 {
         // Last reference - recursively release children
         if level == SHIFT_INCREMENT {
@@ -517,19 +542,17 @@ pub(crate) unsafe fn release_vector(vec: *mut PersistentVector) {
         return;
     }
 
-    if std::env::var("CLORUS_DEBUG_VECTOR_RELEASE").is_ok() {
-        static FREED_VECS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
-        let freed = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new()));
-        let ptr = vec as usize;
-        if let Ok(mut set) = freed.lock() {
-            if set.contains(&ptr) {
+    let ptr = vec as usize;
+    if let Ok(set) = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+        if set.contains(&ptr) {
+            if std::env::var("CLORUS_DEBUG_VECTOR_RELEASE").is_ok() {
                 eprintln!("[clorus] double free detected (vector ptr={:p})", vec);
                 if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
                     let bt_now = std::backtrace::Backtrace::force_capture().to_string();
                     eprintln!("[clorus] vector double free current backtrace:\n{}", bt_now);
                 }
-                return;
             }
+            return;
         }
     }
 
@@ -540,12 +563,14 @@ pub(crate) unsafe fn release_vector(vec: *mut PersistentVector) {
         return;
     }
 
+    // Guard against duplicate release attempts on already-released vectors.
+    if (*vec).refcount.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+
     if (*vec).refcount.fetch_sub(1, Ordering::Relaxed) == 1 {
-        if std::env::var("CLORUS_DEBUG_VECTOR_RELEASE").is_ok() {
-            static FREED_VECS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
-            if let Ok(mut set) = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
-                set.insert(vec as usize);
-            }
+        if let Ok(mut set) = FREED_VECS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+            set.insert(vec as usize);
         }
 
         // Release root
@@ -615,6 +640,9 @@ pub extern "C" fn clorus_vector_assoc(
     unsafe {
         let vec_ptr = (*vec_val).as_ptr() as *mut PersistentVector;
         let new_vec = PersistentVector::assoc(vec_ptr, index, elem);
+        if new_vec.is_null() {
+            return Value::nil();
+        }
         Value::from_ptr(ValueTag::Vector, new_vec as *mut u8)
     }
 }
@@ -769,6 +797,27 @@ mod tests {
 
             release_vector(current);
             release_vector(vec2);
+        }
+    }
+
+    #[test]
+    fn test_assoc_out_of_bounds_returns_null_ptr() {
+        let vec = PersistentVector::empty();
+
+        unsafe {
+            let mut current = vec;
+            for i in 0..4 {
+                let val = Value::double(i as f64);
+                current = PersistentVector::conj(current, val);
+            }
+
+            let new_val = Value::double(99.0);
+            let vec2 = PersistentVector::assoc(current, 99, new_val);
+            assert!(vec2.is_null());
+
+            // assoc retains only on in-bounds path; release our test value.
+            crate::value::clorus_release(new_val);
+            release_vector(current);
         }
     }
 

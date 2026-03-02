@@ -107,7 +107,8 @@ cargo run --bin repl
 
 ```bash
 clorus new <name>        # Create new project
-clorus run               # Compile and run
+clorus run               # Compile and run (JIT engine by default)
+clorus run --legacy-run  # Compile and run with legacy non-JIT engine
 clorus check             # Check syntax
 clorus build             # Build to object file
 clorus repl              # Start project-aware REPL
@@ -115,6 +116,59 @@ clorus help              # Show help
 ```
 
 See `PACKAGE_TOOL.md` for complete documentation.
+
+## Execution Modes
+
+- `run` and `repl` use the JIT path by default.
+- Legacy engine is still available for parity and regression checks via `--legacy-run` in `run`.
+- Production packaging/build flows should use AOT artifacts (`clorus build` / `clorus pack`).
+- CI/regression should run both engines:
+
+```bash
+CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh
+```
+
+## Environment Variables
+
+This is the current complete list of `CLORUS_*` environment variables used by
+runtime code, REPL/CLI code, and first-party test/debug scripts.
+
+### Runtime + REPL/CLI
+
+| Variable | Default | Scope | Purpose |
+|---|---|---|---|
+| `CLORUS_HOME` | unset | CLI, REPL, REPLx, pack/build helpers | Installation root used to locate `lib/` and `stdlib/` (fallback is `~/.clorus/...` in several paths). |
+| `CLORUS_REPL_NO_CORE_LIB` | `0` (disabled) | REPL | If set to any value except `"0"`, skip loading `clorus-core` dylib. |
+| `CLORUS_REPL_LOAD_STDLIB` | `0` (disabled) | REPL | If set to any value except `"0"`, allow JIT-loading stdlib as fallback. |
+| `CLORUS_DEBUG_REPL` | unset | REPL, REPL engine | Verbose REPL debug logging. |
+| `CLORUS_DEBUG_IR` | unset | REPL engine | On LLVM verify failure, dumps REPL IR to `/tmp/clorus_repl_ir.ll`. |
+| `CLORUS_DEBUG_RUNTIME` | unset | REPL internals | Debug logging for runtime-library discovery (diagnostics only). |
+| `CLORUS_SAFE_VALUE` | unset | Runtime | Safety valve: skips `Value` deallocation (leaks memory) to avoid crashes while debugging memory corruption. |
+| `CLORUS_SAFE_VECTOR` | unset | Runtime | Safety valve: skips vector internals release (leaks vector memory) for debugging. |
+| `CLORUS_DEBUG_RELEASE` | unset | Runtime | Enables verbose retain/release/deallocation logging. |
+| `CLORUS_GUARD_RELEASE` | unset | Runtime | Adds guard checks (notably release on `refcount=0`). Used with `CLORUS_DEBUG_RELEASE=1`. |
+| `CLORUS_DEBUG_RELEASE_BT` | unset | Runtime | Adds backtraces for retain/release/double-free diagnostic logs. |
+| `CLORUS_DEBUG_ALLOC_BT` | unset | Runtime | Captures allocation backtraces for values (high overhead). |
+| `CLORUS_DEBUG_PTR` | unset | Runtime | Pointer filter for debug logs (hex `0x...` or decimal). |
+| `CLORUS_DEBUG_TAG` | unset | Runtime | Tag filter for debug logs (example: `Vector`, `Long`, `Double`). |
+| `CLORUS_DEBUG_VECTOR_RELEASE` | unset | Runtime/vector | Extra vector double-release diagnostics. |
+| `CLORUS_ENTRY_FILE` | unset | CLI `run`/`build` | Overrides manifest entry file for one invocation (used by test runners to execute per-file suites without rewriting `Clorus.toml`). |
+
+### Test + Debug Script Variables
+
+| Variable | Default | Used by | Purpose |
+|---|---|---|---|
+| `CLORUS_BIN` | Script-specific | `tests/run_all_tests.sh`, `tests/generate_metrics.sh`, `scripts/test/run-all.sh`, `trace_double_free.sh` | Path to `clorus` binary used by scripts. |
+| `CLORUS_TEST_ENGINES` | `jit legacy` | `tests/run_all_tests.sh` | Engine matrix for semantics runs. Values: `jit`, `legacy`. |
+| `CLORUS_APP_DIR` | `~/Workspace/github/coral/coral-examples/gallery` | `trace_double_free.sh` | Working directory for gallery-based double-free tracing. |
+
+### Notes
+
+- `CLORUS_CACHE` is mentioned in some docs, but is not currently consumed by
+  runtime/CLI code paths.
+- `clorus run` now defaults to JIT. Legacy non-JIT run path is explicit:
+  `clorus run --legacy-run`.
+- `clorus repl` also runs on the JIT execution path by default.
 
 ### Example Workflow
 

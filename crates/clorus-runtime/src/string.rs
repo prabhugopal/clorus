@@ -445,6 +445,11 @@ pub extern "C" fn clorus_is_string(val: *mut Value) -> bool {
     }
 }
 
+#[no_mangle]
+pub extern "C" fn clorus_is_string_i32(val: *mut Value) -> i32 {
+    if clorus_is_string(val) { 1 } else { 0 }
+}
+
 /// Check if string starts with prefix
 ///
 /// (starts-with? "hello world" "hello") => true

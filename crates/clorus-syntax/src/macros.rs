@@ -169,6 +169,11 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_with_open_once(args, registry)
         }
 
+        // Binding macro
+        Expr::Call { func, args } if func == "binding" => {
+            expand_binding_once(args, registry)
+        }
+
         // Lazy-seq macro - for Clojure-style lazy sequences
         Expr::Call { func, args } if func == "lazy-seq" => {
             expand_lazy_seq_once(args, registry)
@@ -367,6 +372,15 @@ fn expand_lazy_seq_impl(args: &[Expr], _recurse: bool) -> Expr {
     expand_lazy_seq(args, &mut registry)
 }
 
+fn expand_binding_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
+    expand_binding_impl(args, false)
+}
+
+fn expand_binding_impl(args: &[Expr], _recurse: bool) -> Expr {
+    let mut registry = MacroRegistry::new();
+    expand_binding(args, &mut registry)
+}
+
 fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
     match expr {
         // Thread-first macro: (-> x (f a) (g b)) => (g (f x a) b)
@@ -457,6 +471,11 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
         // With-open macro: (with-open [x init] body...) => resource management with cleanup
         Expr::Call { func, args} if func == "with-open" => {
             expand_with_open(args, registry)
+        }
+
+        // Binding macro: (binding [x v ...] body...) => (let [x v ...] body...)
+        Expr::Call { func, args } if func == "binding" => {
+            expand_binding(args, registry)
         }
 
         // User-defined macro call
@@ -803,6 +822,51 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
         | Expr::Ns { .. }
         | Expr::Require { .. }
         | Expr::Use { .. } => expr.clone(),
+    }
+}
+
+/// Expand binding macro:
+/// (binding [x 1 y 2] body...) => (let [x 1 y 2] body...)
+fn expand_binding(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.len() < 2 {
+        return Expr::Nil;
+    }
+
+    let raw_bindings = match &args[0] {
+        Expr::Vector(v) => v,
+        _ => return Expr::Nil,
+    };
+
+    if raw_bindings.len() % 2 != 0 {
+        return Expr::Nil;
+    }
+
+    let mut bindings = Vec::with_capacity(raw_bindings.len() / 2);
+    let mut i = 0;
+    while i < raw_bindings.len() {
+        let pattern = match &raw_bindings[i] {
+            Expr::Symbol(s) => crate::ast::Pattern::Symbol(s.clone()),
+            _ => return Expr::Nil,
+        };
+        let value = expand_macros_with_registry(&raw_bindings[i + 1], registry);
+        bindings.push((pattern, Box::new(value)));
+        i += 2;
+    }
+
+    let body_expr = if args.len() == 2 {
+        expand_macros_with_registry(&args[1], registry)
+    } else {
+        Expr::Do {
+            exprs: args[1..]
+                .iter()
+                .map(|e| expand_macros_with_registry(e, registry))
+                .collect(),
+        }
+    };
+
+    Expr::Let {
+        bindings,
+        body: Box::new(body_expr),
     }
 }
 

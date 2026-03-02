@@ -10,6 +10,7 @@ use std::sync::{Mutex, OnceLock};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::cell::Cell;
 
 static RELEASE_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -25,6 +26,43 @@ static FREED_PTRS: OnceLock<Mutex<HashSet<usize>>> = OnceLock::new();
 static FREED_INFO: OnceLock<Mutex<HashMap<usize, FreedInfo>>> = OnceLock::new();
 static FREED_ALLOC_INFO: OnceLock<Mutex<HashMap<usize, AllocInfo>>> = OnceLock::new();
 static ALLOC_INFO: OnceLock<Mutex<HashMap<usize, AllocInfo>>> = OnceLock::new();
+static VALUE_RC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+thread_local! {
+    static VALUE_RC_LOCK_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+struct ValueRcSection {
+    _guard: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+impl ValueRcSection {
+    fn enter() -> Self {
+        let nested = VALUE_RC_LOCK_DEPTH.with(|depth| {
+            let current = depth.get();
+            depth.set(current.saturating_add(1));
+            current > 0
+        });
+
+        if nested {
+            Self { _guard: None }
+        } else {
+            let guard = VALUE_RC_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .ok();
+            Self { _guard: guard }
+        }
+    }
+}
+
+impl Drop for ValueRcSection {
+    fn drop(&mut self) {
+        VALUE_RC_LOCK_DEPTH.with(|depth| {
+            depth.set(depth.get().saturating_sub(1));
+        });
+    }
+}
 
 #[derive(Clone)]
 struct AllocInfo {
@@ -329,6 +367,7 @@ pub extern "C" fn clorus_retain(val: *mut Value) {
     if val.is_null() {
         return;
     }
+    let _rc_section = ValueRcSection::enter();
     unsafe {
         (*val).header.retain();
     }
@@ -359,21 +398,23 @@ pub extern "C" fn clorus_release(val: *mut Value) {
         return;
     }
 
+    // Serialize retain/release critical sections while allowing re-entrant
+    // release() calls on the same thread during recursive deallocation.
+    let _rc_section = ValueRcSection::enter();
+
     let debug_release = std::env::var("CLORUS_DEBUG_RELEASE").is_ok();
-    if debug_release {
-        if (std::env::var("CLORUS_DEBUG_PTR").is_ok() || std::env::var("CLORUS_DEBUG_TAG").is_ok())
-            && should_debug_value(val)
-            && std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok()
-        {
-            let bt_now = std::backtrace::Backtrace::force_capture().to_string();
-            eprintln!("[clorus] release call backtrace:\n{}", bt_now);
-        }
-        let freed = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new()));
-        let freed_info = FREED_INFO.get_or_init(|| Mutex::new(HashMap::new()));
-        let ptr = val as usize;
-        if let Ok(mut set) = freed.lock() {
-            if set.contains(&ptr) {
-                let info = freed_info.lock().ok().and_then(|m| m.get(&ptr).cloned());
+    let ptr = val as usize;
+
+    // Always guard against releasing an already-freed Value pointer.
+    // This avoids allocator corruption on accidental duplicate release calls.
+    if let Ok(set) = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+        if set.contains(&ptr) {
+            if debug_release {
+                let info = FREED_INFO
+                    .get_or_init(|| Mutex::new(HashMap::new()))
+                    .lock()
+                    .ok()
+                    .and_then(|m| m.get(&ptr).cloned());
                 let alloc = ALLOC_INFO
                     .get_or_init(|| Mutex::new(HashMap::new()))
                     .lock()
@@ -394,37 +435,34 @@ pub extern "C" fn clorus_release(val: *mut Value) {
                     if let Some(bt) = info.backtrace {
                         eprintln!("[clorus] first free backtrace:\n{}", bt);
                     }
-                    if let Some(alloc) = alloc {
-                        if let Some(bt) = alloc.backtrace {
-                            eprintln!(
-                                "[clorus] allocation backtrace (tag={:?} ts={}ms):\n{}",
-                                alloc.tag, alloc.ts_ms, bt
-                            );
-                        }
-                    }
-                    if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
-                        let bt_now = std::backtrace::Backtrace::force_capture().to_string();
-                        eprintln!("[clorus] double free current backtrace:\n{}", bt_now);
-                    }
                 } else {
                     eprintln!("[clorus] double free detected: {:p}", val);
-                    if let Some(alloc) = alloc {
-                        if let Some(bt) = alloc.backtrace {
-                            eprintln!(
-                                "[clorus] allocation backtrace (tag={:?} ts={}ms):\n{}",
-                                alloc.tag, alloc.ts_ms, bt
-                            );
-                        }
-                    }
-                    if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
-                        let bt_now = std::backtrace::Backtrace::force_capture().to_string();
-                        eprintln!("[clorus] double free current backtrace:\n{}", bt_now);
+                }
+                if let Some(alloc) = alloc {
+                    if let Some(bt) = alloc.backtrace {
+                        eprintln!(
+                            "[clorus] allocation backtrace (tag={:?} ts={}ms):\n{}",
+                            alloc.tag, alloc.ts_ms, bt
+                        );
                     }
                 }
-                return;
+                if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
+                    let bt_now = std::backtrace::Backtrace::force_capture().to_string();
+                    eprintln!("[clorus] double free current backtrace:\n{}", bt_now);
+                }
             }
+            return;
         }
+    }
 
+    if debug_release {
+        if (std::env::var("CLORUS_DEBUG_PTR").is_ok() || std::env::var("CLORUS_DEBUG_TAG").is_ok())
+            && should_debug_value(val)
+            && std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok()
+        {
+            let bt_now = std::backtrace::Backtrace::force_capture().to_string();
+            eprintln!("[clorus] release call backtrace:\n{}", bt_now);
+        }
         if std::env::var("CLORUS_GUARD_RELEASE").is_ok() {
             let rc_before = unsafe { (*val).header.refcount() };
             if rc_before == 0 {
@@ -484,25 +522,18 @@ pub extern "C" fn clorus_release(val: *mut Value) {
                     "[clorus] release -> deallocate ptr={:p} tag={:?} rc_after={}",
                     val, tag, rc_after
                 );
-                let freed = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new()));
-                let freed_info = FREED_INFO.get_or_init(|| Mutex::new(HashMap::new()));
                 let bt = if std::env::var("CLORUS_DEBUG_RELEASE_BT").is_ok() {
                     Some(std::backtrace::Backtrace::force_capture().to_string())
                 } else {
                     None
                 };
-                if let Ok(mut set) = freed.lock() {
-                    set.insert(val as usize);
-                }
-                if let Ok(mut info_map) = freed_info.lock() {
-                    let info = FreedInfo {
-                        seq,
-                        tag,
-                        ts_ms: ts,
-                        backtrace: bt,
-                    };
+                if let Ok(mut info_map) = FREED_INFO.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                    let info = FreedInfo { seq, tag, ts_ms: ts, backtrace: bt };
                     info_map.insert(val as usize, info);
                 }
+            }
+            if let Ok(mut set) = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
+                set.insert(val as usize);
             }
             if std::env::var("CLORUS_DEBUG_PTR").is_ok() || std::env::var("CLORUS_DEBUG_TAG").is_ok() {
                 if should_debug_value(val) {
@@ -583,21 +614,22 @@ fn record_alloc(val: *mut Value, tag: ValueTag) {
     if val.is_null() {
         return;
     }
-    if std::env::var("CLORUS_DEBUG_ALLOC_BT").is_err() {
-        return;
-    }
-    // If the allocator reuses an address, clear any stale "freed" tracking
-    // so we don't report false double-free.
+    let debug_alloc_bt = std::env::var("CLORUS_DEBUG_ALLOC_BT").is_ok();
+
+    // If allocator reuses an address, clear stale "freed" tracking first.
+    // Do this unconditionally so runtime duplicate-release guard remains accurate.
     if let Ok(mut freed) = FREED_PTRS.get_or_init(|| Mutex::new(HashSet::new())).lock() {
         freed.remove(&(val as usize));
     }
     if let Ok(mut freed_info) = FREED_INFO.get_or_init(|| Mutex::new(HashMap::new())).lock() {
         freed_info.remove(&(val as usize));
     }
-    if let Ok(mut freed_allocs) =
-        FREED_ALLOC_INFO.get_or_init(|| Mutex::new(HashMap::new())).lock()
-    {
+    if let Ok(mut freed_allocs) = FREED_ALLOC_INFO.get_or_init(|| Mutex::new(HashMap::new())).lock() {
         freed_allocs.remove(&(val as usize));
+    }
+
+    if !debug_alloc_bt {
+        return;
     }
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -836,10 +868,12 @@ unsafe fn deallocate_value(val: *mut Value) {
             drop(Box::from_raw(val));
         }
         ValueTag::List => {
-            // Release list and free Value
-            let ptr = (*val).as_ptr() as *mut crate::list::ListNode;
+            // Release persistent list wrapper and free Value.
+            // NOTE: ValueTag::List stores `*mut PersistentList`, not `*mut ListNode`.
+            // Dropping PersistentList will release the head node chain via Drop.
+            let ptr = (*val).as_ptr() as *mut crate::list::PersistentList;
             if !ptr.is_null() {
-                crate::list::release_list(ptr);
+                drop(Box::from_raw(ptr));
             }
             drop(Box::from_raw(val));
         }
@@ -1183,6 +1217,34 @@ pub extern "C" fn clorus_is_fn(val: *mut Value) -> bool {
         tag == ValueTag::Function || tag == ValueTag::MultiArityFunction
     }
 }
+
+#[inline]
+fn bool_to_i32(b: bool) -> i32 {
+    if b { 1 } else { 0 }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_is_number_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_number(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_vector_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_vector(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_list_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_list(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_map_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_map(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_set_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_set(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_symbol_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_symbol(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_nil_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_nil(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_bool_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_bool(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_seq_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_seq(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_coll_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_coll(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_fn_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_fn(val)) }
 
 /// Compare two values for equality
 /// Returns 1 (true) if equal, 0 (false) if not equal

@@ -20,17 +20,18 @@
 
 ;; Helper to run a test
 (defn run-test [num name test-fn]
-  (print (str "[" num "/10] " name " ... "))
-  (let [passed (test-fn)]
-    (if passed
-      (do
-        (println "✓ PASS")
-        (reset! total-tests (+ @total-tests 1))
-        (reset! passed-tests (+ @passed-tests 1)))
-      (do
-        (println "✗ FAIL")
-        (reset! total-tests (+ @total-tests 1))
-        (reset! failed-tests (+ @failed-tests 1))))))
+  (do
+    (print (str "[" num "/10] " name " ... "))
+    (let [passed (test-fn)]
+      (if passed
+        (do
+          (println "✓ PASS")
+          (reset! total-tests (+ @total-tests 1))
+          (reset! passed-tests (+ @passed-tests 1)))
+        (do
+          (println "✗ FAIL")
+          (reset! total-tests (+ @total-tests 1))
+          (reset! failed-tests (+ @failed-tests 1)))))))
 
 ;; Test 1: Arithmetic - Addition
 (run-test 1 "Arithmetic: Addition"

@@ -7,8 +7,9 @@
 
 ;; Register a test
 (defn deftest [testname testfn]
-  (swap! *tests* conj {:name testname :fn testfn})
-  testname)
+  (do
+    (swap! *tests* conj {:name testname :fn testfn})
+    testname))
 
 ;; Assertion: Check equality
 (defn assert-eq [expected actual]
@@ -47,61 +48,63 @@
 
 ;; Helper: Run a single test
 (defn run-single-test [testname testfn]
-  (println (str "  Testing: " testname))
-  (let [result (testfn)]
-    (if (:pass result)
-      (do
-        (println "    ✓ PASS")
-        {:name testname :passed true})
-      (do
-        (println (str "    ✗ FAIL: " (:message result)))
-        {:name testname :passed false :message (:message result)}))))
+  (do
+    (println (str "  Testing: " testname))
+    (let [result (testfn)]
+      (if (:pass result)
+        (do
+          (println "    ✓ PASS")
+          {:name testname :passed true})
+        (do
+          (println (str "    ✗ FAIL: " (:message result)))
+          {:name testname :passed false :message (:message result)})))))
 
 ;; Run all registered tests
 (defn run-tests []
-  (println "\n=== Running Tests ===\n")
-  (reset! *test-results* {:passed 0 :failed 0 :errors []})
+  (do
+    (println "\n=== Running Tests ===\n")
+    (reset! *test-results* {:passed 0 :failed 0 :errors []})
 
-  (let [tests @*tests*
-        test-count (count tests)]
+    (let [tests @*tests*
+          test-count (count tests)]
 
-    (if (= test-count 0)
-      (println "No tests registered.")
-      (do
-        (println (str "Running " test-count " tests...\n"))
+      (if (= test-count 0)
+        (println "No tests registered.")
+        (do
+          (println (str "Running " test-count " tests...\n"))
 
-        (loop [remaining-tests tests
-               passed 0
-               failed 0
-               errors []]
-          (if (empty? remaining-tests)
-            (do
-              (println (str "\n=== Test Summary ==="))
-              (println (str "Total: " test-count))
-              (println (str "Passed: " passed))
-              (println (str "Failed: " failed))
-              (println (str "Success Rate: " (/ (* passed 100) test-count) "%"))
-              (if (> failed 0)
-                (do
-                  (println "\nFailed tests:")
-                  (loop [err-list errors]
-                    (if (empty? err-list)
-                      nil
-                      (let [err (first err-list)]
-                        (println (str "  - " (:name err) ": " (:message err)))
-                        (recur (rest err-list))))))
-                nil)
-              (let [results {:passed passed :failed failed :errors errors}]
-                (reset! *test-results* results)
-                results))
+          (loop [remaining-tests tests
+                 passed 0
+                 failed 0
+                 errors []]
+            (if (empty? remaining-tests)
+              (do
+                (println (str "\n=== Test Summary ==="))
+                (println (str "Total: " test-count))
+                (println (str "Passed: " passed))
+                (println (str "Failed: " failed))
+                (println (str "Success Rate: " (/ (* passed 100) test-count) "%"))
+                (if (> failed 0)
+                  (do
+                    (println "\nFailed tests:")
+                    (loop [err-list errors]
+                      (if (empty? err-list)
+                        nil
+                        (let [err (first err-list)]
+                          (println (str "  - " (:name err) ": " (:message err)))
+                          (recur (rest err-list))))))
+                  nil)
+                (let [results {:passed passed :failed failed :errors errors}]
+                  (reset! *test-results* results)
+                  results))
 
-            (let [test-entry (first remaining-tests)
-                  testname (:name test-entry)
-                  testfn (:fn test-entry)
-                  result (run-single-test testname testfn)]
-              (if (:passed result)
-                (recur (rest remaining-tests) (+ passed 1) failed errors)
-                (recur (rest remaining-tests) passed (+ failed 1) (conj errors result))))))))))
+              (let [test-entry (first remaining-tests)
+                    testname (:name test-entry)
+                    testfn (:fn test-entry)
+                    result (run-single-test testname testfn)]
+                (if (:passed result)
+                  (recur (rest remaining-tests) (+ passed 1) failed errors)
+                  (recur (rest remaining-tests) passed (+ failed 1) (conj errors result)))))))))))
 
 ;; ========================================
 ;; Test Definitions

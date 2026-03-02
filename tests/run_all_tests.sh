@@ -21,6 +21,8 @@ TEST_DIR="./tests"
 PASSED=0
 FAILED=0
 SKIPPED=0
+# Engines for semantics parity checks. Values: "jit", "legacy"
+CLORUS_TEST_ENGINES="${CLORUS_TEST_ENGINES:-jit legacy}"
 
 # Check if clorus binary exists
 if [ ! -f "$CLORUS_BIN" ]; then
@@ -43,42 +45,63 @@ fi
 echo "================================================"
 echo "  CLORUS COMPREHENSIVE TEST SUITE"
 echo "================================================"
+echo "  Engines: $CLORUS_TEST_ENGINES"
 echo ""
 
-# Function to run a single test file
+run_one() {
+    local mode=$1
+    local test_file=$2
+
+    if [ "$mode" = "legacy" ]; then
+        if [ -n "$TIMEOUT_CMD" ]; then
+            CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run --legacy-run > /dev/null 2>&1
+        else
+            CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run --legacy-run > /dev/null 2>&1
+        fi
+        return $?
+    fi
+
+    # Default mode: JIT execution path (`clorus run`).
+    if [ "$mode" = "jit" ]; then
+        if [ -n "$TIMEOUT_CMD" ]; then
+            CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run > /dev/null 2>&1
+        else
+            CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run > /dev/null 2>&1
+        fi
+        return $?
+    fi
+
+    return 99
+}
+
+# Function to run a single test file across configured engines
 run_test() {
     local test_file=$1
     local test_name=$(basename "$test_file" .clr)
     local category=$(dirname "$test_file" | xargs basename)
+    local mode
 
-    printf "%-50s" "Testing $category/$test_name..."
+    for mode in $CLORUS_TEST_ENGINES; do
+        printf "%-50s" "Testing $category/$test_name [$mode]..."
 
-    # Run the test
-    if [ -n "$TIMEOUT_CMD" ]; then
-        # Run with timeout if available
-        if $TIMEOUT_CMD "$CLORUS_BIN" run "$test_file" > /dev/null 2>&1; then
+        if run_one "$mode" "$test_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED++))
-            return 0
         else
+            local code=$?
+            if [ "$code" -eq 99 ]; then
+                echo -e "${YELLOW}⚠ SKIP${NC}"
+                ((SKIPPED++))
+                echo "  File: $test_file (mode=$mode, reason=unknown-engine)" >> test_failures.log
+                continue
+            fi
+
             echo -e "${RED}✗ FAIL${NC}"
             ((FAILED++))
-            echo "  File: $test_file" >> test_failures.log
+            echo "  File: $test_file (mode=$mode)" >> test_failures.log
             return 1
         fi
-    else
-        # Run without timeout
-        if "$CLORUS_BIN" run "$test_file" > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ PASS${NC}"
-            ((PASSED++))
-            return 0
-        else
-            echo -e "${RED}✗ FAIL${NC}"
-            ((FAILED++))
-            echo "  File: $test_file" >> test_failures.log
-            return 1
-        fi
-    fi
+    done
 }
 
 # Function to run tests in a category
@@ -128,6 +151,7 @@ echo "  TEST SUMMARY"
 echo "================================================"
 echo -e "${GREEN}Passed: $PASSED${NC}"
 echo -e "${RED}Failed: $FAILED${NC}"
+echo -e "${YELLOW}Skipped: $SKIPPED${NC}"
 
 if [ $FAILED -gt 0 ]; then
     echo ""
