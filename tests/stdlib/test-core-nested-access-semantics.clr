@@ -1,0 +1,27 @@
+(ns tests.stdlib.test-core-nested-access-semantics)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (let [m {:a {:b nil}}
+          via-list (assoc-in {} '(:x :y) 10)
+          via-list-updated (update-in {:p {:q 5}} '(:p :q) (fn [v] (+ v 7)))
+          assoc-empty (assoc-in {:a 1} [] 9)]
+      ;; get-in: default should only apply when path is missing, not when value is nil.
+      (assert-eq "get-in existing nil does not use default" (get-in m [:a :b] :fallback) nil)
+      (assert-eq "get-in missing uses default" (get-in m [:a :z] :fallback) :fallback)
+
+      ;; get-in/assoc-in/update-in should accept list paths (seq of keys).
+      (assert-eq "get-in list path" (get-in {:x {:y 3}} '(:x :y)) 3)
+      (assert-eq "assoc-in list path" (get-in via-list [:x :y]) 10)
+      (assert-eq "update-in list path" (get-in via-list-updated [:p :q]) 12)
+
+      ;; Clojure parity: empty key-path associates under nil key.
+      (assert-eq "assoc-in empty path writes nil key" (get assoc-empty nil) 9)
+      (assert-eq "assoc-in empty path preserves existing keys" (get assoc-empty :a) 1))
+    "PASS"))
+

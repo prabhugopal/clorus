@@ -1411,6 +1411,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_map_vals", 1);
         self.declare_value_fn("clorus_map_merge", 1);
         self.declare_value_fn("clorus_map_get_in", 2);
+        self.declare_value_fn("clorus_map_get_in_or", 3);
         self.declare_value_fn("clorus_map_assoc_in", 3);
         self.declare_value_fn("clorus_map_update", 3);
 
@@ -10793,67 +10794,19 @@ impl<'ctx> CodeGen<'ctx> {
 
                 let map_ptr = self.compile_expr(&args[0])?;
                 let path_ptr = self.compile_expr(&args[1])?;
-                let result_ptr = self.call_runtime_fn(
-                    "clorus_map_get_in",
-                    &[map_ptr.into(), path_ptr.into()],
-                    "get_in_call",
-                )?;
-
                 if args.len() == 3 {
-                    let is_nil_fn = self
-                        .module
-                        .get_function("clorus_value_is_nil")
-                        .ok_or("clorus_value_is_nil not declared")?;
-                    let is_nil_result = self
-                        .builder
-                        .build_call(is_nil_fn, &[result_ptr.into()], "get_in_is_nil_check")
-                        .unwrap();
-                    let is_nil_i32 = is_nil_result
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_int_value();
-                    let zero = self.context.i32_type().const_zero();
-                    let is_nil = self
-                        .builder
-                        .build_int_compare(IntPredicate::NE, is_nil_i32, zero, "get_in_is_nil_bool")
-                        .unwrap();
-
-                    let current_fn = self
-                        .builder
-                        .get_insert_block()
-                        .unwrap()
-                        .get_parent()
-                        .unwrap();
-                    let then_block = self.context.append_basic_block(current_fn, "get_in_return_default");
-                    let else_block = self.context.append_basic_block(current_fn, "get_in_return_value");
-                    let merge_block = self.context.append_basic_block(current_fn, "get_in_merge");
-
-                    self.builder
-                        .build_conditional_branch(is_nil, then_block, else_block)
-                        .unwrap();
-
-                    self.builder.position_at_end(then_block);
                     let default_ptr = self.compile_expr(&args[2])?;
-                    self.builder
-                        .build_unconditional_branch(merge_block)
-                        .unwrap();
-
-                    self.builder.position_at_end(else_block);
-                    self.builder
-                        .build_unconditional_branch(merge_block)
-                        .unwrap();
-
-                    self.builder.position_at_end(merge_block);
-                    let phi = self
-                        .builder
-                        .build_phi(result_ptr.get_type(), "get_in_result")
-                        .unwrap();
-                    phi.add_incoming(&[(&default_ptr, then_block), (&result_ptr, else_block)]);
-
-                    Ok(phi.as_basic_value().into_pointer_value())
+                    self.call_runtime_fn(
+                        "clorus_map_get_in_or",
+                        &[map_ptr.into(), path_ptr.into(), default_ptr.into()],
+                        "get_in_or_call",
+                    )
                 } else {
-                    Ok(result_ptr)
+                    self.call_runtime_fn(
+                        "clorus_map_get_in",
+                        &[map_ptr.into(), path_ptr.into()],
+                        "get_in_call",
+                    )
                 }
             }
 

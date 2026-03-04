@@ -1,7 +1,8 @@
 use crate::value::{Value, ValueTag};
 use crate::vector::PersistentVector;
+use crate::list::PersistentList;
 use crate::map::ClorusHashMap;
-use crate::collections::clorus_get;
+use crate::collections::{clorus_contains, clorus_get, clorus_nth};
 
 /// Remove a key from a map (dissoc)
 #[no_mangle]
@@ -117,28 +118,72 @@ pub extern "C" fn clorus_map_merge(maps: *mut Value) -> *mut Value {
 /// Get nested value from a map using a path of keys (get-in)
 #[no_mangle]
 pub extern "C" fn clorus_map_get_in(map_val: *mut Value, keys: *mut Value) -> *mut Value {
-    if map_val.is_null() || keys.is_null() {
+    clorus_map_get_in_or(map_val, keys, Value::nil())
+}
+
+/// Get nested value from a map using a path of keys, with explicit not-found.
+pub extern "C" fn clorus_map_get_in_or(
+    map_val: *mut Value,
+    keys: *mut Value,
+    not_found: *mut Value,
+) -> *mut Value {
+    if map_val.is_null() {
+        if !not_found.is_null() {
+            unsafe { (*not_found).header().retain(); }
+            return not_found;
+        }
         return Value::nil();
     }
 
-    unsafe {
-        let mut current = map_val;
+    let not_found = if not_found.is_null() {
+        Value::nil()
+    } else {
+        not_found
+    };
 
-        // Keys should be a vector
-        if (*keys).header().tag() != ValueTag::Vector {
-            return Value::nil();
+    unsafe {
+        let count = match path_count(keys) {
+            Some(c) => c,
+            None => {
+                (*not_found).header().retain();
+                return not_found;
+            }
+        };
+
+        // Empty key path returns the original value.
+        if count == 0 {
+            (*map_val).header().retain();
+            return map_val;
         }
 
-        let vec_ptr = (*keys).as_ptr() as *mut PersistentVector;
-        let count = (*vec_ptr).count();
+        let mut current = map_val;
+        let mut owns_current = false;
 
         for i in 0..count {
-            let key = PersistentVector::nth(vec_ptr, i);
-            current = clorus_get(current, key);
+            let key = clorus_nth(keys, i as i64);
+            let contains = clorus_contains(current, key);
+            let key_present = !contains.is_null()
+                && (*contains).header().tag() == ValueTag::Bool
+                && (*contains).as_bool();
+            crate::value::clorus_release(contains);
 
-            if current.is_null() || (*current).header().tag() == ValueTag::Nil {
-                return Value::nil();
+            if !key_present {
+                crate::value::clorus_release(key);
+                if owns_current {
+                    crate::value::clorus_release(current);
+                }
+                (*not_found).header().retain();
+                return not_found;
             }
+
+            let next = clorus_get(current, key);
+            crate::value::clorus_release(key);
+
+            if owns_current {
+                crate::value::clorus_release(current);
+            }
+            current = next;
+            owns_current = true;
         }
 
         current
@@ -152,56 +197,91 @@ pub extern "C" fn clorus_map_assoc_in(
     keys: *mut Value,
     value: *mut Value
 ) -> *mut Value {
-    if keys.is_null() {
-        unsafe {
-            if !map_val.is_null() {
-                (*map_val).header().retain();
-            }
-        }
-        return map_val;
-    }
-
     unsafe {
-        // Keys should be a vector
-        if (*keys).header().tag() != ValueTag::Vector {
-            (*map_val).header().retain();
-            return map_val;
-        }
+        let count = match path_count(keys) {
+            Some(c) => c,
+            None => {
+                if map_val.is_null() {
+                    return crate::map::clorus_map_empty();
+                }
+                (*map_val).header().retain();
+                return map_val;
+            }
+        };
 
-        let vec_ptr = (*keys).as_ptr() as *mut PersistentVector;
-        let count = (*vec_ptr).count();
+        // assoc-in on nil/non-map should create nested maps.
+        let base_map = if map_val.is_null() || (*map_val).header().tag() != ValueTag::HashMap {
+            crate::map::clorus_map_empty()
+        } else {
+            map_val
+        };
 
         if count == 0 {
-            (*map_val).header().retain();
-            return map_val;
+            // Clojure parity: (assoc-in m [] v) => (assoc m nil v)
+            return crate::map::clorus_map_assoc(base_map, Value::nil(), value);
         }
 
         if count == 1 {
             // Base case: single key
-            let key = PersistentVector::nth(vec_ptr, 0);
-            return crate::map::clorus_map_assoc(map_val, key, value);
+            let key = clorus_nth(keys, 0);
+            let result = crate::map::clorus_map_assoc(base_map, key, value);
+            crate::value::clorus_release(key);
+            return result;
         }
 
         // Recursive case: assoc-in on nested map
-        let first_key = PersistentVector::nth(vec_ptr, 0);
-        let nested_map = clorus_get(map_val, first_key);
+        let first_key = clorus_nth(keys, 0);
+        let nested_map = clorus_get(base_map, first_key);
+        let nested_base = if nested_map.is_null() || (*nested_map).header().tag() != ValueTag::HashMap {
+            crate::map::clorus_map_empty()
+        } else {
+            nested_map
+        };
 
         // Create rest of keys vector
         let mut rest_keys = PersistentVector::empty();
         for i in 1..count {
-            let key = PersistentVector::nth(vec_ptr, i);
+            let key = clorus_nth(keys, i as i64);
             rest_keys = PersistentVector::conj(rest_keys, key);
+            crate::value::clorus_release(key);
         }
         let rest_keys_val = Value::from_ptr(ValueTag::Vector, rest_keys as *mut u8);
 
         // Recursively update nested map
-        let updated_nested = clorus_map_assoc_in(nested_map, rest_keys_val, value);
+        let updated_nested = clorus_map_assoc_in(nested_base, rest_keys_val, value);
 
         // Assoc the updated nested map back into the original map
-        let result = crate::map::clorus_map_assoc(map_val, first_key, updated_nested);
+        let result = crate::map::clorus_map_assoc(base_map, first_key, updated_nested);
 
+        crate::value::clorus_release(first_key);
         crate::value::clorus_release(rest_keys_val);
+        crate::value::clorus_release(updated_nested);
+        if !nested_map.is_null() {
+            crate::value::clorus_release(nested_map);
+        }
+        if nested_base != nested_map {
+            crate::value::clorus_release(nested_base);
+        }
         result
+    }
+}
+
+unsafe fn path_count(keys: *mut Value) -> Option<u64> {
+    if keys.is_null() {
+        return Some(0);
+    }
+
+    match (*keys).header().tag() {
+        ValueTag::Nil => Some(0),
+        ValueTag::Vector => {
+            let vec_ptr = (*keys).as_ptr() as *mut PersistentVector;
+            Some((*vec_ptr).count())
+        }
+        ValueTag::List => {
+            let list_ptr = (*keys).as_ptr() as *mut PersistentList;
+            Some((*list_ptr).count())
+        }
+        _ => None,
     }
 }
 
@@ -215,11 +295,12 @@ pub extern "C" fn clorus_map_update(
 ) -> *mut Value {
     if map_val.is_null() || func.is_null() {
         unsafe {
-            if !map_val.is_null() {
-                (*map_val).header().retain();
+            if map_val.is_null() {
+                return crate::map::clorus_map_empty();
             }
+            (*map_val).header().retain();
+            return map_val;
         }
-        return map_val;
     }
 
     let _current_val = clorus_get(map_val, key);
