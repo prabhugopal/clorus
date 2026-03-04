@@ -1,0 +1,27 @@
+;; Reader discard edge cases beyond baseline:
+;; - consecutive discards
+;; - trailing discard in vectors/lists
+;; - discard in map values
+
+(ns tests.language.test-reader-discard-edge)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+;; Consecutive discards should remove exactly the next form each time.
+(def seq-a [#_ 1 #_ 2 3 4])
+(assert-eq "consecutive discards" [3 4] seq-a)
+
+;; Trailing discard in vector/list should be valid and drop that form.
+(def vec-a [1 2 #_ 999])
+(assert-eq "vector trailing discard" [1 2] vec-a)
+
+(def list-a '(1 2 #_ 999))
+(assert-eq "list trailing discard" '(1 2) list-a)
+
+;; Map value discard: key stays, discarded value replaced by next form.
+(def map-a {:a #_ 1 2 :b 3})
+(assert-eq "map discard value" {:a 2 :b 3} map-a)
+
+(println "reader discard edge passed")

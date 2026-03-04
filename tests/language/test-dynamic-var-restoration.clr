@@ -1,0 +1,52 @@
+;; Dynamic var restoration parity checks:
+;; - nested bindings restore outer values
+;; - set! inside nested scopes only mutates current dynamic frame
+;; - throw paths still unwind and restore root bindings
+
+(ns tests.language.test-dynamic-var-restoration)
+
+(def ^:dynamic *x* 1)
+(def ^:dynamic *y* 100)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn mutate-both! [xv yv]
+  (do
+    (set! *x* xv)
+    (set! *y* yv)
+    [*x* *y*]))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "initial x" *x* 1)
+    (assert-eq "initial y" *y* 100)
+
+    (assert-eq "nested binding sees inner values"
+               (binding [*x* 10 *y* 20]
+                 (binding [*x* 30]
+                   (mutate-both! 31 21)))
+               [31 21])
+
+    (assert-eq "outer frame restored after inner exit"
+               (binding [*x* 10 *y* 20]
+                 (binding [*x* 30]
+                   (mutate-both! 31 21))
+                 [*x* *y*])
+               [10 20])
+
+    (assert-eq "root restored after nested binding" [*x* *y*] [1 100])
+
+    (assert-eq "throw path keeps root restoration"
+               (do
+                 (try
+                   (binding [*x* 7 *y* 8]
+                     (mutate-both! 70 80)
+                     (throw "boom"))
+                   (catch e :caught))
+                 [*x* *y*])
+               [1 100])
+
+    "PASS"))
