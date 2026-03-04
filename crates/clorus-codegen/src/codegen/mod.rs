@@ -117,6 +117,14 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    fn arity_variant_name(base_name: &str, fixed_param_count: usize, has_rest_param: bool) -> String {
+        if has_rest_param {
+            format!("{}_arity_{}_var", base_name, fixed_param_count)
+        } else {
+            format!("{}_arity_{}", base_name, fixed_param_count)
+        }
+    }
+
     fn build_rest_vector_from_values(
         &self,
         values: &[PointerValue<'ctx>],
@@ -2270,6 +2278,28 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         None
+    }
+
+    fn find_variadic_arity_variant(
+        &self,
+        function_base_name: &str,
+        arg_count: usize,
+    ) -> Option<String> {
+        let prefix = format!("{}_arity_", function_base_name);
+        let mut best: Option<(usize, String)> = None;
+
+        for (name, (fixed_params, has_rest)) in self.function_signatures.iter() {
+            if !*has_rest || !name.starts_with(&prefix) || *fixed_params > arg_count {
+                continue;
+            }
+
+            match &best {
+                Some((best_fixed, _)) if *best_fixed >= *fixed_params => {}
+                _ => best = Some((*fixed_params, name.clone())),
+            }
+        }
+
+        best.map(|(_, name)| name)
     }
 
     /// Helper: Compile a quoted expression (returns data, not evaluated)
@@ -5065,7 +5095,8 @@ impl<'ctx> CodeGen<'ctx> {
                 // STEP 1: Create all LLVM function declarations first (for mutual/self recursion)
                 let mut arity_functions = Vec::new();
                 for arity in arities.iter() {
-                    let arity_name = format!("{}_arity_{}", base_name, arity.params.len());
+                    let arity_name =
+                        Self::arity_variant_name(&base_name, arity.params.len(), arity.rest_param.is_some());
 
                     // Create parameter types for this arity
                     let mut param_types: Vec<_> =
@@ -5084,9 +5115,9 @@ impl<'ctx> CodeGen<'ctx> {
                     arity_functions.push((arity_name.clone(), function));
 
                     // Register this arity function immediately so bodies can reference it
-                    self.functions.insert(arity_name, function);
+                    self.functions.insert(arity_name.clone(), function);
                     self.function_signatures.insert(
-                        format!("{}_arity_{}", base_name, arity.params.len()),
+                        arity_name,
                         (arity.params.len(), arity.rest_param.is_some()),
                     );
                 }
@@ -5692,7 +5723,11 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Generate a function for each arity
                 for arity in arities.iter() {
-                    let arity_name = format!("{}_arity_{}", base_lambda_name, arity.params.len());
+                    let arity_name = Self::arity_variant_name(
+                        &base_lambda_name,
+                        arity.params.len(),
+                        arity.rest_param.is_some(),
+                    );
 
                     // Create parameter types for this arity
                     let mut param_types: Vec<_> =
@@ -8805,7 +8840,24 @@ impl<'ctx> CodeGen<'ctx> {
                 // Prefer direct/static function calls when possible (important for defn->defn calls),
                 // and only fall back to global dynamic dispatch when no static target exists.
                 let arity_variant = format!("{}_arity_{}", function_to_lookup, args.len());
+                let fallback_arity_variant = format!("{}_arity_{}", func, args.len());
+                let variadic_variant =
+                    self.find_variadic_arity_variant(&function_to_lookup, args.len());
+                let fallback_variadic_variant = if function_to_lookup != *func {
+                    self.find_variadic_arity_variant(func, args.len())
+                } else {
+                    None
+                };
                 let has_static_target = self.functions.contains_key(&arity_variant)
+                    || self.functions.contains_key(&fallback_arity_variant)
+                    || variadic_variant
+                        .as_ref()
+                        .map(|name| self.functions.contains_key(name))
+                        .unwrap_or(false)
+                    || fallback_variadic_variant
+                        .as_ref()
+                        .map(|name| self.functions.contains_key(name))
+                        .unwrap_or(false)
                     || self.functions.contains_key(&function_to_lookup)
                     || self.functions.contains_key(func);
                 if !has_static_target {
@@ -8940,10 +8992,36 @@ impl<'ctx> CodeGen<'ctx> {
                     // Try to find multi-arity variant: function_arity_N
                     let arity_variant =
                         format!("{}_arity_{}", function_to_lookup, arg_values.len());
+                    let fallback_arity_variant = format!("{}_arity_{}", func, arg_values.len());
 
                     if let Some(func) = self.functions.get(&arity_variant) {
                         // Found multi-arity variant
                         (func.clone(), arg_values)
+                    } else if let Some(func) = self.functions.get(&fallback_arity_variant) {
+                        // Found multi-arity variant via bare fallback name
+                        (func.clone(), arg_values)
+                    } else if let Some(variadic_name) =
+                        self.find_variadic_arity_variant(&function_to_lookup, arg_values.len())
+                    {
+                        if let Some(func) = self.functions.get(&variadic_name) {
+                            (func.clone(), arg_values)
+                        } else {
+                            return Err(format!(
+                                "Undefined variadic function variant: {} for call {}",
+                                variadic_name, func
+                            ));
+                        }
+                    } else if let Some(variadic_name) =
+                        self.find_variadic_arity_variant(func, arg_values.len())
+                    {
+                        if let Some(func) = self.functions.get(&variadic_name) {
+                            (func.clone(), arg_values)
+                        } else {
+                            return Err(format!(
+                                "Undefined variadic function variant: {} for call {}",
+                                variadic_name, func
+                            ));
+                        }
                     } else {
                         // Try regular function lookup
                         let func = self

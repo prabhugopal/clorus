@@ -1,0 +1,29 @@
+(ns tests.language.test-fixed-vs-variadic-dispatch)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn dispatch-demo
+  ([a b] :exact)
+  ([a b & more] :variadic))
+
+(defn recursive-dispatch-demo
+  ([a b] [:exact a b])
+  ([a b & more]
+   ;; Critical regression: this call must resolve to the fixed-arity variant.
+   (recursive-dispatch-demo a b)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "exact arity selected"
+               (dispatch-demo 1 2)
+               :exact)
+    (assert-eq "variadic selected for extra args"
+               (dispatch-demo 1 2 3)
+               :variadic)
+    (assert-eq "recursive variadic call resolves to exact arity"
+               (recursive-dispatch-demo 10 20 30)
+               [:exact 10 20])
+    "PASS"))

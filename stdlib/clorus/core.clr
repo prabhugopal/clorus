@@ -485,7 +485,14 @@
                  (assoc acc k (f (get acc k) (get right k)))
                  (assoc acc k (get right k))))
              left
-             (keys right)))))
+             (keys right))))
+  ([f m1 m2 & ms]
+   (loop [acc (merge-with f m1 m2)
+          remaining ms]
+     (if (empty? remaining)
+       acc
+       (recur (merge-with f acc (first remaining))
+              (rest remaining))))))
 
 ;; keys - Get all keys from map
 ;; Example: (keys {:a 1 :b 2}) ; => [:a :b]

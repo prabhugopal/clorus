@@ -24,4 +24,7 @@
     (assert-eq "merge-with nil map treated as empty"
                (merge-with + nil {:a 1})
                {:a 1})
+    (assert-eq "merge-with variadic maps"
+               (merge-with + {:a 1} {:a 2 :b 1} {:a 3 :b 4})
+               {:a 6 :b 5})
     "PASS"))
