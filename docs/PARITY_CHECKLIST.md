@@ -1,7 +1,7 @@
 # Clorus Clojure Parity Checklist
 
 Last updated: 2026-03-04
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 167, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 173, Failed 0, Skipped 1.
 
 ## How to use this checklist
 - `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
@@ -46,7 +46,7 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - [ ] When legacy path is retired, keep one semantic matrix runner that compares modes where still relevant.
 
 ## Active Execution Queue (Feature-by-Feature)
-- [ ] Reader parity: add remaining non-`#_` reader forms and close failures
+- [x] Reader parity: cover supported non-`#_` reader forms (quote, syntax-quote, unquote, unquote-splicing error paths, deref, var-quote)
 - [x] Macro tooling parity: add `&env` tests
 - [x] Macro tooling parity: add `&form` tests
 - [x] Macro hygiene edge cases: test + baseline fix (auto-gensym in syntax-quote)

@@ -1,0 +1,30 @@
+(ns tests.language.test-reader-macro-forms)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(def z 9)
+
+(defn -main [& _args]
+  (do
+    ;; Quote sugar
+    (assert-eq "quote sugar" '(1 2 3) (quote (1 2 3)))
+
+    ;; Syntax-quote with unquote and unquote-splicing
+    (assert-eq "syntax-quote unquote list"
+               '(1 10 3)
+               (let [x 10]
+                 `(1 ~x 3)))
+    (assert-eq "syntax-quote splice list"
+               '(1 2 3 4)
+               (let [xs '(2 3)]
+                 `(1 ~@xs 4)))
+
+    ;; Deref sugar
+    (assert-eq "deref sugar" 10 (let [a (atom 10)] @a))
+
+    ;; Var quote sugar
+    (assert-eq "var quote has name" 'z (:name (meta #'z)))
+    "PASS"))

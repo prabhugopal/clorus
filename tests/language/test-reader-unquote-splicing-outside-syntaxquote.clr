@@ -1,0 +1,5 @@
+; EXPECT_COMPILE_ERROR: Unquote-splicing (~@) can only be used inside syntax-quote
+
+(ns tests.language.test-reader-unquote-splicing-outside-syntaxquote)
+
+~@xs
