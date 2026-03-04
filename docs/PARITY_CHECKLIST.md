@@ -1,7 +1,7 @@
 # Clorus Clojure Parity Checklist
 
 Last updated: 2026-03-04
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 175, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 177, Failed 0, Skipped 1.
 
 ## How to use this checklist
 - `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
@@ -62,6 +62,7 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - [x] Collections parity: `update-in` deep edge matrix
 - [x] Exception data parity: `ex-info` behavior matrix
 - [x] Exception data parity: `ex-data` propagation/rethrow baseline
+- [x] Exception data parity: nested cause chain (`ex-cause`) preservation on rethrow
 - [x] Re-run full `jit+legacy` suite and refresh baseline counts
 
 ## Step 1 Closure (Language Parity Stabilization)

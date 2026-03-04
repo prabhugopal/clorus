@@ -1,0 +1,46 @@
+;; Exception data parity matrix:
+;; - ex-data/ex-message/ex-cause on ex-info payloads
+;; - nil behavior for non-ex-info values
+;; - throw/catch rethrow preserves structured payload
+
+(ns tests.language.test-exception-data-propagation)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn build-ex []
+  (let [root {:source :db :retryable false}
+        first (ex-info "read failed" {:code 500 :op :read} root)]
+    (ex-info "request failed" {:code 502 :op :gateway} first)))
+
+(defn rethrow-once [ex]
+  (try
+    (throw ex)
+    (catch e
+      (throw e))))
+
+(defn -main [& _args]
+  (let [ex (build-ex)
+        caught (try
+                 (rethrow-once ex)
+                 (catch e e))]
+    (assert-eq "exception? true" (exception? caught) true)
+    (assert-eq "outer message" (ex-message caught) "request failed")
+    (assert-eq "outer data code" (get (ex-data caught) :code nil) 502)
+    (assert-eq "outer data op" (get (ex-data caught) :op nil) :gateway)
+
+    (let [cause (ex-cause caught)]
+      (assert-eq "cause is exception payload" (exception? cause) true)
+      (assert-eq "cause message" (ex-message cause) "read failed")
+      (assert-eq "cause data op" (get (ex-data cause) :op nil) :read)
+      (assert-eq "root cause map"
+                 (ex-cause cause)
+                 {:source :db :retryable false}))
+
+    ;; Non-exception inputs should return nil.
+    (assert-eq "ex-data non-exception nil" (ex-data {:type :other}) nil)
+    (assert-eq "ex-message non-exception nil" (ex-message "boom") nil)
+    (assert-eq "ex-cause non-exception nil" (ex-cause 42) nil)
+    "PASS"))
