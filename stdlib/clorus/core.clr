@@ -257,6 +257,29 @@
           remaining (drop n coll)]
       (conj (partition-all n remaining) chunk))))
 
+;; partition-by - Partition collection by consecutive runs of (f item)
+;; Example: (partition-by odd? [1 3 2 4 5]) ; => [[1 3] [2 4] [5]]
+(defn partition-by [f coll]
+  (if (empty? coll)
+    []
+    (loop [remaining (rest coll)
+           current-key (f (first coll))
+           current-group [(first coll)]
+           result []]
+      (if (empty? remaining)
+        (conj result current-group)
+        (let [x (first remaining)
+              k (f x)]
+          (if (= k current-key)
+            (recur (rest remaining)
+                   current-key
+                   (conj current-group x)
+                   result)
+            (recur (rest remaining)
+                   k
+                   [x]
+                   (conj result current-group))))))))
+
 ;; take-while - Take elements while predicate is true
 ;; Example: (take-while (partial > 5) [1 2 3 6 7 1]) ; => [1 2 3]
 (defn take-while [pred coll]
