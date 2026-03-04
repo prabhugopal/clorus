@@ -1,0 +1,43 @@
+(ns tests.stdlib.test-core-map-utils)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; select-keys
+    (assert-eq "select-keys keeps existing nil values"
+               (select-keys {:a 1 :b nil :c 3} [:b :z])
+               {:b nil})
+    (assert-eq "select-keys missing only"
+               (select-keys {:a 1} [:x :y])
+               {})
+
+    ;; rename-keys
+    (assert-eq "rename-keys basic"
+               (rename-keys {:a 1 :b 2} {:a :x :b :y})
+               {:x 1 :y 2})
+    (assert-eq "rename-keys chained overlap uses original map values"
+               (rename-keys {:a 1 :b 2} {:a :b :b :c})
+               {:b 1 :c 2})
+    (assert-eq "rename-keys ignores missing old key"
+               (rename-keys {:a 1} {:z :x})
+               {:a 1})
+
+    ;; dissoc-in
+    (assert-eq "dissoc-in leaf removal"
+               (dissoc-in {:a {:b 1 :c 2}} [:a :b])
+               {:a {:c 2}})
+    (assert-eq "dissoc-in prunes empty map branch"
+               (dissoc-in {:a {:b 1}} [:a :b])
+               {})
+    (assert-eq "dissoc-in missing path unchanged"
+               (dissoc-in {:a {:b 1}} [:a :x])
+               {:a {:b 1}})
+    (assert-eq "dissoc-in nil map unchanged"
+               (dissoc-in nil [:a :b])
+               nil)
+    "PASS"))
+

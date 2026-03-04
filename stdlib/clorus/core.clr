@@ -499,14 +499,27 @@
 ;; rename-keys - Rename keys in map
 ;; Example: (rename-keys {:a 1 :b 2} {:a :x :b :y}) ; => {:x 1 :y 2}
 (defn rename-keys [m kmap]
-  (reduce (fn [result [old-key new-key]]
-            (if (contains? result old-key)
-              (-> result
-                  (assoc new-key (get result old-key))
-                  (dissoc old-key))
-              result))
-          m
+  (reduce (fn [result pair]
+            (let [old-key (first pair)
+                  new-key (second pair)]
+              (if (contains? m old-key)
+                (assoc result new-key (get m old-key))
+                result)))
+          (reduce (fn [acc key] (dissoc acc key)) m (keys kmap))
           kmap))
+
+;; dissoc-in - Remove nested key path from map and prune empty maps.
+;; Example: (dissoc-in {:a {:b 1 :c 2}} [:a :b]) ; => {:a {:c 2}}
+(defn dissoc-in [m [k & ks]]
+  (if ks
+    (let [next-map (get m k)]
+      (if next-map
+        (let [new-map (dissoc-in next-map ks)]
+          (if (and (map? new-map) (empty? new-map))
+            (dissoc m k)
+            (assoc m k new-map)))
+        m))
+    (dissoc m k)))
 
 ;; invert-map - Invert map (swap keys and values)
 ;; Example: (invert-map {:a 1 :b 2}) ; => {1 :a 2 :b}
