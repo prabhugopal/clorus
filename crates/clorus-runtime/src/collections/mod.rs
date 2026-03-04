@@ -8,6 +8,7 @@ use crate::value::{Value, ValueTag};
 use crate::vector::PersistentVector;
 use crate::list::PersistentList;
 use crate::map::ClorusHashMap;
+use crate::set::ClorusHashSet;
 
 pub mod map_ops;
 pub mod concat;
@@ -44,6 +45,58 @@ pub extern "C" fn clorus_get(coll: *mut Value, key: *mut Value) -> *mut Value {
                 PersistentVector::nth(vec_ptr, index)
             }
             _ => Value::nil(),
+        }
+    }
+}
+
+/// Check whether a collection contains a key/index/value.
+///
+/// Semantics:
+/// - maps: key presence
+/// - vectors: index presence (numeric key)
+/// - sets: element presence
+/// - others: false
+#[no_mangle]
+pub extern "C" fn clorus_contains(coll: *mut Value, key: *mut Value) -> *mut Value {
+    if coll.is_null() || key.is_null() {
+        return Value::boolean(false);
+    }
+
+    unsafe {
+        match (*coll).header().tag() {
+            ValueTag::HashMap => {
+                let map_ptr = (*coll).as_ptr() as *mut ClorusHashMap;
+                Value::boolean((*map_ptr).get_entry(key).is_some())
+            }
+            ValueTag::Vector => {
+                let idx_opt: Option<u64> = match (*key).header().tag() {
+                    ValueTag::Long => {
+                        let i = (*key).as_long();
+                        if i < 0 { None } else { Some(i as u64) }
+                    }
+                    ValueTag::Double => {
+                        let d = (*key).as_double();
+                        if d.is_finite() && d >= 0.0 && d.fract() == 0.0 {
+                            Some(d as u64)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+
+                if let Some(idx) = idx_opt {
+                    let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
+                    Value::boolean(idx < (*vec_ptr).count())
+                } else {
+                    Value::boolean(false)
+                }
+            }
+            ValueTag::HashSet => {
+                let set_ptr = (*coll).as_ptr() as *mut ClorusHashSet;
+                Value::boolean((*set_ptr).contains(key))
+            }
+            _ => Value::boolean(false),
         }
     }
 }

@@ -49,6 +49,24 @@ static FORCE_LINK_CHAN_CLOSE: unsafe extern "C" fn(*mut Value) -> *mut Value = c
 static FORCE_LINK_ALTS: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::channel::clorus_alts;
 #[used]
 static FORCE_LINK_GO: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::go_block::clorus_go;
+#[used]
+static FORCE_LINK_DERIVE: extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_derive;
+#[used]
+static FORCE_LINK_UNDERIVE: extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_underive;
+#[used]
+static FORCE_LINK_ISA_I32: extern "C" fn(*mut Value, *mut Value) -> i32 = clorus_runtime::hierarchy::clorus_isa_i32;
+#[used]
+static FORCE_LINK_PARENTS: extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_parents;
+#[used]
+static FORCE_LINK_ANCESTORS: extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_ancestors;
+#[used]
+static FORCE_LINK_DESCENDANTS: extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_descendants;
+#[used]
+static FORCE_LINK_PROTOCOL_SATISFIES: extern "C" fn(*const std::ffi::c_char, *const std::ffi::c_char) -> i32 =
+    clorus_runtime::protocols::clorus_protocol_satisfies_type_i32;
+#[used]
+static FORCE_LINK_GENSYM: extern "C" fn(*const std::ffi::c_char) -> *mut Value =
+    clorus_runtime::value::clorus_gensym;
 
 // Force-link I/O operations
 #[used]
@@ -129,7 +147,7 @@ pub fn format_result(result: &repl_engine::EvalResult, namespace: &str) -> Strin
     use repl_engine::EvalKind;
 
     match &result.kind {
-        EvalKind::Def(name) | EvalKind::Defn(name) => {
+        EvalKind::Def(name) | EvalKind::Defn(name) | EvalKind::Defmacro(name) => {
             format!("#'{}/{}", namespace, name)
         }
         EvalKind::Namespace | EvalKind::Import => {
@@ -355,10 +373,13 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
             }
         }
 
-        // Try to find core.clr in CLORUS_HOME/stdlib or ~/.clorus/stdlib
+        // Try to find clorus/core.clr in CLORUS_HOME/stdlib or ~/.clorus/stdlib
         if core_stdlib_path.is_none() {
             if let Ok(clorus_home) = std::env::var("CLORUS_HOME") {
-                let path = std::path::Path::new(&clorus_home).join("stdlib").join("core.clr");
+                let path = std::path::Path::new(&clorus_home)
+                    .join("stdlib")
+                    .join("clorus")
+                    .join("core.clr");
                 if path.exists() {
                     core_stdlib_path = Some(path);
                 }
@@ -366,10 +387,49 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         }
 
         if core_stdlib_path.is_none() {
+            // Binary-relative fallback:
+            // - installed layout: <CLORUS_HOME>/bin/clorus + <CLORUS_HOME>/stdlib/clorus/core.clr
+            // - repo layout: <repo>/target/{debug,release}/clorus + <repo>/stdlib/clorus/core.clr
+            if let Ok(exe) = std::env::current_exe() {
+                let mut candidates = Vec::new();
+                if let Some(exe_dir) = exe.parent() {
+                    candidates.push(exe_dir.join("../stdlib/clorus/core.clr"));     // installed
+                    candidates.push(exe_dir.join("../../stdlib/clorus/core.clr"));  // repo target/{debug,release}
+                    candidates.push(exe_dir.join("../../../stdlib/clorus/core.clr")); // extra fallback
+                }
+                for path in candidates {
+                    if path.exists() {
+                        core_stdlib_path = Some(path);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if core_stdlib_path.is_none() {
             if let Ok(home) = std::env::var("HOME") {
-                let path = std::path::Path::new(&home).join(".clorus").join("stdlib").join("core.clr");
+                let path = std::path::Path::new(&home)
+                    .join(".clorus")
+                    .join("stdlib")
+                    .join("clorus")
+                    .join("core.clr");
                 if path.exists() {
                     core_stdlib_path = Some(path);
+                }
+            }
+        }
+
+        // Local development fallback (project/workspace-relative)
+        if core_stdlib_path.is_none() {
+            let candidates = [
+                std::path::PathBuf::from("stdlib/clorus/core.clr"),
+                std::path::PathBuf::from("../stdlib/clorus/core.clr"),
+                std::path::PathBuf::from("../../stdlib/clorus/core.clr"),
+            ];
+            for path in candidates {
+                if path.exists() {
+                    core_stdlib_path = Some(path);
+                    break;
                 }
             }
         }
@@ -377,17 +437,36 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
 
     let mut _core_lib: Option<libloading::Library> = None;
     if let Some(core_path) = core_stdlib_path.as_ref() {
+        // Default to JIT stdlib in REPL so core functions like `map` are callable.
         let enable_jit_stdlib = std::env::var("CLORUS_REPL_LOAD_STDLIB")
             .ok()
             .map(|v| v != "0")
-            .unwrap_or(false);
+            .unwrap_or(true);
         let disable_core_lib = std::env::var("CLORUS_REPL_NO_CORE_LIB")
             .ok()
             .map(|v| v != "0")
             .unwrap_or(false);
 
-        // Default path: load clorus-core dylib + register stdlib symbols only (no JIT stdlib).
-        if !disable_core_lib {
+        // Primary path: JIT-compile stdlib.
+        if enable_jit_stdlib {
+            match std::fs::read_to_string(core_path) {
+                Ok(source) => match repl_engine.load_stdlib_batch(source) {
+                    Ok(count) => {
+                        println!("✓ Loaded clorus.core ({} functions) via JIT stdlib", count);
+                        core_loaded = true;
+                    }
+                    Err(e) => {
+                        eprintln!("⚠ Error loading stdlib via JIT: {}", e);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("⚠ Could not read stdlib: {}", e);
+                }
+            }
+        }
+
+        // Optional fallback path: dylib symbols-only (disabled by default when JIT is on).
+        if !core_loaded && !disable_core_lib {
             match load_core_library() {
                 Ok(lib) => {
                     _core_lib = Some(lib);
@@ -411,24 +490,6 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                 }
                 Err(e) => {
                     eprintln!("⚠ Failed to load clorus-core dylib: {}", e);
-                }
-            }
-        }
-
-        // Optional fallback: JIT-compile stdlib (legacy path).
-        if !core_loaded && enable_jit_stdlib {
-            match std::fs::read_to_string(core_path) {
-                Ok(source) => match repl_engine.load_stdlib_batch(source) {
-                    Ok(count) => {
-                        println!("✓ Loaded clorus.core ({} functions) via JIT stdlib", count);
-                        core_loaded = true;
-                    }
-                    Err(e) => {
-                        eprintln!("⚠ Error loading stdlib via JIT: {}", e);
-                    }
-                },
-                Err(e) => {
-                    eprintln!("⚠ Could not read stdlib: {}", e);
                 }
             }
         }
@@ -596,8 +657,14 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         }
     }
 
-    // Load project entry file if in a project directory (unless no_auto_load is set)
-    if !config.no_auto_load {
+    // Load project entry file if in a project directory, unless disabled.
+    // Env override helps scripted/piped REPL use-cases where project auto-load is undesirable.
+    let no_auto_load = config.no_auto_load
+        || std::env::var("CLORUS_REPL_NO_AUTO_LOAD")
+            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+            .unwrap_or(false);
+
+    if !no_auto_load {
         if let Some(ref proj_config) = project {
             if std::path::Path::new(&proj_config.build.entry).exists() {
                 println!("Loading {}...", proj_config.build.entry);

@@ -1,0 +1,31 @@
+(ns tests.stdlib.test-core-access-semantics)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; get semantics
+    (assert-eq "get map existing" (get {:a 1} :a) 1)
+    (assert-eq "get map missing nil" (get {:a 1} :b) nil)
+    (assert-eq "get map missing default" (get {:a 1} :b 9) 9)
+    (assert-eq "get vector existing index" (get [10 20 30] 1) 20)
+    (assert-eq "get vector missing index nil" (get [10 20] 9) nil)
+    (assert-eq "get vector missing index default" (get [10 20] 9 77) 77)
+    (assert-eq "get nil returns nil" (get nil :a) nil)
+    (assert-eq "get nil with default" (get nil :a 42) 42)
+
+    ;; nth semantics (2-arity + default 3-arity)
+    (assert-eq "nth in range" (nth [10 20 30] 2) 30)
+    (assert-eq "nth out of range default" (nth [10 20] 9 :d) :d)
+
+    ;; contains? semantics
+    (assert-eq "contains? map key present" (contains? {:a 1 :b nil} :b) true)
+    (assert-eq "contains? map key absent" (contains? {:a 1} :z) false)
+    (assert-eq "contains? vector valid index" (contains? [10 20] 1) true)
+    (assert-eq "contains? vector invalid index" (contains? [10 20] 9) false)
+    (assert-eq "contains? set present" (contains? #{1 2 3} 2) true)
+    (assert-eq "contains? set absent" (contains? #{1 2 3} 9) false)
+    "PASS"))

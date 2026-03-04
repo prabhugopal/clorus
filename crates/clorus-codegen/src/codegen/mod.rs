@@ -1232,6 +1232,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_set_conj", 2);
         self.declare_value_fn("clorus_set_disj", 2);
         self.declare_value_fn("clorus_set_contains", 2);
+        self.declare_value_fn("clorus_contains", 2);
         self.declare_value_to_i64_fn("clorus_set_count");
 
         // ===== Atom Functions =====
@@ -10947,9 +10948,9 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "nth" => {
-                // nth takes 2 args: collection, index
-                if args.len() != 2 {
-                    return Err("nth requires 2 arguments: collection, index".to_string());
+                // nth takes 2-3 args: collection, index, [default]
+                if args.len() < 2 || args.len() > 3 {
+                    return Err("nth requires 2 or 3 arguments: collection, index, [default]".to_string());
                 }
 
                 let coll_ptr = self.compile_expr(&args[0])?;
@@ -10971,12 +10972,73 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_call(nth_fn, &[coll_ptr.into(), index_i64.into()], "nth_call")
                     .unwrap();
-
-                Ok(result
+                let result_ptr = result
                     .try_as_basic_value()
                     .left()
                     .unwrap()
-                    .into_pointer_value())
+                    .into_pointer_value();
+
+                // If we have a default value and result is nil, return default.
+                if args.len() == 3 {
+                    let is_nil_fn = self
+                        .module
+                        .get_function("clorus_value_is_nil")
+                        .ok_or("clorus_value_is_nil not declared")?;
+                    let is_nil_result = self
+                        .builder
+                        .build_call(is_nil_fn, &[result_ptr.into()], "nth_is_nil_check")
+                        .unwrap();
+                    let is_nil_i32 = is_nil_result
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_int_value();
+
+                    let zero = self.context.i32_type().const_zero();
+                    let is_nil = self
+                        .builder
+                        .build_int_compare(IntPredicate::NE, is_nil_i32, zero, "nth_is_nil_bool")
+                        .unwrap();
+
+                    let current_fn = self
+                        .builder
+                        .get_insert_block()
+                        .unwrap()
+                        .get_parent()
+                        .unwrap();
+                    let then_block = self
+                        .context
+                        .append_basic_block(current_fn, "nth_return_default");
+                    let else_block = self
+                        .context
+                        .append_basic_block(current_fn, "nth_return_value");
+                    let merge_block = self.context.append_basic_block(current_fn, "nth_merge");
+
+                    self.builder
+                        .build_conditional_branch(is_nil, then_block, else_block)
+                        .unwrap();
+
+                    self.builder.position_at_end(then_block);
+                    let default_ptr = self.compile_expr(&args[2])?;
+                    self.builder
+                        .build_unconditional_branch(merge_block)
+                        .unwrap();
+
+                    self.builder.position_at_end(else_block);
+                    self.builder
+                        .build_unconditional_branch(merge_block)
+                        .unwrap();
+
+                    self.builder.position_at_end(merge_block);
+                    let phi = self.builder.build_phi(
+                        self.context.i8_type().ptr_type(AddressSpace::default()),
+                        "nth_result",
+                    ).unwrap();
+                    phi.add_incoming(&[(&default_ptr, then_block), (&result_ptr, else_block)]);
+                    Ok(phi.as_basic_value().into_pointer_value())
+                } else {
+                    Ok(result_ptr)
+                }
             }
 
             "count" => {
@@ -11682,25 +11744,25 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "contains?" => {
-                // contains? takes 2 args: set, element
+                // contains? takes 2 args: collection, key/index/element
                 if args.len() != 2 {
-                    return Err("contains? requires 2 arguments: set, element".to_string());
+                    return Err("contains? requires 2 arguments: collection, key/index/element".to_string());
                 }
 
-                let set_ptr = self.compile_expr(&args[0])?;
-                let elem_ptr = self.compile_expr(&args[1])?;
+                let coll_ptr = self.compile_expr(&args[0])?;
+                let key_ptr = self.compile_expr(&args[1])?;
 
                 let contains_fn = self
                     .module
-                    .get_function("clorus_set_contains")
-                    .ok_or("clorus_set_contains not declared")?;
+                    .get_function("clorus_contains")
+                    .ok_or("clorus_contains not declared")?;
 
                 let result = self
                     .builder
                     .build_call(
                         contains_fn,
-                        &[set_ptr.into(), elem_ptr.into()],
-                        "set_contains_call",
+                        &[coll_ptr.into(), key_ptr.into()],
+                        "contains_call",
                     )
                     .unwrap();
 

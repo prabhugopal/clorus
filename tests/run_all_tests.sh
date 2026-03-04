@@ -267,6 +267,8 @@ run_repl_regressions() {
     echo -e "\n${BLUE}5. REPL REGRESSION TESTS${NC}"
 
     local repl_output_file="/tmp/clorus_repl_regression.log"
+    local clorus_bin_abs
+    clorus_bin_abs="$(cd "$(dirname "$CLORUS_BIN")" && pwd)/$(basename "$CLORUS_BIN")"
     local mode
 
     for mode in $CLORUS_TEST_ENGINES; do
@@ -283,12 +285,14 @@ run_repl_regressions() {
         # - defmacro returns var-ish symbol name
         # - macro expansion has usable env form
         # - core map is callable
-        if cat <<'EOF' | "$CLORUS_BIN" repl > "$repl_output_file" 2>&1
+        if (
+            cd /tmp && cat <<'EOF' | CLORUS_REPL_NO_AUTO_LOAD=1 CLORUS_REPL_LOAD_STDLIB=1 "$clorus_bin_abs" repl > "$repl_output_file" 2>&1
 (defmacro show-env [] &env)
 (show-env)
 (map #(* % 2) [1 2 3 4])
 :q
 EOF
+        )
         then
             :
         else
