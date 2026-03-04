@@ -1,0 +1,27 @@
+(ns tests.stdlib.test-core-merge-with)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "merge-with no maps"
+               (merge-with +)
+               {})
+    (assert-eq "merge-with single map"
+               (merge-with + {:a 1 :b 2})
+               {:a 1 :b 2})
+    (assert-eq "merge-with two maps collision + non-collision"
+               (merge-with + {:a 1 :b 2} {:a 10 :c 3})
+               {:a 11 :b 2 :c 3})
+    (assert-eq "merge-with prefers combine fn on nil values too"
+               (merge-with (fn [x y] (if x (+ x y) y))
+                           {:a nil :b 2}
+                           {:a 5 :b 8})
+               {:a 5 :b 10})
+    (assert-eq "merge-with nil map treated as empty"
+               (merge-with + nil {:a 1})
+               {:a 1})
+    "PASS"))

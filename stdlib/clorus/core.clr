@@ -470,6 +470,23 @@
 (defn update [m k f]
   (assoc m k (f (get m k))))
 
+;; merge-with - Merge maps, combining collisions with function
+;; Example: (merge-with + {:a 1 :b 2} {:a 10 :c 3}) ; => {:a 11 :b 2 :c 3}
+(defn merge-with
+  ([f]
+   {})
+  ([f m]
+   (if m m {}))
+  ([f m1 m2]
+   (let [left (if m1 m1 {})
+         right (if m2 m2 {})]
+     (reduce (fn [acc k]
+               (if (contains? acc k)
+                 (assoc acc k (f (get acc k) (get right k)))
+                 (assoc acc k (get right k))))
+             left
+             (keys right)))))
+
 ;; keys - Get all keys from map
 ;; Example: (keys {:a 1 :b 2}) ; => [:a :b]
 (defn keys [m]
