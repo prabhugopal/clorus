@@ -138,8 +138,8 @@ runtime code, REPL/CLI code, and first-party test/debug scripts.
 | Variable | Default | Scope | Purpose |
 |---|---|---|---|
 | `CLORUS_HOME` | unset | CLI, REPL, REPLx, pack/build helpers | Installation root used to locate `lib/` and `stdlib/` (fallback is `~/.clorus/...` in several paths). |
-| `CLORUS_REPL_NO_CORE_LIB` | `0` (disabled) | REPL | If set to any value except `"0"`, skip loading `clorus-core` dylib. |
-| `CLORUS_REPL_LOAD_STDLIB` | `0` (disabled) | REPL | If set to any value except `"0"`, allow JIT-loading stdlib as fallback. |
+| `CLORUS_REPL_NO_CORE_LIB` | `0` (disabled) | REPL | If set to any value except `"0"`, skip loading `clorus-core` dylib fallback. |
+| `CLORUS_REPL_LOAD_STDLIB` | `1` (enabled) | REPL | If set to any value except `"0"`, JIT-load stdlib (`clorus.core`) at REPL startup (default path). |
 | `CLORUS_DEBUG_REPL` | unset | REPL, REPL engine | Verbose REPL debug logging. |
 | `CLORUS_DEBUG_IR` | unset | REPL engine | On LLVM verify failure, dumps REPL IR to `/tmp/clorus_repl_ir.ll`. |
 | `CLORUS_DEBUG_RUNTIME` | unset | REPL internals | Debug logging for runtime-library discovery (diagnostics only). |
@@ -180,12 +180,15 @@ $ clorus new hello-world
 # Edit src/main.clrs
 $ cd hello-world
 $ cat > src/main.clrs << EOF
+(ns main)
+
 (defn factorial [n]
   (if (< n 2)
     1
     (* n (factorial (- n 1)))))
 
-(factorial 5)
+(defn -main [& _args]
+  (factorial 5))
 EOF
 
 # Run it
@@ -265,7 +268,7 @@ See `MODULAR_ARCHITECTURE.md` for details.
 - `take`, `drop`, `concat`, `flatten`, `distinct`
 
 **Standard Library**
-- 50+ utility functions in pure Clorus (`stdlib/core.clr`)
+- 50+ utility functions in pure Clorus (`stdlib/clorus/core.clr`)
 - `partial`, `comp`, `zipmap`, `frequencies`, `group-by`
 - Predicates: `nil?`, `even?`, `empty?`, etc.
 - Math: `abs`, `min`, `max`, `sum`

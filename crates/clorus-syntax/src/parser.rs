@@ -1,6 +1,6 @@
 /// Parser for S-expressions
 use crate::ast::{Expr, ProtocolMethodImpl};
-use crate::lexer::{Lexer, Token, Span};
+use crate::lexer::{Lexer, Span, Token};
 use std::cell::Cell;
 
 thread_local! {
@@ -102,6 +102,12 @@ impl Parser {
                 self.parse_set()
             }
 
+            Token::ReaderDiscard(_) => {
+                // Reader discard (#_) drops one form and continues with the following form.
+                self.skip_reader_discard()?;
+                self.parse_expr()
+            }
+
             Token::Quote(_) => {
                 self.advance(); // Consume the ' token
                 let quoted_expr = self.parse_expr()?;
@@ -159,10 +165,99 @@ impl Parser {
             }
 
             Token::Meta(_) => {
-                self.advance(); // Consume the ^ token
-                // Parse metadata and the expression it applies to
-                // For now, just skip metadata and parse the next expression
-                self.parse_expr()
+                // Parse one or more metadata prefixes and attach them to supported forms.
+                let mut metadata = Vec::new();
+                while matches!(self.current_token(), Token::Meta(_)) {
+                    self.advance(); // consume ^
+                    metadata.extend(self.parse_metadata_form()?);
+                }
+
+                let target = self.parse_expr()?;
+                if metadata.is_empty() {
+                    return Ok(target);
+                }
+
+                match target {
+                    Expr::Def {
+                        name,
+                        value,
+                        metadata: existing,
+                    } => {
+                        let merged = Self::merge_metadata(existing, metadata);
+                        Ok(Expr::Def {
+                            name,
+                            value,
+                            metadata: Some(merged),
+                        })
+                    }
+                    Expr::Defn {
+                        name,
+                        params,
+                        rest_param,
+                        body,
+                        metadata: existing,
+                    } => {
+                        let merged = Self::merge_metadata(existing, metadata);
+                        Ok(Expr::Defn {
+                            name,
+                            params,
+                            rest_param,
+                            body,
+                            metadata: Some(merged),
+                        })
+                    }
+                    Expr::DefnMulti {
+                        name,
+                        arities,
+                        metadata: existing,
+                    } => {
+                        let merged = Self::merge_metadata(existing, metadata);
+                        Ok(Expr::DefnMulti {
+                            name,
+                            arities,
+                            metadata: Some(merged),
+                        })
+                    }
+                    Expr::Defmulti {
+                        name,
+                        dispatch_fn,
+                        metadata: existing,
+                    } => {
+                        let merged = Self::merge_metadata(existing, metadata);
+                        Ok(Expr::Defmulti {
+                            name,
+                            dispatch_fn,
+                            metadata: Some(merged),
+                        })
+                    }
+                    // If target is already a with-meta form with a literal metadata map,
+                    // merge reader metadata into that map so chained prefixes and explicit
+                    // with-meta forms preserve existing entries.
+                    Expr::Call { func, mut args } if func == "with-meta" && args.len() == 2 => {
+                        if let Expr::Map(existing_entries) = args.pop().unwrap() {
+                            let mut merged_entries = existing_entries;
+                            merged_entries.extend(metadata);
+                            let target_expr = args.pop().unwrap();
+                            Ok(Expr::Call {
+                                func: "with-meta".to_string(),
+                                args: vec![target_expr, Expr::Map(merged_entries)],
+                            })
+                        } else {
+                            // Non-literal metadata argument; keep explicit form and apply
+                            // outer reader metadata as another with-meta layer.
+                            let target_expr = Expr::Call { func, args };
+                            Ok(Expr::Call {
+                                func: "with-meta".to_string(),
+                                args: vec![target_expr, Expr::Map(metadata)],
+                            })
+                        }
+                    }
+                    // For non-def forms, lower metadata prefix to (with-meta target {:k v ...}).
+                    _ => Ok(Expr::Call {
+                        func: "with-meta".to_string(),
+                        args: vec![target, Expr::Map(metadata)],
+                    }),
+                }
             }
 
             Token::RParen(_) | Token::RBracket(_) | Token::RBrace(_) => {
@@ -179,8 +274,7 @@ impl Parser {
                 let span = self.current_token().span();
                 Err(format!(
                     "Unexpected end of input at line {}, column {}",
-                    span.line,
-                    span.column
+                    span.line, span.column
                 ))
             }
         }
@@ -206,6 +300,8 @@ impl Parser {
                 "extend-type" => return self.parse_extend_type(),
                 "defmulti" => return self.parse_defmulti(),
                 "defmethod" => return self.parse_defmethod(),
+                "prefer-method" => return self.parse_prefer_method(),
+                "remove-method" => return self.parse_remove_method(),
                 "fn" => return self.parse_fn(),
                 "if" => return self.parse_if(),
                 "do" => return self.parse_do(),
@@ -214,8 +310,10 @@ impl Parser {
                 "use" => return self.parse_use(),
                 "loop" => return self.parse_loop(),
                 "recur" => return self.parse_recur(),
+                "binding" => return self.parse_binding(),
                 "try" => return self.parse_try(),
                 "throw" => return self.parse_throw(),
+                "set!" => return self.parse_set_bang(),
                 _ => {}
             }
         }
@@ -225,6 +323,10 @@ impl Parser {
         while !matches!(self.current_token(), Token::RParen(_)) {
             if self.current_token() == &self.eof_token {
                 return Err("Unclosed list".to_string());
+            }
+            if matches!(self.current_token(), Token::ReaderDiscard(_)) {
+                self.skip_reader_discard()?;
+                continue;
             }
             elements.push(self.parse_expr()?);
         }
@@ -264,35 +366,55 @@ impl Parser {
         };
         self.advance();
 
-        // Check for optional docstring
-        // (defn foo "docstring" [...] body) or (defn foo "docstring" ([] ...) ([x] ...))
-        let _docstring = if let Token::String(_, _) = self.current_token() {
-            // Consume the docstring but don't use it yet (could be added to AST later)
-            let docstring = match self.current_token() {
-                Token::String(s, _) => Some(s.clone()),
-                _ => None,
-            };
+        // Optional docstring and attr-map metadata:
+        // (defn f "doc" {:private true} [x] ...)
+        let mut metadata = Vec::new();
+        if let Token::String(s, _) = self.current_token() {
+            metadata.push((Expr::Keyword("doc".to_string()), Expr::String(s.clone())));
             self.advance();
-            docstring
-        } else {
-            None
-        };
+        }
+
+        if matches!(self.current_token(), Token::LBrace(_)) {
+            let attr_expr = self.parse_expr()?;
+            match attr_expr {
+                Expr::Map(entries) => metadata.extend(entries),
+                _ => return Err("defn attribute map must be a map literal".to_string()),
+            }
+        }
 
         // Check if this is single-arity or multi-arity
         // Single: (defn foo [x y] body) or (defn foo "doc" [x y] body)
         // Multi:  (defn foo ([] body1) ([x] body2)) or (defn foo "doc" ([] ...) ([x] ...))
         if matches!(self.current_token(), Token::LBracket(_)) {
             // Single arity
-            self.parse_single_arity_defn(name)
+            self.parse_single_arity_defn(
+                name,
+                if metadata.is_empty() {
+                    None
+                } else {
+                    Some(metadata)
+                },
+            )
         } else if matches!(self.current_token(), Token::LParen(_)) {
             // Multi arity
-            self.parse_multi_arity_defn(name)
+            self.parse_multi_arity_defn(
+                name,
+                if metadata.is_empty() {
+                    None
+                } else {
+                    Some(metadata)
+                },
+            )
         } else {
             Err("defn requires either parameter vector [...] or arity clauses (...)".to_string())
         }
     }
 
-    fn parse_single_arity_defn(&mut self, name: String) -> Result<Expr, String> {
+    fn parse_single_arity_defn(
+        &mut self,
+        name: String,
+        metadata: Option<Vec<(Expr, Expr)>>,
+    ) -> Result<Expr, String> {
         // Expect parameter vector: [x y z]
         if !matches!(self.current_token(), Token::LBracket(_)) {
             return Err("defn requires a parameter vector [...]".to_string());
@@ -340,6 +462,11 @@ impl Parser {
         // Parse body (single expression for now)
         let body = self.parse_expr()?;
 
+        if !matches!(self.current_token(), Token::RParen(_)) {
+            return Err(
+                "defn body expects a single expression; wrap multiple forms in (do ...)".to_string(),
+            );
+        }
         self.expect(Token::RParen(Span::dummy()))?;
 
         Ok(Expr::Defn {
@@ -347,10 +474,15 @@ impl Parser {
             params,
             rest_param,
             body: Box::new(body),
+            metadata,
         })
     }
 
-    fn parse_multi_arity_defn(&mut self, name: String) -> Result<Expr, String> {
+    fn parse_multi_arity_defn(
+        &mut self,
+        name: String,
+        metadata: Option<Vec<(Expr, Expr)>>,
+    ) -> Result<Expr, String> {
         use crate::ast::FunctionArity;
 
         let mut arities = Vec::new();
@@ -403,6 +535,12 @@ impl Parser {
             // Parse body
             let body = self.parse_expr()?;
 
+            if !matches!(self.current_token(), Token::RParen(_)) {
+                return Err(
+                    "Each defn arity body expects a single expression; wrap multiple forms in (do ...)"
+                        .to_string(),
+                );
+            }
             self.expect(Token::RParen(Span::dummy()))?; // consume ) closing arity clause
 
             arities.push(FunctionArity {
@@ -418,7 +556,11 @@ impl Parser {
             return Err("Multi-arity defn must have at least one arity clause".to_string());
         }
 
-        Ok(Expr::DefnMulti { name, arities })
+        Ok(Expr::DefnMulti {
+            name,
+            arities,
+            metadata,
+        })
     }
 
     fn parse_defmacro(&mut self) -> Result<Expr, String> {
@@ -631,7 +773,10 @@ impl Parser {
 
         // Expect field vector: [field1 field2]
         if !matches!(self.current_token(), Token::LBracket(_)) {
-            return Err(format!("deftype requires a field vector [...], found {:?}", self.current_token()));
+            return Err(format!(
+                "deftype requires a field vector [...], found {:?}",
+                self.current_token()
+            ));
         }
         self.advance(); // consume [
 
@@ -830,7 +975,9 @@ impl Parser {
 
             // Each method is a list: (method-name [params] body)
             if !matches!(self.current_token(), Token::LParen(_)) {
-                return Err("extend-type method must be a list (method-name [params] body)".to_string());
+                return Err(
+                    "extend-type method must be a list (method-name [params] body)".to_string(),
+                );
             }
             self.advance(); // consume (
 
@@ -896,6 +1043,20 @@ impl Parser {
         };
         self.advance();
 
+        // Optional docstring and attr-map metadata, same surface as defn.
+        let mut metadata = Vec::new();
+        if let Token::String(s, _) = self.current_token() {
+            metadata.push((Expr::Keyword("doc".to_string()), Expr::String(s.clone())));
+            self.advance();
+        }
+        if matches!(self.current_token(), Token::LBrace(_)) {
+            let attr_expr = self.parse_expr()?;
+            match attr_expr {
+                Expr::Map(entries) => metadata.extend(entries),
+                _ => return Err("defmulti attr-map metadata must be a map literal".to_string()),
+            }
+        }
+
         // Parse dispatch function (can be any expression)
         let dispatch_fn = self.parse_expr()?;
 
@@ -904,6 +1065,11 @@ impl Parser {
         Ok(Expr::Defmulti {
             name,
             dispatch_fn: Box::new(dispatch_fn),
+            metadata: if metadata.is_empty() {
+                None
+            } else {
+                Some(metadata)
+            },
         })
     }
 
@@ -954,6 +1120,56 @@ impl Parser {
             dispatch_value: Box::new(dispatch_value),
             params,
             body: Box::new(body),
+        })
+    }
+
+    fn parse_prefer_method(&mut self) -> Result<Expr, String> {
+        // (prefer-method area :a :b)
+        if let Token::Symbol(s, _) = self.current_token() {
+            if s == "prefer-method" {
+                self.advance();
+            }
+        }
+
+        let name = match self.current_token() {
+            Token::Symbol(s, _) => s.clone(),
+            _ => return Err("prefer-method requires a multimethod name".to_string()),
+        };
+        self.advance();
+
+        let preferred_dispatch = self.parse_expr()?;
+        let over_dispatch = self.parse_expr()?;
+
+        self.expect(Token::RParen(Span::dummy()))?;
+
+        Ok(Expr::PreferMethod {
+            name,
+            preferred_dispatch: Box::new(preferred_dispatch),
+            over_dispatch: Box::new(over_dispatch),
+        })
+    }
+
+    fn parse_remove_method(&mut self) -> Result<Expr, String> {
+        // (remove-method area :dispatch)
+        if let Token::Symbol(s, _) = self.current_token() {
+            if s == "remove-method" {
+                self.advance();
+            }
+        }
+
+        let name = match self.current_token() {
+            Token::Symbol(s, _) => s.clone(),
+            _ => return Err("remove-method requires a multimethod name".to_string()),
+        };
+        self.advance();
+
+        let dispatch_value = self.parse_expr()?;
+
+        self.expect(Token::RParen(Span::dummy()))?;
+
+        Ok(Expr::RemoveMethod {
+            name,
+            dispatch_value: Box::new(dispatch_value),
         })
     }
 
@@ -1157,9 +1373,7 @@ impl Parser {
             Box::new(body_exprs.into_iter().next().unwrap())
         } else {
             // Multiple expressions in body - wrap in an implicit do
-            Box::new(Expr::Do {
-                exprs: body_exprs
-            })
+            Box::new(Expr::Do { exprs: body_exprs })
         };
 
         Ok(Expr::Let { bindings, body })
@@ -1203,7 +1417,10 @@ impl Parser {
 
             // Parse parameter vector
             if !matches!(self.current_token(), Token::LBracket(_)) {
-                return Err(format!("letfn function '{}' requires parameter vector", name));
+                return Err(format!(
+                    "letfn function '{}' requires parameter vector",
+                    name
+                ));
             }
             self.advance(); // consume [
 
@@ -1219,14 +1436,19 @@ impl Parser {
                 if let Token::Symbol(s, _) = self.current_token() {
                     if s == "&" {
                         self.advance(); // consume &
-                        // Next should be rest parameter name
+                                        // Next should be rest parameter name
                         match self.current_token() {
                             Token::Symbol(rest_name, _) => {
                                 rest_param = Some(rest_name.clone());
                                 self.advance();
                                 break; // & must be last
                             }
-                            _ => return Err(format!("Expected rest parameter name after & in function '{}'", name)),
+                            _ => {
+                                return Err(format!(
+                                    "Expected rest parameter name after & in function '{}'",
+                                    name
+                                ))
+                            }
                         }
                     }
                 }
@@ -1255,9 +1477,7 @@ impl Parser {
                 Box::new(body_exprs.into_iter().next().unwrap())
             } else {
                 // Multiple expressions in body - wrap in an implicit do
-                Box::new(Expr::Do {
-                    exprs: body_exprs
-                })
+                Box::new(Expr::Do { exprs: body_exprs })
             };
 
             bindings.push((name, params, rest_param, body));
@@ -1283,9 +1503,7 @@ impl Parser {
             Box::new(body_exprs.into_iter().next().unwrap())
         } else {
             // Multiple expressions in body - wrap in an implicit do
-            Box::new(Expr::Do {
-                exprs: body_exprs
-            })
+            Box::new(Expr::Do { exprs: body_exprs })
         };
 
         Ok(Expr::Letfn { bindings, body })
@@ -1310,7 +1528,7 @@ impl Parser {
             Token::LBracket(_) => self.parse_vector_pattern(),
             Token::LBrace(_) => self.parse_map_pattern(),
 
-            _ => Err(format!("Invalid pattern: {:?}", self.current_token()))
+            _ => Err(format!("Invalid pattern: {:?}", self.current_token())),
         }
     }
 
@@ -1355,7 +1573,11 @@ impl Parser {
         }
 
         self.expect(Token::RBracket(Span::dummy()))?;
-        Ok(Pattern::Vector { elements, rest: rest_param, as_binding: None })
+        Ok(Pattern::Vector {
+            elements,
+            rest: rest_param,
+            as_binding: None,
+        })
     }
 
     /// Parse map destructuring pattern: {:keys [x y]}
@@ -1380,10 +1602,8 @@ impl Parser {
                     match self.current_token() {
                         Token::Symbol(s, _) => {
                             let name = s.clone();
-                            bindings.push((
-                                MapPatternKey::Symbol(name.clone()),
-                                Pattern::Symbol(name)
-                            ));
+                            bindings
+                                .push((MapPatternKey::Symbol(name.clone()), Pattern::Symbol(name)));
                             self.advance();
                         }
                         _ => return Err(":keys vector must contain symbols".to_string()),
@@ -1392,7 +1612,10 @@ impl Parser {
 
                 self.expect(Token::RBracket(Span::dummy()))?;
                 self.expect(Token::RBrace(Span::dummy()))?;
-                return Ok(Pattern::Map { bindings, defaults: None });
+                return Ok(Pattern::Map {
+                    bindings,
+                    defaults: None,
+                });
             }
         }
 
@@ -1410,18 +1633,26 @@ impl Parser {
             // Expect: keyword (map key)
             let map_key = match self.current_token() {
                 Token::Keyword(k, _) => k.clone(),
-                _ => return Err(format!("Expected keyword after {} in map destructuring", binding_name)),
+                _ => {
+                    return Err(format!(
+                        "Expected keyword after {} in map destructuring",
+                        binding_name
+                    ))
+                }
             };
             self.advance();
 
             bindings.push((
                 MapPatternKey::Symbol(map_key),
-                Pattern::Symbol(binding_name)
+                Pattern::Symbol(binding_name),
             ));
         }
 
         self.expect(Token::RBrace(Span::dummy()))?;
-        Ok(Pattern::Map { bindings, defaults: None })
+        Ok(Pattern::Map {
+            bindings,
+            defaults: None,
+        })
     }
 
     fn parse_def(&mut self) -> Result<Expr, String> {
@@ -1430,6 +1661,15 @@ impl Parser {
             if s == "def" {
                 self.advance();
             }
+        }
+
+        // Optional metadata prefixes before var name:
+        // (def ^:dynamic *x* 1)
+        // (def ^{:doc "text"} x 1)
+        let mut metadata = Vec::new();
+        while matches!(self.current_token(), Token::Meta(_)) {
+            self.advance(); // consume ^
+            metadata.extend(self.parse_metadata_form()?);
         }
 
         // Get variable name
@@ -1447,8 +1687,43 @@ impl Parser {
         Ok(Expr::Def {
             name,
             value: Box::new(value),
-            metadata: None,
+            metadata: if metadata.is_empty() {
+                None
+            } else {
+                Some(metadata)
+            },
         })
+    }
+
+    /// Parse a single metadata form after `^` and normalize to map entries.
+    /// Supported forms (Clojure-compatible):
+    /// - ^:dynamic      => {:dynamic true}
+    /// - ^String        => {:tag String}
+    /// - ^"doc text"    => {:doc "doc text"}
+    /// - ^{:k v ...}    => {:k v ...}
+    fn parse_metadata_form(&mut self) -> Result<Vec<(Expr, Expr)>, String> {
+        let meta_expr = self.parse_expr()?;
+        match meta_expr {
+            Expr::Keyword(k) => Ok(vec![(Expr::Keyword(k), Expr::Bool(true))]),
+            Expr::Symbol(s) => Ok(vec![(
+                Expr::Keyword("tag".to_string()),
+                Expr::Quote {
+                    expr: Box::new(Expr::Symbol(s)),
+                },
+            )]),
+            Expr::String(s) => Ok(vec![(Expr::Keyword("doc".to_string()), Expr::String(s))]),
+            Expr::Map(entries) => Ok(entries),
+            _ => Err("metadata form must be keyword, symbol, string, or map".to_string()),
+        }
+    }
+
+    fn merge_metadata(
+        existing: Option<Vec<(Expr, Expr)>>,
+        extra: Vec<(Expr, Expr)>,
+    ) -> Vec<(Expr, Expr)> {
+        let mut merged = existing.unwrap_or_default();
+        merged.extend(extra);
+        merged
     }
 
     fn parse_if(&mut self) -> Result<Expr, String> {
@@ -1632,7 +1907,67 @@ impl Parser {
 
         self.expect(Token::RParen(Span::dummy()))?;
 
-        Ok(Expr::Loop { bindings, body: Box::new(body) })
+        Ok(Expr::Loop {
+            bindings,
+            body: Box::new(body),
+        })
+    }
+
+    fn parse_binding(&mut self) -> Result<Expr, String> {
+        // Already saw 'binding', consume it.
+        if let Token::Symbol(s, _) = self.current_token() {
+            if s == "binding" {
+                self.advance();
+            }
+        }
+
+        // Expect binding vector: [*x* 1 *y* 2]
+        if !matches!(self.current_token(), Token::LBracket(_)) {
+            return Err("binding requires a binding vector [...]".to_string());
+        }
+        self.advance(); // consume [
+
+        let mut bindings = Vec::new();
+        while !matches!(self.current_token(), Token::RBracket(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed binding vector in binding".to_string());
+            }
+
+            let name = match self.current_token() {
+                Token::Symbol(s, _) => s.clone(),
+                _ => return Err("binding requires symbol names in binding vector".to_string()),
+            };
+            self.advance();
+
+            let value = self.parse_expr()?;
+            bindings.push((name, Box::new(value)));
+        }
+        self.expect(Token::RBracket(Span::dummy()))?; // consume ]
+
+        if matches!(self.current_token(), Token::RParen(_)) {
+            return Err("binding requires a body expression".to_string());
+        }
+
+        // Parse one or more body expressions.
+        let mut body_exprs = Vec::new();
+        while !matches!(self.current_token(), Token::RParen(_)) {
+            if self.current_token() == &self.eof_token {
+                return Err("Unclosed binding form".to_string());
+            }
+            body_exprs.push(self.parse_expr()?);
+        }
+        self.expect(Token::RParen(Span::dummy()))?; // consume )
+
+        let body = if body_exprs.len() == 1 {
+            body_exprs.into_iter().next().unwrap()
+        } else {
+            Expr::Do { exprs: body_exprs }
+        };
+
+        Ok(Expr::Binding {
+            bindings,
+            body: Box::new(body),
+        })
     }
 
     fn parse_recur(&mut self) -> Result<Expr, String> {
@@ -1694,25 +2029,35 @@ impl Parser {
                 Token::Symbol(s, _) if s == "catch" => {
                     self.advance(); // consume 'catch'
 
-                    // Parse exception type (optional - if not present, catch all)
-                    let exception_type = if matches!(self.current_token(), Token::Symbol(_, _)) {
-                        let next = self.current_token().clone();
-                        if let Token::Symbol(type_name, _) = next {
-                            self.advance();
-                            Some(type_name)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    // Parse binding variable
-                    let binding = match self.current_token() {
-                        Token::Symbol(var, _) => {
-                            let v = var.clone();
-                            self.advance();
-                            v
+                    // Parse catch forms:
+                    // 1) (catch ExceptionType e handler)
+                    // 2) (catch e handler)  ; shorthand catch-all
+                    let (exception_type, binding) = match self.current_token() {
+                        Token::Symbol(first, _) => {
+                            let first_sym = first.clone();
+                            let second_sym = match self.tokens.get(self.position + 1) {
+                                Some(Token::Symbol(sym, _)) => Some(sym.clone()),
+                                _ => None,
+                            };
+                            let typed_catch = second_sym.is_some()
+                                && !matches!(
+                                    self.tokens.get(self.position + 2),
+                                    Some(Token::RParen(_))
+                                );
+                            match (typed_catch, second_sym) {
+                                (true, Some(sym)) => {
+                                    // Two symbols => typed catch
+                                    self.advance(); // consume exception type
+                                    let bind = sym;
+                                    self.advance(); // consume binding
+                                    (Some(first_sym), bind)
+                                }
+                                _ => {
+                                    // One symbol => shorthand catch-all binding
+                                    self.advance(); // consume binding
+                                    (None, first_sym)
+                                }
+                            }
                         }
                         _ => return Err("catch requires a binding variable".to_string()),
                     };
@@ -1775,6 +2120,28 @@ impl Parser {
         })
     }
 
+    fn parse_set_bang(&mut self) -> Result<Expr, String> {
+        // (set! x expr)
+        self.advance(); // Skip 'set!'
+
+        let target = match self.current_token() {
+            Token::Symbol(name, _) => {
+                let n = name.clone();
+                self.advance();
+                n
+            }
+            _ => return Err("set! requires a symbol target".to_string()),
+        };
+
+        let value = self.parse_expr()?;
+        self.expect(Token::RParen(Span::dummy()))?;
+
+        Ok(Expr::SetBang {
+            target,
+            value: Box::new(value),
+        })
+    }
+
     fn parse_ns(&mut self) -> Result<Expr, String> {
         // (ns my.app.core
         //   (:require [my.lib :as lib] [other.lib :refer [func1 func2]])
@@ -1816,7 +2183,7 @@ impl Parser {
             match self.current_token() {
                 Token::Keyword(kw, _) if kw == "require" => {
                     self.advance(); // Skip :require
-                    // Parse all require specs until )
+                                    // Parse all require specs until )
                     while !matches!(self.current_token(), Token::RParen(_)) {
                         requires.push(self.parse_require_spec()?);
                     }
@@ -1824,7 +2191,7 @@ impl Parser {
                 }
                 Token::Keyword(kw, _) if kw == "rust" => {
                     self.advance(); // Skip :rust
-                    // Parse all rust import specs until )
+                                    // Parse all rust import specs until )
                     while !matches!(self.current_token(), Token::RParen(_)) {
                         rust_imports.push(self.parse_rust_import_spec()?);
                     }
@@ -1915,6 +2282,7 @@ impl Parser {
         let mut alias = None;
         let mut refer = Vec::new();
         let mut refer_all = false;
+        let mut rename = Vec::new();
 
         // Parse options: :as alias, :refer [...]
         while !matches!(self.current_token(), Token::RBracket(_)) {
@@ -1953,7 +2321,44 @@ impl Parser {
                         return Err(":refer requires :all or a vector [func1 func2]".to_string());
                     }
                 }
-                _ => return Err(format!("Unknown option in require spec: {:?}", self.current_token())),
+                Token::Keyword(kw, _) if kw == "rename" => {
+                    self.advance(); // Skip :rename
+
+                    if !matches!(self.current_token(), Token::LBrace(_)) {
+                        return Err(":rename requires a map {old new ...}".to_string());
+                    }
+
+                    self.advance(); // Skip {
+                    while !matches!(self.current_token(), Token::RBrace(_)) {
+                        let from = match self.current_token() {
+                            Token::Symbol(name, _) => {
+                                let n = name.clone();
+                                self.advance();
+                                n
+                            }
+                            _ => return Err(":rename map keys must be symbols".to_string()),
+                        };
+
+                        let to = match self.current_token() {
+                            Token::Symbol(name, _) => {
+                                let n = name.clone();
+                                self.advance();
+                                n
+                            }
+                            _ => return Err(":rename map values must be symbols".to_string()),
+                        };
+
+                        rename.push((from, to));
+                    }
+
+                    self.expect(Token::RBrace(Span::dummy()))?;
+                }
+                _ => {
+                    return Err(format!(
+                        "Unknown option in require spec: {:?}",
+                        self.current_token()
+                    ))
+                }
             }
         }
 
@@ -1964,6 +2369,7 @@ impl Parser {
             alias,
             refer,
             refer_all,
+            rename,
         })
     }
 
@@ -1997,7 +2403,12 @@ impl Parser {
                         _ => return Err(":as requires an alias name".to_string()),
                     }
                 }
-                _ => return Err(format!("Unknown option in rust import: {:?}", self.current_token())),
+                _ => {
+                    return Err(format!(
+                        "Unknown option in rust import: {:?}",
+                        self.current_token()
+                    ))
+                }
             }
         }
 
@@ -2047,23 +2458,30 @@ impl Parser {
         let param_set = self.collect_shorthand_params(&body)?;
 
         // Generate parameter list from collected params
-        let params = self.generate_param_list(&param_set)?;
+        let (params, rest_param) = self.generate_param_list(&param_set)?;
 
         // Transform to Fn expression
         Ok(Expr::Fn {
             params,
-            rest_param: None, // Shorthand functions don't support rest params
+            rest_param,
             body: Box::new(body),
         })
     }
 
     /// Collect all shorthand parameter symbols from an expression
     /// Returns a set of parameter names: "%", "%1", "%2", etc.
-    fn collect_shorthand_params(&self, expr: &Expr) -> Result<std::collections::HashSet<String>, String> {
+    fn collect_shorthand_params(
+        &self,
+        expr: &Expr,
+    ) -> Result<std::collections::HashSet<String>, String> {
         self.collect_shorthand_params_impl(expr, 0)
     }
 
-    fn collect_shorthand_params_impl(&self, expr: &Expr, depth: usize) -> Result<std::collections::HashSet<String>, String> {
+    fn collect_shorthand_params_impl(
+        &self,
+        expr: &Expr,
+        depth: usize,
+    ) -> Result<std::collections::HashSet<String>, String> {
         use std::collections::HashSet;
 
         if depth > 100 {
@@ -2146,6 +2564,10 @@ impl Parser {
                 // Method bodies are handled separately
             }
 
+            Expr::PreferMethod { .. } | Expr::RemoveMethod { .. } => {
+                // Don't recurse into multimethod preference/removal declarations
+            }
+
             Expr::DefnMulti { .. } | Expr::FnMulti { .. } => {
                 // Don't recurse into multi-arity function bodies either
                 // Each arity clause handles its own parameters
@@ -2157,7 +2579,11 @@ impl Parser {
                 }
             }
 
-            Expr::If { condition, then_branch, else_branch } => {
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 params.extend(self.collect_shorthand_params_impl(condition, depth + 1)?);
                 params.extend(self.collect_shorthand_params_impl(then_branch, depth + 1)?);
                 params.extend(self.collect_shorthand_params_impl(else_branch, depth + 1)?);
@@ -2180,7 +2606,10 @@ impl Parser {
                 params.extend(self.collect_shorthand_params_impl(expr, depth + 1)?);
             }
 
-            Expr::SyntaxQuote { expr } | Expr::Unquote { expr } | Expr::UnquoteSplicing { expr } | Expr::Deref { expr } => {
+            Expr::SyntaxQuote { expr }
+            | Expr::Unquote { expr }
+            | Expr::UnquoteSplicing { expr }
+            | Expr::Deref { expr } => {
                 // Recurse into syntax-quoted/unquoted/deref expressions
                 params.extend(self.collect_shorthand_params_impl(expr, depth + 1)?);
             }
@@ -2200,7 +2629,11 @@ impl Parser {
                 }
             }
 
-            Expr::Try { body, catch_clauses, finally_block } => {
+            Expr::Try {
+                body,
+                catch_clauses,
+                finally_block,
+            } => {
                 // Recurse into try body
                 params.extend(self.collect_shorthand_params_impl(body, depth + 1)?);
 
@@ -2236,10 +2669,21 @@ impl Parser {
                 params.extend(self.collect_shorthand_params_impl(body, depth + 1)?);
             }
 
+            Expr::SetBang { value, .. } => {
+                params.extend(self.collect_shorthand_params_impl(value, depth + 1)?);
+            }
+
             // Atoms don't contain parameters
-            Expr::Long(_) | Expr::Double(_) | Expr::String(_) | Expr::Keyword(_)
-            | Expr::Bool(_) | Expr::Nil | Expr::Ns { .. }
-            | Expr::Require { .. } | Expr::Use { .. } | Expr::Letfn { .. } => {}
+            Expr::Long(_)
+            | Expr::Double(_)
+            | Expr::String(_)
+            | Expr::Keyword(_)
+            | Expr::Bool(_)
+            | Expr::Nil
+            | Expr::Ns { .. }
+            | Expr::Require { .. }
+            | Expr::Use { .. }
+            | Expr::Letfn { .. } => {}
         }
 
         Ok(params)
@@ -2249,19 +2693,22 @@ impl Parser {
     /// % => ["%"]
     /// %1, %3, %2 => ["%1", "%2", "%3"]
     /// % and %2 => ["%", "%2"]  (% is always first)
-    fn generate_param_list(&self, symbols: &std::collections::HashSet<String>) -> Result<Vec<crate::ast::Pattern>, String> {
+    fn generate_param_list(
+        &self,
+        symbols: &std::collections::HashSet<String>,
+    ) -> Result<(Vec<crate::ast::Pattern>, Option<String>), String> {
         use crate::ast::Pattern;
 
         let mut params = Vec::new();
         let mut numbered_params = Vec::new();
+        let mut has_rest = false;
 
         for sym in symbols {
             if sym == "%" {
                 // Plain % is the first (and often only) parameter
                 params.push(Pattern::Symbol("%".to_string()));
             } else if sym == "%&" {
-                // TODO: Handle rest parameters in future
-                return Err("Shorthand rest parameters (%&) not yet supported".to_string());
+                has_rest = true;
             } else if sym.starts_with('%') {
                 // Numbered parameter like %1, %2, %3
                 let num_str = &sym[1..];
@@ -2286,18 +2733,29 @@ impl Parser {
             let expected_nums: Vec<usize> = (1..=numbered_params.len()).collect();
             let actual_nums: Vec<usize> = numbered_params.iter().map(|(n, _)| *n).collect();
             if expected_nums != actual_nums {
-                return Err(format!("Shorthand parameters must be sequential: got {:?}, expected {:?}",
-                    actual_nums, expected_nums));
+                return Err(format!(
+                    "Shorthand parameters must be sequential: got {:?}, expected {:?}",
+                    actual_nums, expected_nums
+                ));
             }
 
-            params.extend(numbered_params.into_iter().map(|(_, sym)| Pattern::Symbol(sym)));
+            params.extend(
+                numbered_params
+                    .into_iter()
+                    .map(|(_, sym)| Pattern::Symbol(sym)),
+            );
         }
 
         // Allow zero-parameter shorthand functions (Clojure compatibility)
         // #(reset! count 0) => (fn [] (reset! count 0))
         // If no parameters found, return empty params list
 
-        Ok(params)
+        let rest_param = if has_rest {
+            Some("%&".to_string())
+        } else {
+            None
+        };
+        Ok((params, rest_param))
     }
 
     fn parse_vector(&mut self) -> Result<Expr, String> {
@@ -2307,6 +2765,10 @@ impl Parser {
         while !matches!(self.current_token(), Token::RBracket(_)) {
             if self.current_token() == &self.eof_token {
                 return Err("Unclosed vector".to_string());
+            }
+            if matches!(self.current_token(), Token::ReaderDiscard(_)) {
+                self.skip_reader_discard()?;
+                continue;
             }
             elements.push(self.parse_expr()?);
         }
@@ -2322,6 +2784,10 @@ impl Parser {
         while !matches!(self.current_token(), Token::RBrace(_)) {
             if self.current_token() == &self.eof_token {
                 return Err("Unclosed map".to_string());
+            }
+            if matches!(self.current_token(), Token::ReaderDiscard(_)) {
+                self.skip_reader_discard()?;
+                continue;
             }
 
             let key = self.parse_expr()?;
@@ -2345,6 +2811,10 @@ impl Parser {
             if self.current_token() == &self.eof_token {
                 return Err("Unclosed set".to_string());
             }
+            if matches!(self.current_token(), Token::ReaderDiscard(_)) {
+                self.skip_reader_discard()?;
+                continue;
+            }
             elements.push(self.parse_expr()?);
         }
 
@@ -2356,10 +2826,20 @@ impl Parser {
         let mut expressions = Vec::new();
 
         while !matches!(self.current_token(), Token::Eof(_)) {
+            if matches!(self.current_token(), Token::ReaderDiscard(_)) {
+                self.skip_reader_discard()?;
+                continue;
+            }
             expressions.push(self.parse_expr()?);
         }
 
         Ok(expressions)
+    }
+
+    fn skip_reader_discard(&mut self) -> Result<(), String> {
+        self.advance(); // consume #_
+        let _ = self.parse_expr()?;
+        Ok(())
     }
 }
 
@@ -2427,10 +2907,13 @@ mod tests {
         // defn is now a special form, so it should be parsed as Expr::Defn
         if let Expr::Defn { name, params, .. } = &exprs[0] {
             assert_eq!(name, "add");
-            assert_eq!(params, &vec![
-                crate::ast::Pattern::Symbol("x".to_string()),
-                crate::ast::Pattern::Symbol("y".to_string())
-            ]);
+            assert_eq!(
+                params,
+                &vec![
+                    crate::ast::Pattern::Symbol("x".to_string()),
+                    crate::ast::Pattern::Symbol("y".to_string())
+                ]
+            );
         } else {
             panic!("Expected Defn expression, got: {:?}", exprs[0]);
         }
@@ -2441,7 +2924,12 @@ mod tests {
         let exprs = parse_str("(ns my.app.core)").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Ns { name, requires, rust_imports } = &exprs[0] {
+        if let Expr::Ns {
+            name,
+            requires,
+            rust_imports,
+        } = &exprs[0]
+        {
             assert_eq!(name, "my.app.core");
             assert!(requires.is_empty());
             assert!(rust_imports.is_empty());
@@ -2455,13 +2943,19 @@ mod tests {
         let exprs = parse_str("(ns my.app.core (:require [my.lib :as lib]))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Ns { name, requires, rust_imports } = &exprs[0] {
+        if let Expr::Ns {
+            name,
+            requires,
+            rust_imports,
+        } = &exprs[0]
+        {
             assert_eq!(name, "my.app.core");
             assert_eq!(requires.len(), 1);
             assert_eq!(requires[0].module, "my.lib");
             assert_eq!(requires[0].alias, Some("lib".to_string()));
             assert!(requires[0].refer.is_empty());
             assert!(!requires[0].refer_all);
+            assert!(requires[0].rename.is_empty());
             assert!(rust_imports.is_empty());
         } else {
             panic!("Expected Ns expression");
@@ -2471,8 +2965,9 @@ mod tests {
     #[test]
     fn test_parse_ns_with_multiple_requires() {
         let exprs = parse_str(
-            "(ns my.app.core (:require [my.lib :as lib] [other.lib :refer [func1 func2]]))"
-        ).unwrap();
+            "(ns my.app.core (:require [my.lib :as lib] [other.lib :refer [func1 func2]]))",
+        )
+        .unwrap();
 
         if let Expr::Ns { name, requires, .. } = &exprs[0] {
             assert_eq!(name, "my.app.core");
@@ -2484,7 +2979,11 @@ mod tests {
 
             // Second require
             assert_eq!(requires[1].module, "other.lib");
-            assert_eq!(requires[1].refer, vec!["func1".to_string(), "func2".to_string()]);
+            assert_eq!(
+                requires[1].refer,
+                vec!["func1".to_string(), "func2".to_string()]
+            );
+            assert!(requires[1].rename.is_empty());
         } else {
             panic!("Expected Ns expression");
         }
@@ -2499,6 +2998,7 @@ mod tests {
             assert_eq!(requires[0].module, "my.lib");
             assert!(requires[0].refer_all);
             assert!(requires[0].refer.is_empty());
+            assert!(requires[0].rename.is_empty());
         } else {
             panic!("Expected Ns expression");
         }
@@ -2508,7 +3008,10 @@ mod tests {
     fn test_parse_ns_with_rust_import() {
         let exprs = parse_str("(ns my.app.gui (:rust [egui-hello :as gui]))").unwrap();
 
-        if let Expr::Ns { name, rust_imports, .. } = &exprs[0] {
+        if let Expr::Ns {
+            name, rust_imports, ..
+        } = &exprs[0]
+        {
             assert_eq!(name, "my.app.gui");
             assert_eq!(rust_imports.len(), 1);
             assert_eq!(rust_imports[0].library, "egui-hello");
@@ -2523,10 +3026,16 @@ mod tests {
         let exprs = parse_str(
             "(ns my.app.core \
              (:require [my.lib :as lib] [other.lib :refer [f1 f2]]) \
-             (:rust [egui-hello :as gui]))"
-        ).unwrap();
+             (:rust [egui-hello :as gui]))",
+        )
+        .unwrap();
 
-        if let Expr::Ns { name, requires, rust_imports } = &exprs[0] {
+        if let Expr::Ns {
+            name,
+            requires,
+            rust_imports,
+        } = &exprs[0]
+        {
             assert_eq!(name, "my.app.core");
             assert_eq!(requires.len(), 2);
             assert_eq!(rust_imports.len(), 1);
@@ -2558,6 +3067,7 @@ mod tests {
             assert_eq!(specs[0].module, "my.lib");
             assert_eq!(specs[1].module, "other.lib");
             assert_eq!(specs[1].refer, vec!["func".to_string()]);
+            assert!(specs[1].rename.is_empty());
         } else {
             panic!("Expected Require expression");
         }
@@ -2571,7 +3081,29 @@ mod tests {
             assert_eq!(specs.len(), 1);
             assert_eq!(specs[0].module, "my.lib");
             assert_eq!(specs[0].alias, Some("lib".to_string()));
-            assert_eq!(specs[0].refer, vec!["func1".to_string(), "func2".to_string()]);
+            assert_eq!(
+                specs[0].refer,
+                vec!["func1".to_string(), "func2".to_string()]
+            );
+            assert!(specs[0].rename.is_empty());
+        } else {
+            panic!("Expected Require expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_require_with_rename() {
+        let exprs =
+            parse_str("(require [my.lib :refer [func1] :rename {func1 renamed-func}])").unwrap();
+
+        if let Expr::Require { specs } = &exprs[0] {
+            assert_eq!(specs.len(), 1);
+            assert_eq!(specs[0].module, "my.lib");
+            assert_eq!(specs[0].refer, vec!["func1".to_string()]);
+            assert_eq!(
+                specs[0].rename,
+                vec![("func1".to_string(), "renamed-func".to_string())]
+            );
         } else {
             panic!("Expected Require expression");
         }
@@ -2617,9 +3149,6 @@ mod tests {
             panic!("Expected Fn expression");
         }
     }
-
-    // TODO: Shorthand fn tests disabled - causing stack overflow/infinite loop
-    // Will be re-enabled once the parsing issue is fixed
 
     #[test]
     fn test_parse_do_single() {
@@ -2678,13 +3207,18 @@ mod tests {
                     assert_eq!(elements.len(), 3);
                     assert_eq!(elements[0], Expr::Symbol("*".to_string()));
                     assert_eq!(elements[1], Expr::Symbol("%".to_string()));
-                    assert!(matches!(elements[2], Expr::Long(2)) || matches!(elements[2], Expr::Double(2.0)));
+                    assert!(
+                        matches!(elements[2], Expr::Long(2))
+                            || matches!(elements[2], Expr::Double(2.0))
+                    );
                 }
                 Expr::Call { func, args } => {
                     assert_eq!(func, "*");
                     assert_eq!(args.len(), 2);
                     assert_eq!(args[0], Expr::Symbol("%".to_string()));
-                    assert!(matches!(args[1], Expr::Long(2)) || matches!(args[1], Expr::Double(2.0)));
+                    assert!(
+                        matches!(args[1], Expr::Long(2)) || matches!(args[1], Expr::Double(2.0))
+                    );
                 }
                 _ => {
                     panic!("Expected list or call body");
@@ -2702,10 +3236,13 @@ mod tests {
         assert_eq!(exprs.len(), 1);
 
         if let Expr::Fn { params, .. } = &exprs[0] {
-            assert_eq!(params, &vec![
-                crate::ast::Pattern::Symbol("%1".to_string()),
-                crate::ast::Pattern::Symbol("%2".to_string())
-            ]);
+            assert_eq!(
+                params,
+                &vec![
+                    crate::ast::Pattern::Symbol("%1".to_string()),
+                    crate::ast::Pattern::Symbol("%2".to_string())
+                ]
+            );
         } else {
             panic!("Expected Fn expression");
         }
@@ -2742,12 +3279,46 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_shorthand_fn_rest_only() {
+        // #(count %&) => (fn [& %&] (count %&))
+        let exprs = parse_str("#(count %&)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        if let Expr::Fn {
+            params, rest_param, ..
+        } = &exprs[0]
+        {
+            assert!(params.is_empty());
+            assert_eq!(rest_param, &Some("%&".to_string()));
+        } else {
+            panic!("Expected Fn expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_shorthand_fn_numbered_with_rest() {
+        // #(+ %1 (count %&)) => (fn [%1 & %&] (+ %1 (count %&)))
+        let exprs = parse_str("#(+ %1 (count %&))").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        if let Expr::Fn {
+            params, rest_param, ..
+        } = &exprs[0]
+        {
+            assert_eq!(params, &vec![crate::ast::Pattern::Symbol("%1".to_string())]);
+            assert_eq!(rest_param, &Some("%&".to_string()));
+        } else {
+            panic!("Expected Fn expression");
+        }
+    }
+
+    #[test]
     fn test_parse_multi_arity_defn() {
         // Test multi-arity function definition
         let exprs = parse_str("(defn greet ([] 0) ([x] 1) ([x y] 2))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::DefnMulti { name, arities } = &exprs[0] {
+        if let Expr::DefnMulti { name, arities, .. } = &exprs[0] {
             assert_eq!(name, "greet");
             assert_eq!(arities.len(), 3);
 
@@ -2757,13 +3328,22 @@ mod tests {
 
             // Check second arity: [x]
             assert_eq!(arities[1].params.len(), 1);
-            assert_eq!(arities[1].params[0], crate::ast::Pattern::Symbol("x".to_string()));
+            assert_eq!(
+                arities[1].params[0],
+                crate::ast::Pattern::Symbol("x".to_string())
+            );
             assert!(arities[1].rest_param.is_none());
 
             // Check third arity: [x y]
             assert_eq!(arities[2].params.len(), 2);
-            assert_eq!(arities[2].params[0], crate::ast::Pattern::Symbol("x".to_string()));
-            assert_eq!(arities[2].params[1], crate::ast::Pattern::Symbol("y".to_string()));
+            assert_eq!(
+                arities[2].params[0],
+                crate::ast::Pattern::Symbol("x".to_string())
+            );
+            assert_eq!(
+                arities[2].params[1],
+                crate::ast::Pattern::Symbol("y".to_string())
+            );
             assert!(arities[2].rest_param.is_none());
         } else {
             panic!("Expected DefnMulti expression, got: {:?}", exprs[0]);
@@ -2784,7 +3364,10 @@ mod tests {
 
             // Check second arity: [x]
             assert_eq!(arities[1].params.len(), 1);
-            assert_eq!(arities[1].params[0], crate::ast::Pattern::Symbol("x".to_string()));
+            assert_eq!(
+                arities[1].params[0],
+                crate::ast::Pattern::Symbol("x".to_string())
+            );
 
             // Check third arity: [x y]
             assert_eq!(arities[2].params.len(), 2);
@@ -2799,7 +3382,7 @@ mod tests {
         let exprs = parse_str("(defn sum ([] 0) ([x] x) ([x y & rest] (+ x y)))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::DefnMulti { name, arities } = &exprs[0] {
+        if let Expr::DefnMulti { name, arities, .. } = &exprs[0] {
             assert_eq!(name, "sum");
             assert_eq!(arities.len(), 3);
 
@@ -2866,7 +3449,13 @@ mod tests {
         let exprs = parse_str("(defmacro when [test & body] `(if ~test (do ~@body) nil))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Defmacro { name, params, rest_param, body } = &exprs[0] {
+        if let Expr::Defmacro {
+            name,
+            params,
+            rest_param,
+            body,
+        } = &exprs[0]
+        {
             assert_eq!(name, "when");
             assert_eq!(params.len(), 1);
             assert_eq!(params[0], "test");
@@ -2884,7 +3473,13 @@ mod tests {
         let exprs = parse_str("(defmacro unless [test then] `(if (not ~test) ~then nil))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Defmacro { name, params, rest_param, .. } = &exprs[0] {
+        if let Expr::Defmacro {
+            name,
+            params,
+            rest_param,
+            ..
+        } = &exprs[0]
+        {
             assert_eq!(name, "unless");
             assert_eq!(params.len(), 2);
             assert_eq!(params[0], "test");
@@ -2901,13 +3496,21 @@ mod tests {
         let exprs = parse_str("(try (div 10 0) (catch Exception e (println e)))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Try { body, catch_clauses, finally_block } = &exprs[0] {
+        if let Expr::Try {
+            body,
+            catch_clauses,
+            finally_block,
+        } = &exprs[0]
+        {
             // Body should be (div 10 0)
             assert!(matches!(**body, Expr::Call { .. }));
 
             // Should have 1 catch clause
             assert_eq!(catch_clauses.len(), 1);
-            assert_eq!(catch_clauses[0].exception_type, Some("Exception".to_string()));
+            assert_eq!(
+                catch_clauses[0].exception_type,
+                Some("Exception".to_string())
+            );
             assert_eq!(catch_clauses[0].binding, "e");
 
             // No finally
@@ -2923,7 +3526,12 @@ mod tests {
         let exprs = parse_str("(try (open-file) (finally (close-file)))").unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Try { catch_clauses, finally_block, .. } = &exprs[0] {
+        if let Expr::Try {
+            catch_clauses,
+            finally_block,
+            ..
+        } = &exprs[0]
+        {
             // No catch clauses
             assert_eq!(catch_clauses.len(), 0);
 
@@ -2937,19 +3545,299 @@ mod tests {
     #[test]
     fn test_parse_try_catch_finally() {
         // Test try with both catch and finally
-        let exprs = parse_str(r#"
+        let exprs = parse_str(
+            r#"
             (try
               (risky-operation)
               (catch Error e (log e))
               (finally (cleanup)))
-        "#).unwrap();
+        "#,
+        )
+        .unwrap();
         assert_eq!(exprs.len(), 1);
 
-        if let Expr::Try { catch_clauses, finally_block, .. } = &exprs[0] {
+        if let Expr::Try {
+            catch_clauses,
+            finally_block,
+            ..
+        } = &exprs[0]
+        {
             assert_eq!(catch_clauses.len(), 1);
             assert!(finally_block.is_some());
         } else {
             panic!("Expected Try expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_def_metadata_inline() {
+        let exprs = parse_str("(def ^:dynamic ^\"doc\" *x* 1)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Def { name, metadata, .. } => {
+                assert_eq!(name, "*x*");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta
+                    .iter()
+                    .any(|(k, v)| *k == Expr::Keyword("dynamic".to_string())
+                        && *v == Expr::Bool(true)));
+                assert!(meta
+                    .iter()
+                    .any(|(k, v)| *k == Expr::Keyword("doc".to_string())
+                        && *v == Expr::String("doc".to_string())));
+            }
+            other => panic!("Expected def, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_metadata_prefix_on_def_form() {
+        let exprs = parse_str("^:private (def x 10)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Def { name, metadata, .. } => {
+                assert_eq!(name, "x");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta
+                    .iter()
+                    .any(|(k, v)| *k == Expr::Keyword("private".to_string())
+                        && *v == Expr::Bool(true)));
+            }
+            other => panic!("Expected def, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_metadata_prefix_on_non_def_lowers_to_with_meta() {
+        let exprs = parse_str("^:private [1 2]").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "with-meta");
+                assert_eq!(args.len(), 2);
+                match &args[1] {
+                    Expr::Map(entries) => {
+                        assert!(entries.iter().any(|(k, v)| {
+                            *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                        }));
+                    }
+                    _ => panic!("Expected metadata map argument"),
+                }
+            }
+            _ => panic!("Expected with-meta call"),
+        }
+    }
+
+    #[test]
+    fn test_parse_chained_metadata_prefixes_merge_into_single_map() {
+        let exprs = parse_str("^{:tag \"A\"} ^{:tag \"B\" :private true} [1 2]").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "with-meta");
+                assert_eq!(args.len(), 2);
+                match &args[1] {
+                    Expr::Map(entries) => {
+                        assert!(entries.iter().any(|(k, v)| {
+                            *k == Expr::Keyword("tag".to_string())
+                                && *v == Expr::String("A".to_string())
+                        }));
+                        assert!(entries.iter().any(|(k, v)| {
+                            *k == Expr::Keyword("tag".to_string())
+                                && *v == Expr::String("B".to_string())
+                        }));
+                        assert!(entries.iter().any(|(k, v)| {
+                            *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                        }));
+                    }
+                    _ => panic!("Expected metadata map argument"),
+                }
+            }
+            _ => panic!("Expected with-meta call"),
+        }
+    }
+
+    #[test]
+    fn test_parse_metadata_prefix_merges_with_explicit_with_meta_map() {
+        let exprs = parse_str("^:private (with-meta [1] {:doc \"d\"})").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Call { func, args } => {
+                assert_eq!(func, "with-meta");
+                assert_eq!(args.len(), 2);
+                match &args[1] {
+                    Expr::Map(entries) => {
+                        assert!(entries.iter().any(|(k, v)| {
+                            *k == Expr::Keyword("doc".to_string())
+                                && *v == Expr::String("d".to_string())
+                        }));
+                        assert!(entries.iter().any(|(k, v)| {
+                            *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                        }));
+                    }
+                    _ => panic!("Expected merged metadata map"),
+                }
+            }
+            _ => panic!("Expected with-meta call"),
+        }
+    }
+
+    #[test]
+    fn test_parse_defn_docstring_into_metadata() {
+        let exprs = parse_str("(defn foo \"doc text\" [x] x)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Defn { name, metadata, .. } => {
+                assert_eq!(name, "foo");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("doc".to_string())
+                        && *v == Expr::String("doc text".to_string())
+                }));
+            }
+            other => panic!("Expected defn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_defn_attr_map_into_metadata() {
+        let exprs = parse_str("(defn foo {:private true :dynamic true} [x] x)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Defn { name, metadata, .. } => {
+                assert_eq!(name, "foo");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                }));
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("dynamic".to_string()) && *v == Expr::Bool(true)
+                }));
+            }
+            other => panic!("Expected defn, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_defmulti_docstring_into_metadata() {
+        let exprs = parse_str("(defmulti area \"doc\" :kind)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Defmulti { name, metadata, .. } => {
+                assert_eq!(name, "area");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("doc".to_string()) && *v == Expr::String("doc".to_string())
+                }));
+            }
+            other => panic!("Expected defmulti, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_defmulti_attr_map_into_metadata() {
+        let exprs = parse_str("(defmulti area {:private true :dynamic true} :kind)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Defmulti { name, metadata, .. } => {
+                assert_eq!(name, "area");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                }));
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("dynamic".to_string()) && *v == Expr::Bool(true)
+                }));
+            }
+            other => panic!("Expected defmulti, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_metadata_prefix_on_defmulti_merges_into_metadata() {
+        let exprs = parse_str("^:private (defmulti area :kind)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Defmulti { name, metadata, .. } => {
+                assert_eq!(name, "area");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                }));
+            }
+            other => panic!("Expected defmulti, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_prefer_method() {
+        let exprs = parse_str("(prefer-method area :square :rectangle)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::PreferMethod {
+                name,
+                preferred_dispatch,
+                over_dispatch,
+            } => {
+                assert_eq!(name, "area");
+                assert_eq!(
+                    preferred_dispatch.as_ref(),
+                    &Expr::Keyword("square".to_string())
+                );
+                assert_eq!(
+                    over_dispatch.as_ref(),
+                    &Expr::Keyword("rectangle".to_string())
+                );
+            }
+            other => panic!("Expected prefer-method, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_remove_method() {
+        let exprs = parse_str("(remove-method area :square)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::RemoveMethod {
+                name,
+                dispatch_value,
+            } => {
+                assert_eq!(name, "area");
+                assert_eq!(
+                    dispatch_value.as_ref(),
+                    &Expr::Keyword("square".to_string())
+                );
+            }
+            other => panic!("Expected remove-method, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_metadata_prefix_on_defn_form_merges_into_var_metadata() {
+        let exprs = parse_str("^:private (defn foo [x] x)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::Defn { name, metadata, .. } => {
+                assert_eq!(name, "foo");
+                let meta = metadata.as_ref().expect("metadata expected");
+                assert!(meta.iter().any(|(k, v)| {
+                    *k == Expr::Keyword("private".to_string()) && *v == Expr::Bool(true)
+                }));
+            }
+            other => panic!("Expected defn, got {:?}", other),
         }
     }
 
@@ -2965,6 +3853,40 @@ mod tests {
         } else {
             panic!("Expected Throw expression, got: {:?}", exprs[0]);
         }
+    }
+
+    #[test]
+    fn test_parse_set_bang() {
+        let exprs = parse_str("(set! x 42)").unwrap();
+        assert_eq!(exprs.len(), 1);
+
+        match &exprs[0] {
+            Expr::SetBang { target, value } => {
+                assert_eq!(target, "x");
+                assert_eq!(value.as_ref(), &Expr::Long(42));
+            }
+            other => panic!("Expected set!, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_reader_discard() {
+        let exprs = parse_str("#_ 1 2").unwrap();
+        assert_eq!(exprs.len(), 1);
+        assert_eq!(exprs[0], Expr::Long(2));
+    }
+
+    #[test]
+    fn test_parse_reader_discard_trailing_top_level() {
+        let exprs = parse_str("#_ 1").unwrap();
+        assert_eq!(exprs.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_reader_discard_trailing_in_collection() {
+        let exprs = parse_str("[1 #_ 2]").unwrap();
+        assert_eq!(exprs.len(), 1);
+        assert_eq!(exprs[0], Expr::Vector(vec![Expr::Long(1)]));
     }
 
     #[test]
@@ -3037,7 +3959,11 @@ mod tests {
                 assert_eq!(elements[0], Pattern::Symbol("a".to_string()));
 
                 // Check nested pattern
-                if let Pattern::Vector { elements: inner_elements, .. } = &elements[1] {
+                if let Pattern::Vector {
+                    elements: inner_elements,
+                    ..
+                } = &elements[1]
+                {
                     assert_eq!(inner_elements.len(), 2);
                     assert_eq!(inner_elements[0], Pattern::Symbol("b".to_string()));
                     assert_eq!(inner_elements[1], Pattern::Symbol("c".to_string()));
@@ -3064,7 +3990,11 @@ mod tests {
             assert_eq!(bindings.len(), 1);
 
             // Check pattern is a Map with :keys bindings
-            if let Pattern::Map { bindings: map_bindings, .. } = &bindings[0].0 {
+            if let Pattern::Map {
+                bindings: map_bindings,
+                ..
+            } = &bindings[0].0
+            {
                 assert_eq!(map_bindings.len(), 2);
 
                 // Check first binding

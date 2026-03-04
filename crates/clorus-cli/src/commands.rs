@@ -33,19 +33,18 @@ entry = "src/main.clrs"
     fs::write(project_path.join("Clorus.toml"), manifest_content)
         .map_err(|e| format!("Failed to create Clorus.toml: {}", e))?;
 
-    // Create src/main.clrs
-    let main_content = r#"; Clorus main file
-(def main-result
-  (let [x 10
-        y 20]
-    (+ x y)))
+    // Create src/main.clrs with modern namespace + -main entrypoint template.
+    let main_content = format!(
+        r#"; {} entrypoint
+(ns main)
 
-; Uncomment to define a function
-; (defn greet [name]
-;   (println "Hello" name))
-
-main-result
-"#;
+(defn -main [& _args]
+  (do
+    (println "Hello from {}!")
+    0))
+"#,
+        name, name
+    );
 
     fs::write(project_path.join("src/main.clrs"), main_content)
         .map_err(|e| format!("Failed to create main.clrs: {}", e))?;
@@ -144,7 +143,7 @@ fn load_module_recursive(
 /// Convert namespace to file path
 /// coral.widgets → src/coral/widgets.clrs
 /// coral.core → src/coral/core.clrs
-/// clorus.core → $CLORUS_HOME/stdlib/core.clr or ~/.clorus/stdlib/core.clr (global stdlib)
+/// clorus.core → $CLORUS_HOME/stdlib/clorus/core.clr or ~/.clorus/stdlib/clorus/core.clr (global stdlib)
 fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, String> {
     let parts: Vec<&str> = namespace.split('.').collect();
 
@@ -154,37 +153,31 @@ fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, Strin
 
     // Check if this is a clorus.* namespace (stdlib)
     if parts[0] == "clorus" {
-        // Try to load from global stdlib directories (like Clojure does with clojure.core)
-        // Try CLORUS_HOME/stdlib first, then ~/.clorus/stdlib
+        // Clojure-style mapping: clorus.set -> stdlib/clorus/set.clr
+        // Search CLORUS_HOME/stdlib first, then ~/.clorus/stdlib.
         let stdlib_paths = vec![
             std::env::var("CLORUS_HOME").ok().map(|home| PathBuf::from(home).join("stdlib")),
             std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".clorus/stdlib")),
         ];
 
-        // Convert clorus.core → core.clr
-        let stdlib_file = if parts.len() == 2 {
-            format!("{}.clr", parts[1])
-        } else {
-            // For nested namespaces like clorus.string.utils → string/utils.clr
-            let mut subpath = PathBuf::new();
-            for part in &parts[1..parts.len()-1] {
-                subpath = subpath.join(part);
-            }
-            subpath = subpath.join(format!("{}.clr", parts[parts.len()-1]));
-            subpath.to_string_lossy().to_string()
-        };
+        // Convert clorus.string.utils -> clorus/string/utils.clr
+        let mut ns_path = PathBuf::new();
+        for part in &parts[..parts.len() - 1] {
+            ns_path = ns_path.join(part);
+        }
+        ns_path = ns_path.join(format!("{}.clr", parts[parts.len() - 1]));
 
         for stdlib_dir in stdlib_paths.into_iter().flatten() {
-            let stdlib_path = stdlib_dir.join(&stdlib_file);
+            let stdlib_path = stdlib_dir.join(&ns_path);
             if stdlib_path.exists() {
                 return Ok(stdlib_path);
             }
         }
 
-        // Stdlib not found
         return Err(format!(
-            "Stdlib module not found: {} (looking for {} in CLORUS_HOME/stdlib or ~/.clorus/stdlib)",
-            namespace, stdlib_file
+            "Stdlib module not found: {} (expected {} in CLORUS_HOME/stdlib or ~/.clorus/stdlib)",
+            namespace,
+            ns_path.to_string_lossy()
         ));
     }
 
@@ -377,16 +370,16 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
-    // Load and parse stdlib/core.clr and stdlib/transducers.clr (optional)
+    // Load and parse stdlib/clorus/core.clr and stdlib/clorus/transducers.clr (optional)
     let mut all_exprs = Vec::new();
     if manifest.build.stdlib {
-        let stdlib_path = Path::new("stdlib/core.clr");
+        let stdlib_path = Path::new("stdlib/clorus/core.clr");
         if stdlib_path.exists() {
             let stdlib_source = fs::read_to_string(stdlib_path)
-                .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+                .map_err(|e| format!("Failed to read stdlib/clorus/core.clr: {}", e))?;
 
             let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
-                .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+                .map_err(|e| format!("Parse error in stdlib/clorus/core.clr: {}", e))?;
 
             if debug {
                 println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
@@ -399,29 +392,29 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                 .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
 
             if let Some(compiler_dir) = compiler_dir {
-                let alt_stdlib = compiler_dir.join("stdlib/core.clr");
+                let alt_stdlib = compiler_dir.join("stdlib/clorus/core.clr");
                 if alt_stdlib.exists() {
                     let stdlib_source = fs::read_to_string(&alt_stdlib)
-                        .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+                        .map_err(|e| format!("Failed to read stdlib/clorus/core.clr: {}", e))?;
 
                     let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
-                        .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+                        .map_err(|e| format!("Parse error in stdlib/clorus/core.clr: {}", e))?;
 
                     all_exprs.extend(stdlib_exprs);
                 }
             }
         }
 
-        let transducers_path = Path::new("stdlib/transducers.clr");
+        let transducers_path = Path::new("stdlib/clorus/transducers.clr");
         if transducers_path.exists() {
             let transducers_source = fs::read_to_string(transducers_path)
-                .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+                .map_err(|e| format!("Failed to read stdlib/clorus/transducers.clr: {}", e))?;
 
             let transducers_exprs = clorus::parse_and_expand(&transducers_source)
-                .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+                .map_err(|e| format!("Parse error in stdlib/clorus/transducers.clr: {}", e))?;
 
             if debug {
-                println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+                println!("   [DEBUG] Loaded {} expressions from stdlib/clorus/transducers.clr", transducers_exprs.len());
             }
             all_exprs.extend(transducers_exprs);
         } else {
@@ -431,13 +424,13 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                 .and_then(|p| p.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()));
 
             if let Some(compiler_dir) = compiler_dir {
-                let alt_transducers = compiler_dir.join("stdlib/transducers.clr");
+                let alt_transducers = compiler_dir.join("stdlib/clorus/transducers.clr");
                 if alt_transducers.exists() {
                     let transducers_source = fs::read_to_string(&alt_transducers)
-                        .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+                        .map_err(|e| format!("Failed to read stdlib/clorus/transducers.clr: {}", e))?;
 
                     let transducers_exprs = clorus::parse_and_expand(&transducers_source)
-                        .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+                        .map_err(|e| format!("Parse error in stdlib/clorus/transducers.clr: {}", e))?;
 
                     all_exprs.extend(transducers_exprs);
                 }
@@ -815,7 +808,10 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     // during development and tests, then fall back to CLORUS_HOME installs.
     let mut runtime_lib: Option<String> = None;
 
-    let local_candidates: Vec<&str> = if debug {
+    // If the CLI itself is a debug build, prefer debug runtime archives even without --debug.
+    // This prevents stale release archives from causing unresolved symbols during dev/test loops.
+    let prefer_debug_runtime = debug || cfg!(debug_assertions);
+    let local_candidates: Vec<&str> = if prefer_debug_runtime {
         vec![
             "target/debug/deps/libclorus_runtime.a",
             "target/debug/libclorus_runtime.a",
@@ -1063,7 +1059,7 @@ fn load_and_compile_modules<'ctx>(
     project_root: &Path,
     source_dirs: &[String],
 ) -> Result<(), String> {
-    use clorus_codegen::namespace_context::NamespaceContext;
+    use clorus_codegen::namespace_context::{ImportBinding, NamespaceContext};
 
     for module_name in modules {
         if loaded.contains(module_name) {
@@ -1177,7 +1173,22 @@ fn load_and_compile_modules<'ctx>(
                         ns_ctx.aliases.insert(alias.clone(), req_spec.module.clone());
                     }
                     for symbol in &req_spec.refer {
-                        ns_ctx.imports.insert(symbol.clone(), req_spec.module.clone());
+                        ns_ctx.imports.insert(
+                            symbol.clone(),
+                            ImportBinding {
+                                namespace: req_spec.module.clone(),
+                                symbol: symbol.clone(),
+                            },
+                        );
+                    }
+                    for (source_symbol, local_symbol) in &req_spec.rename {
+                        ns_ctx.imports.insert(
+                            local_symbol.clone(),
+                            ImportBinding {
+                                namespace: req_spec.module.clone(),
+                                symbol: source_symbol.clone(),
+                            },
+                        );
                     }
                 }
 
@@ -1300,39 +1311,39 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
-    // Load and parse stdlib/core.clr + stdlib/transducers.clr (optional)
+    // Load and parse stdlib/clorus/core.clr + stdlib/clorus/transducers.clr (optional)
     let mut all_exprs = Vec::new();
     if manifest.build.stdlib {
-        let stdlib_path = Path::new("stdlib/core.clr");
+        let stdlib_path = Path::new("stdlib/clorus/core.clr");
         if stdlib_path.exists() {
             let stdlib_source = fs::read_to_string(stdlib_path)
-                .map_err(|e| format!("Failed to read stdlib/core.clr: {}", e))?;
+                .map_err(|e| format!("Failed to read stdlib/clorus/core.clr: {}", e))?;
 
             let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
-                .map_err(|e| format!("Parse error in stdlib/core.clr: {}", e))?;
+                .map_err(|e| format!("Parse error in stdlib/clorus/core.clr: {}", e))?;
 
             if debug {
                 println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
             }
             all_exprs.extend(stdlib_exprs);
         } else if debug {
-            println!("   [DEBUG] stdlib/core.clr not found, stdlib functions unavailable");
+            println!("   [DEBUG] stdlib/clorus/core.clr not found, stdlib functions unavailable");
         }
 
-        let transducers_path = Path::new("stdlib/transducers.clr");
+        let transducers_path = Path::new("stdlib/clorus/transducers.clr");
         if transducers_path.exists() {
             let transducers_source = fs::read_to_string(transducers_path)
-                .map_err(|e| format!("Failed to read stdlib/transducers.clr: {}", e))?;
+                .map_err(|e| format!("Failed to read stdlib/clorus/transducers.clr: {}", e))?;
 
             let transducers_exprs = clorus::parse_and_expand(&transducers_source)
-                .map_err(|e| format!("Parse error in stdlib/transducers.clr: {}", e))?;
+                .map_err(|e| format!("Parse error in stdlib/clorus/transducers.clr: {}", e))?;
 
             if debug {
-                println!("   [DEBUG] Loaded {} expressions from stdlib/transducers.clr", transducers_exprs.len());
+                println!("   [DEBUG] Loaded {} expressions from stdlib/clorus/transducers.clr", transducers_exprs.len());
             }
             all_exprs.extend(transducers_exprs);
         } else if debug {
-            println!("   [DEBUG] stdlib/transducers.clr not found, transducers unavailable");
+            println!("   [DEBUG] stdlib/clorus/transducers.clr not found, transducers unavailable");
         }
     } else if debug {
         println!("   [DEBUG] Stdlib loading disabled (build.stdlib = false)");
@@ -1560,7 +1571,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
     // We need to track how many stdlib expressions there are so modules can use them
     let mut stdlib_expr_count = 0usize;
     if manifest.build.stdlib {
-        let stdlib_path = Path::new("stdlib/core.clr");
+        let stdlib_path = Path::new("stdlib/clorus/core.clr");
         if stdlib_path.exists() {
             if let Ok(stdlib_source) = fs::read_to_string(stdlib_path) {
                 if let Ok(stdlib_exprs) = clorus::parse_and_expand(&stdlib_source) {
@@ -1569,7 +1580,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
             }
         }
 
-        let transducers_path = Path::new("stdlib/transducers.clr");
+        let transducers_path = Path::new("stdlib/clorus/transducers.clr");
         if transducers_path.exists() {
             if let Ok(transducers_source) = fs::read_to_string(transducers_path) {
                 if let Ok(transducers_exprs) = clorus::parse_and_expand(&transducers_source) {
@@ -1585,7 +1596,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     // Compile stdlib expressions into CodeGen so modules can use them
     // Use "user" namespace for stdlib (no mangling)
-    use clorus_codegen::namespace_context::NamespaceContext;
+    use clorus_codegen::namespace_context::{ImportBinding, NamespaceContext};
     use std::collections::HashMap;
     let stdlib_ns = NamespaceContext {
         current: "user".to_string(),
@@ -1723,7 +1734,22 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
                     ns_ctx.aliases.insert(alias.clone(), req_spec.module.clone());
                 }
                 for symbol in &req_spec.refer {
-                    ns_ctx.imports.insert(symbol.clone(), req_spec.module.clone());
+                    ns_ctx.imports.insert(
+                        symbol.clone(),
+                        ImportBinding {
+                            namespace: req_spec.module.clone(),
+                            symbol: symbol.clone(),
+                        },
+                    );
+                }
+                for (source_symbol, local_symbol) in &req_spec.rename {
+                    ns_ctx.imports.insert(
+                        local_symbol.clone(),
+                        ImportBinding {
+                            namespace: req_spec.module.clone(),
+                            symbol: source_symbol.clone(),
+                        },
+                    );
                 }
             }
 
@@ -1958,17 +1984,16 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
     // Try to find the library in multiple locations
     let mut lib_path = None;
 
-    // 1. Try current project's target/release
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
-    }
+    // Prefer matching profile in development to avoid symbol/version skew.
+    #[cfg(debug_assertions)]
+    let local_candidates = [Path::new("target/debug").join(lib_name), Path::new("target/release").join(lib_name)];
+    #[cfg(not(debug_assertions))]
+    let local_candidates = [Path::new("target/release").join(lib_name), Path::new("target/debug").join(lib_name)];
 
-    // 2. Try current project's target/debug
-    if lib_path.is_none() {
-        let debug_path = Path::new("target/debug").join(lib_name);
-        if debug_path.exists() {
-            lib_path = Some(debug_path);
+    for candidate in local_candidates {
+        if candidate.exists() {
+            lib_path = Some(candidate);
+            break;
         }
     }
 
@@ -2001,14 +2026,18 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
         // Walk up to find workspace root
         let mut current = env::current_dir().ok();
         while let Some(dir) = current {
-            let workspace_release = dir.join("target/release").join(lib_name);
-            if workspace_release.exists() {
-                lib_path = Some(workspace_release);
-                break;
+            #[cfg(debug_assertions)]
+            let workspace_candidates = [dir.join("target/debug").join(lib_name), dir.join("target/release").join(lib_name)];
+            #[cfg(not(debug_assertions))]
+            let workspace_candidates = [dir.join("target/release").join(lib_name), dir.join("target/debug").join(lib_name)];
+
+            for candidate in workspace_candidates {
+                if candidate.exists() {
+                    lib_path = Some(candidate);
+                    break;
+                }
             }
-            let workspace_debug = dir.join("target/debug").join(lib_name);
-            if workspace_debug.exists() {
-                lib_path = Some(workspace_debug);
+            if lib_path.is_some() {
                 break;
             }
             current = dir.parent().map(|p| p.to_path_buf());
@@ -2047,18 +2076,18 @@ fn load_std_library() -> Result<libloading::Library, String> {
     #[cfg(target_os = "windows")]
     let lib_name = "clorus_std.dll";
 
-    // Try to find the library in target/release or target/debug
+    // Try to find the library in target/{profile}
     let mut lib_path = None;
 
-    // First try release build
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
-    } else {
-        // Try debug build
-        let debug_path = Path::new("target/debug").join(lib_name);
-        if debug_path.exists() {
-            lib_path = Some(debug_path);
+    #[cfg(debug_assertions)]
+    let local_candidates = [Path::new("target/debug").join(lib_name), Path::new("target/release").join(lib_name)];
+    #[cfg(not(debug_assertions))]
+    let local_candidates = [Path::new("target/release").join(lib_name), Path::new("target/debug").join(lib_name)];
+
+    for candidate in local_candidates {
+        if candidate.exists() {
+            lib_path = Some(candidate);
+            break;
         }
     }
 
@@ -2069,15 +2098,18 @@ fn load_std_library() -> Result<libloading::Library, String> {
         // Go up directories to find workspace root
         let mut search_dir = current_dir.as_path();
         for _ in 0..5 {
-            let release_path = search_dir.join("target/release").join(lib_name);
-            if release_path.exists() {
-                lib_path = Some(release_path);
-                break;
-            }
+            #[cfg(debug_assertions)]
+            let search_candidates = [search_dir.join("target/debug").join(lib_name), search_dir.join("target/release").join(lib_name)];
+            #[cfg(not(debug_assertions))]
+            let search_candidates = [search_dir.join("target/release").join(lib_name), search_dir.join("target/debug").join(lib_name)];
 
-            let debug_path = search_dir.join("target/debug").join(lib_name);
-            if debug_path.exists() {
-                lib_path = Some(debug_path);
+            for candidate in search_candidates {
+                if candidate.exists() {
+                    lib_path = Some(candidate);
+                    break;
+                }
+            }
+            if lib_path.is_some() {
                 break;
             }
 
@@ -2134,18 +2166,18 @@ fn load_example_library() -> Result<libloading::Library, String> {
     #[cfg(target_os = "windows")]
     let lib_name = "example_rust_lib.dll";
 
-    // Try to find the library in target/release or target/debug
+    // Try to find the library in target/{profile}
     let mut lib_path = None;
 
-    // First try release build
-    let release_path = Path::new("target/release").join(lib_name);
-    if release_path.exists() {
-        lib_path = Some(release_path);
-    } else {
-        // Try debug build
-        let debug_path = Path::new("target/debug").join(lib_name);
-        if debug_path.exists() {
-            lib_path = Some(debug_path);
+    #[cfg(debug_assertions)]
+    let local_candidates = [Path::new("target/debug").join(lib_name), Path::new("target/release").join(lib_name)];
+    #[cfg(not(debug_assertions))]
+    let local_candidates = [Path::new("target/release").join(lib_name), Path::new("target/debug").join(lib_name)];
+
+    for candidate in local_candidates {
+        if candidate.exists() {
+            lib_path = Some(candidate);
+            break;
         }
     }
 
@@ -2156,15 +2188,18 @@ fn load_example_library() -> Result<libloading::Library, String> {
         // Go up directories to find workspace root
         let mut search_dir = current_dir.as_path();
         for _ in 0..5 {
-            let release_path = search_dir.join("target/release").join(lib_name);
-            if release_path.exists() {
-                lib_path = Some(release_path);
-                break;
-            }
+            #[cfg(debug_assertions)]
+            let search_candidates = [search_dir.join("target/debug").join(lib_name), search_dir.join("target/release").join(lib_name)];
+            #[cfg(not(debug_assertions))]
+            let search_candidates = [search_dir.join("target/release").join(lib_name), search_dir.join("target/debug").join(lib_name)];
 
-            let debug_path = search_dir.join("target/debug").join(lib_name);
-            if debug_path.exists() {
-                lib_path = Some(debug_path);
+            for candidate in search_candidates {
+                if candidate.exists() {
+                    lib_path = Some(candidate);
+                    break;
+                }
+            }
+            if lib_path.is_some() {
                 break;
             }
 
@@ -2479,4 +2514,44 @@ pub fn pack_workspace(output_dir: Option<String>) -> Result<(), String> {
     println!("Output directory: {}", output_path.display());
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::new;
+    use std::env;
+    use std::fs;
+    use tempfile::tempdir;
+
+    struct CwdGuard(std::path::PathBuf);
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = env::set_current_dir(&self.0);
+        }
+    }
+
+    #[test]
+    fn new_project_generates_modern_main_template() {
+        let tmp = tempdir().expect("failed to create tempdir");
+        let original_cwd = env::current_dir().expect("failed to get cwd");
+        let _cwd_guard = CwdGuard(original_cwd);
+        env::set_current_dir(tmp.path()).expect("failed to cd to tempdir");
+
+        let project_name = "sample-app";
+        new(project_name).expect("clorus new failed");
+
+        let main_path = tmp.path().join(project_name).join("src/main.clrs");
+        let main_content = fs::read_to_string(&main_path).expect("failed to read generated main.clrs");
+
+        assert!(
+            main_content.contains("(ns main)"),
+            "generated template should include namespace declaration"
+        );
+        assert!(
+            main_content.contains("(defn -main [& _args]"),
+            "generated template should include -main entrypoint"
+        );
+
+    }
 }
