@@ -1,0 +1,7 @@
+(ns test-import-mod-a)
+
+(defn ping []
+  :a)
+
+(defn left []
+  :left-a)

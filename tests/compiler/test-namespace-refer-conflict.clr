@@ -1,0 +1,8 @@
+; EXPECT_COMPILE_ERROR: Namespace import conflict
+
+(ns tests.compiler.test-namespace-refer-conflict
+  (:require [test-import-mod-a :refer [ping]]
+            [test-import-mod-b :refer [ping]]))
+
+(defn -main [& _args]
+  "SHOULD-NOT-RUN")

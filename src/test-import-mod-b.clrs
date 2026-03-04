@@ -1,0 +1,7 @@
+(ns test-import-mod-b)
+
+(defn ping []
+  :b)
+
+(defn right []
+  :right-b)

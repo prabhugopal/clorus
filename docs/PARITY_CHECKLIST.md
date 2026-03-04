@@ -1,7 +1,7 @@
 # Clorus Clojure Parity Checklist
 
 Last updated: 2026-03-04
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 177, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 183, Failed 0, Skipped 1.
 
 ## How to use this checklist
 - `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
@@ -66,11 +66,10 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - [x] Re-run full `jit+legacy` suite and refresh baseline counts
 
 ## Step 1 Closure (Language Parity Stabilization)
-- Status: 🔄 Reopened (strict closure requested).
-- Strict exit criteria:
-  - `jit` + `legacy` both green on full suite.
-  - Reader parity matrix complete (not only `#_` cases).
-  - Dynamic-var semantics matrix complete (nested/function/throw + edge behavior).
-  - Exception data matrix complete (`ex-info`/`ex-data` propagation + rethrow paths).
-  - Namespace resolution/error-path matrix complete (`:require`, `:refer`, `:rename`, alias collisions).
-- Only after these are closed do we mark Step 1 as complete.
+- Status: ✅ Complete (strict closure met).
+- Strict exit criteria met:
+  - `jit` + `legacy` both green on full suite (`Passed 183, Failed 0, Skipped 1`).
+  - Reader parity matrix completed for supported reader macros (not only `#_`).
+  - Dynamic-var semantics matrix completed (nested/function/throw + edge behavior).
+  - Exception data matrix completed (`ex-info`/`ex-data` propagation + rethrow paths).
+  - Namespace resolution/error-path matrix completed (`:require`, `:refer`, `:rename`, alias/import collisions).

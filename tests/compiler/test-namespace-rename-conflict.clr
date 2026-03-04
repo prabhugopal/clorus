@@ -1,0 +1,8 @@
+; EXPECT_COMPILE_ERROR: Namespace import conflict
+
+(ns tests.compiler.test-namespace-rename-conflict
+  (:require [test-import-mod-a :rename {left shared}]
+            [test-import-mod-b :rename {right shared}]))
+
+(defn -main [& _args]
+  "SHOULD-NOT-RUN")

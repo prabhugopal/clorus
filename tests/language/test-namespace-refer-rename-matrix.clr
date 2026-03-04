@@ -1,0 +1,24 @@
+;; Namespace matrix sanity:
+;; - alias calls remain available
+;; - refer and rename import distinct local symbols
+
+(ns tests.language.test-namespace-refer-rename-matrix
+  (:require [test-import-mod-a :as a]
+            [test-import-mod-b :as b]
+            [test-import-mod-a :refer [left]]
+            [test-import-mod-b :rename {right local-right}]))
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "alias a/ping" (a/ping) :a)
+    (assert-eq "alias b/ping" (b/ping) :b)
+    (assert-eq "refer left" (left) :left-a)
+    (assert-eq "rename right->local-right" (local-right) :right-b)
+    "PASS"))
+
+(-main)
