@@ -1,0 +1,16 @@
+;; ex-info/ex-data/ex-message/ex-cause behavior smoke test
+
+(defn -main []
+  (let [result (try
+                 (throw (ex-info "boom" {:code 42} :root))
+                 (catch Exception e
+                   [(exception? e)
+                    (ex-message e)
+                    (get (ex-data e) :code nil)
+                    (ex-cause e)]))]
+    (if (and (= (first result) true)
+             (= (nth result 1) "boom")
+             (= (nth result 2) 42)
+             (= (nth result 3) :root))
+      "PASS"
+      (throw "FAIL: ex-info helpers mismatch"))))

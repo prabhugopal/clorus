@@ -1,0 +1,34 @@
+(ns test-multimethod-admin)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defmulti pick (fn [m] (get m :kind)))
+
+(defmethod pick :a [m]
+  :A)
+
+(defmethod pick :b [m]
+  :B)
+
+(defmethod pick :default [m]
+  :DEFAULT)
+
+;; Should be accepted and stored for dispatch precedence once hierarchy dispatch is enabled.
+(prefer-method pick :a :b)
+
+(defn -main []
+  (do
+    (assert-eq "before remove a" (pick {:kind :a}) :A)
+    (assert-eq "before remove b" (pick {:kind :b}) :B)
+
+    (remove-method pick :a)
+
+    (assert-eq "after remove uses default" (pick {:kind :a}) :DEFAULT)
+    (assert-eq "b still present" (pick {:kind :b}) :B)
+    (println "multimethod admin passed")
+    0))
+
+(-main)

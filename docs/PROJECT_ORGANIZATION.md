@@ -1,5 +1,11 @@
 # Clorus Project Organization Guide
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/DOCUMENTATION_INDEX.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Overview
 
 This document describes the recommended organization of the Clorus project, separating runtime/compiler code (Rust) from standard library code (Clorus).

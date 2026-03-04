@@ -1,5 +1,11 @@
 # Shorthand Function Implementation Complete ✅
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Date:** January 27, 2026
 **Status:** ✅ COMPLETE
 **Feature:** Reader macro `#()` for anonymous functions

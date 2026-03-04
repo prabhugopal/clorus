@@ -1,5 +1,11 @@
 # Phase 2b: Value* Type System - COMPLETE
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/ROADMAP_TO_100_PARITY.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** ✅ Complete
 **Completion Date:** January 26, 2025
 **Actual Duration:** 2-3 hours (vs estimated 9-14 days!)

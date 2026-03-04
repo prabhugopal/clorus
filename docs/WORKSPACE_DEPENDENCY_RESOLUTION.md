@@ -1,5 +1,11 @@
 # Workspace Dependency Resolution (Phase 3)
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/WORKSPACE_MONOREPO_ANALYSIS.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** ✅ Implemented
 **Date:** February 10, 2026
 

@@ -1,8 +1,15 @@
 /// Var (variable) support for dynamic bindings
 /// Vars are first-class objects that hold a root value and metadata
 use crate::value::{Value, ValueTag};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+thread_local! {
+    /// Thread-local dynamic binding stack.
+    /// Key is Var pointer address, value is stack of bound values (top = last).
+    static DYNAMIC_BINDINGS: RefCell<HashMap<usize, Vec<*mut Value>>> = RefCell::new(HashMap::new());
+}
 
 /// Var structure
 /// Holds a root binding and optional metadata
@@ -20,6 +27,11 @@ pub struct Var {
 impl Var {
     /// Create a new Var with a root value
     pub fn new(name: String, root: *mut Value) -> Self {
+        unsafe {
+            if !root.is_null() {
+                crate::value::clorus_retain(root);
+            }
+        }
         Var {
             name,
             root: Arc::new(Mutex::new(root)),
@@ -36,6 +48,14 @@ impl Var {
     /// Set the root value (alter-var-root)
     pub fn set_root(&self, new_value: *mut Value) {
         let mut root = self.root.lock().unwrap();
+        unsafe {
+            if !new_value.is_null() {
+                crate::value::clorus_retain(new_value);
+            }
+            if !(*root).is_null() {
+                crate::value::clorus_release(*root);
+            }
+        }
         *root = new_value;
     }
 
@@ -54,7 +74,87 @@ impl Var {
     /// Set metadata value for a key
     pub fn set_meta(&self, key: String, value: *mut Value) {
         let mut meta = self.metadata.lock().unwrap();
-        meta.insert(key, value);
+        unsafe {
+            if !value.is_null() {
+                crate::value::clorus_retain(value);
+            }
+        }
+        if let Some(old) = meta.insert(key, value) {
+            unsafe {
+                if !old.is_null() {
+                    crate::value::clorus_release(old);
+                }
+            }
+        }
+    }
+
+    /// Replace all metadata with entries from `meta_map`.
+    /// `meta_map` must be a Clorus HashMap value.
+    pub fn replace_meta_from_map(&self, meta_map: *mut Value) {
+        unsafe {
+            // Metadata contract: only map or nil is valid.
+            // Invalid metadata values keep existing metadata unchanged.
+            let is_nil = meta_map.is_null() || (*meta_map).tag() == ValueTag::Nil;
+            let is_map = !meta_map.is_null() && (*meta_map).tag() == ValueTag::HashMap;
+            if !is_nil && !is_map {
+                return;
+            }
+
+            // Clear old metadata and release old values.
+            let mut meta = self.metadata.lock().unwrap();
+            for v in meta.values() {
+                if !(*v).is_null() {
+                    crate::value::clorus_release(*v);
+                }
+            }
+            meta.clear();
+
+            if is_nil {
+                return;
+            }
+
+            let map_ptr = (*meta_map).as_ptr() as *mut crate::map::ClorusHashMap;
+            for (k, v) in (*map_ptr).entries_iter() {
+                let key_str = if (*k).is_null() {
+                    None
+                } else {
+                    match (**k).tag() {
+                        ValueTag::Keyword => Some((**k).as_keyword().to_string()),
+                        ValueTag::String => Some((**k).as_string().to_string()),
+                        _ => None,
+                    }
+                };
+
+                if let Some(key) = key_str {
+                    if !(*v).is_null() {
+                        crate::value::clorus_retain(*v);
+                    }
+                    meta.insert(key, *v);
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Var {
+    fn drop(&mut self) {
+        if let Ok(root) = self.root.lock() {
+            unsafe {
+                if !(*root).is_null() {
+                    crate::value::clorus_release(*root);
+                }
+            }
+        }
+
+        if let Ok(meta) = self.metadata.lock() {
+            for v in meta.values() {
+                unsafe {
+                    if !(*v).is_null() {
+                        crate::value::clorus_release(*v);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -87,10 +187,20 @@ pub extern "C" fn clorus_var_new(name_ptr: *mut Value, root_value: *mut Value) -
 /// Returns: Value*
 #[no_mangle]
 pub extern "C" fn clorus_var_get(var_ptr: *mut Var) -> *mut Value {
+    if var_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let key = var_ptr as usize;
+    let thread_bound = DYNAMIC_BINDINGS.with(|map_cell| {
+        let map = map_cell.borrow();
+        map.get(&key).and_then(|stack| stack.last().copied())
+    });
+    if let Some(v) = thread_bound {
+        return v;
+    }
+
     unsafe {
-        if var_ptr.is_null() {
-            return std::ptr::null_mut();
-        }
         let var = &*var_ptr;
         var.get_root()
     }
@@ -101,13 +211,91 @@ pub extern "C" fn clorus_var_get(var_ptr: *mut Var) -> *mut Value {
 /// Returns: new_value (Value*)
 #[no_mangle]
 pub extern "C" fn clorus_var_set(var_ptr: *mut Var, new_value: *mut Value) -> *mut Value {
-    unsafe {
-        if var_ptr.is_null() {
-            return std::ptr::null_mut();
+    if var_ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let key = var_ptr as usize;
+    let mut updated_thread_binding = false;
+    DYNAMIC_BINDINGS.with(|map_cell| {
+        let mut map = map_cell.borrow_mut();
+        if let Some(stack) = map.get_mut(&key) {
+            if let Some(slot) = stack.last_mut() {
+                unsafe {
+                    if !new_value.is_null() {
+                        crate::value::clorus_retain(new_value);
+                    }
+                    if !(*slot).is_null() {
+                        crate::value::clorus_release(*slot);
+                    }
+                }
+                *slot = new_value;
+                updated_thread_binding = true;
+            }
         }
-        let var = &*var_ptr;
-        var.set_root(new_value);
+    });
+
+    if !updated_thread_binding {
+        unsafe {
+            let var = &*var_ptr;
+            var.set_root(new_value);
+        }
+    }
+
+    new_value
+}
+
+/// Push a thread-local dynamic binding for this var.
+#[no_mangle]
+pub extern "C" fn clorus_var_push_binding(var_ptr: *mut Var, new_value: *mut Value) {
+    if var_ptr.is_null() {
+        return;
+    }
+
+    let value_to_bind = if new_value.is_null() {
+        Value::nil()
+    } else {
         new_value
+    };
+
+    unsafe {
+        if !value_to_bind.is_null() {
+            crate::value::clorus_retain(value_to_bind);
+        }
+    }
+
+    let key = var_ptr as usize;
+    DYNAMIC_BINDINGS.with(|map_cell| {
+        let mut map = map_cell.borrow_mut();
+        map.entry(key).or_default().push(value_to_bind);
+    });
+}
+
+/// Pop a thread-local dynamic binding for this var.
+#[no_mangle]
+pub extern "C" fn clorus_var_pop_binding(var_ptr: *mut Var) {
+    if var_ptr.is_null() {
+        return;
+    }
+
+    let key = var_ptr as usize;
+    let mut popped: *mut Value = std::ptr::null_mut();
+    DYNAMIC_BINDINGS.with(|map_cell| {
+        let mut map = map_cell.borrow_mut();
+        let mut should_remove = false;
+        if let Some(stack) = map.get_mut(&key) {
+            popped = stack.pop().unwrap_or(std::ptr::null_mut());
+            should_remove = stack.is_empty();
+        }
+        if should_remove {
+            map.remove(&key);
+        }
+    });
+
+    if !popped.is_null() {
+        unsafe {
+            crate::value::clorus_release(popped);
+        }
     }
 }
 
@@ -149,6 +337,78 @@ pub extern "C" fn clorus_var_set_meta(
         };
 
         var.set_meta(key, value);
+    }
+}
+
+/// Get all metadata from a Var as a Clorus map.
+/// Keys are returned as keywords (e.g. "doc" -> :doc).
+#[no_mangle]
+pub extern "C" fn clorus_var_meta(var_ptr: *mut Var) -> *mut Value {
+    unsafe {
+        if var_ptr.is_null() {
+            return Value::nil();
+        }
+
+        let var = &*var_ptr;
+        let map_empty_fn = crate::map::clorus_map_empty;
+        let map_assoc_fn = crate::map::clorus_map_assoc;
+
+        let mut out = map_empty_fn();
+        if let Ok(meta) = var.metadata.lock() {
+            for (k, v) in meta.iter() {
+                let key_val = Value::keyword(k);
+                out = map_assoc_fn(out, key_val, *v);
+                crate::value::clorus_release(key_val);
+            }
+        }
+
+        out
+    }
+}
+
+/// Generic metadata lookup.
+/// Currently only Var metadata is supported.
+#[no_mangle]
+pub extern "C" fn clorus_meta(value_ptr: *mut Value) -> *mut Value {
+    unsafe {
+        if value_ptr.is_null() {
+            return Value::nil();
+        }
+
+        if (*value_ptr).tag() == ValueTag::Var {
+            let var_ptr = (*value_ptr).as_var();
+            return clorus_var_meta(var_ptr);
+        }
+        crate::value::clorus_value_meta(value_ptr)
+    }
+}
+
+/// Attach metadata to a value.
+/// Currently metadata is applied only for Var values.
+#[no_mangle]
+pub extern "C" fn clorus_with_meta(value_ptr: *mut Value, meta_map: *mut Value) -> *mut Value {
+    unsafe {
+        if value_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let valid_meta = meta_map.is_null()
+            || (*meta_map).tag() == ValueTag::Nil
+            || (*meta_map).tag() == ValueTag::HashMap;
+        if !valid_meta {
+            return crate::value::metadata_type_error("with-meta", meta_map);
+        }
+
+        if (*value_ptr).tag() == ValueTag::Var {
+            let var_ptr = (*value_ptr).as_var();
+            if !var_ptr.is_null() {
+                (&*var_ptr).replace_meta_from_map(meta_map);
+            }
+            crate::value::clorus_retain(value_ptr);
+            return value_ptr;
+        }
+
+        crate::value::clorus_value_with_meta(value_ptr, meta_map)
     }
 }
 
@@ -198,5 +458,29 @@ pub extern "C" fn clorus_value_as_var(value_ptr: *mut Value) -> *mut Var {
             return std::ptr::null_mut();
         }
         (*value_ptr).as_var()
+    }
+}
+
+/// Auto-deref helper for symbol reads.
+/// If `value_ptr` is a Var, returns its root value; otherwise returns `value_ptr`.
+/// The returned value is retained for caller ownership.
+#[no_mangle]
+pub extern "C" fn clorus_deref_var_value(value_ptr: *mut Value) -> *mut Value {
+    unsafe {
+        if value_ptr.is_null() {
+            return std::ptr::null_mut();
+        }
+
+        let out = if (*value_ptr).tag() == ValueTag::Var {
+            let var_ptr = (*value_ptr).as_var();
+            clorus_var_get(var_ptr)
+        } else {
+            value_ptr
+        };
+
+        if !out.is_null() {
+            crate::value::clorus_retain(out);
+        }
+        out
     }
 }

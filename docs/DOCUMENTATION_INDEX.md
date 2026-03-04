@@ -2,7 +2,7 @@
 
 **Purpose:** Navigate the documentation maze - find what you need quickly
 
-**Start here:** `LANGUAGE_SPEC.md` - Single source of truth
+**Start here:** `STATUS.md` - Canonical docs map
 
 ---
 
@@ -10,8 +10,13 @@
 
 | I Want To... | Go To |
 |--------------|-------|
-| **See what's implemented** | `LANGUAGE_SPEC.md` |
+| **Find canonical docs quickly** | `STATUS.md` |
+| **See what's implemented** | `reference/LANGUAGE_SPEC.md` |
 | **Compare to Clojure** | `LANGUAGE_PARITY.md` |
+| **See current parity checklist (paired vs gaps)** | `PARITY_CHECKLIST.md` |
+| **See execution plan to parity** | `PARITY_EXECUTION_PLAN.md` |
+| **See docs cleanup plan** | `DOCS_CONSOLIDATION_PLAN.md` |
+| **See exception semantics plan** | `EXCEPTION_SEMANTICS_PLAN.md` |
 | **Learn a specific feature** | See [Feature Guides](#feature-guides) below |
 | **Understand the roadmap** | `ROADMAP_TO_100_PARITY.md` |
 | **See recent changes** | `sessions/` folder |
@@ -23,7 +28,7 @@
 ## 📚 Core Documentation
 
 ### Primary References (Read These First)
-1. **`LANGUAGE_SPEC.md`** ⭐ - Complete language specification
+1. **`reference/LANGUAGE_SPEC.md`** ⭐ - Complete language specification
    - All implemented features
    - Quick reference
    - Examples
@@ -34,71 +39,36 @@
    - Coverage percentages
    - Progress timeline
 
-3. **`ROADMAP_TO_100_PARITY.md`** - Path forward
+3. **`PARITY_CHECKLIST.md`** - Current parity truth table
+   - Paired vs partial vs missing
+   - Dual-engine validation baseline
+   - Next milestone checklist
+
+4. **`ROADMAP_TO_100_PARITY.md`** - Path forward
    - What's missing
    - Implementation priorities
    - Timeline estimates
 
-### Architecture & Internals
-1. **`HARDCODED_VALUES_ANALYSIS.md`** 🔧 - Comprehensive analysis
-   - All 168 FFI functions
-   - 21 special forms
-   - ValueTag enum (17 types)
-   - Core functions registry
-   - Configurability assessment
-   - ~300+ hardcoded identifiers documented
+5. **`PARITY_EXECUTION_PLAN.md`** - Current execution plan
+   - Dual-engine baseline and gating commands
+   - Milestones for compiler/runtime/repl hardening
+   - Priority backlog and definition of done
 
-2. **`ARCHITECTURE_ANALYSIS.md`** 📐 - Built-in vs stdlib architecture
-   - Duplicate analysis (map, filter, take, drop)
-   - Forward reference issues
-   - Cleanup recommendations
-   - Test coverage gaps
+### Canonical Operations Docs
+- `PARITY_CHECKLIST.md` — current feature status
+- `PARITY_EXECUTION_PLAN.md` — active execution plan
+- `DOCS_CONSOLIDATION_PLAN.md` — docs merge/archive policy
+- `tests/FEATURE_COVERAGE.md` — test inventory map
 
 ---
 
-## 🔧 Feature Guides
+## 🗃️ Historical Docs
 
-### Collections
-- `COLLECTION_ACCESS_COMPLETE.md` - Collection operations (get, nth, assoc, etc.)
-- `HASHSET_IMPLEMENTATION_COMPLETE.md` - Set implementation
-- `HOF_IMPLEMENTATION_COMPLETE.md` - Higher-order functions
-- `LAZY_SEQUENCES_COMPLETE.md` - Lazy sequence library
+Many legacy docs are now marked with:
+- `Status: Archived (Historical)`
+- `Canonical replacement: <path>`
 
-### Control Flow & Macros
-- `THREADING_MACROS_COMPLETE.md` - ->>, ->, some->>, doto
-- `QUOTE_IMPLEMENTATION_COMPLETE.md` - Quote, syntax-quote, unquote
-- `SHORTHAND_FN_COMPLETE.md` - #() syntax
-
-### State Management
-- `implementation/LOOP_AND_ATOMS_COMPLETE.md` - Loop/recur and atoms
-- `features/REFS_STM_COMPLETE.md` - Software Transactional Memory
-- `features/AGENTS_COMPLETE.md` - Agent system
-  - `AGENTS_PHASE1_COMPLETE.md` - Basic agents
-  - `AGENTS_PHASE2_COMPLETE.md` - Error handling
-  - `AGENTS_PHASE3_COMPLETE.md` - Validation
-  - `AGENTS_PHASE4_COMPLETE.md` - Thread pools
-- `features/CHANNELS_PHASE1_COMPLETE.md` - CSP channels
-
-### Polymorphism
-- `PHASE_C_COMPLETE.md` - Records, protocols, multimethods
-
-### Strings & I/O
-- `features/STRING_OPERATIONS_COMPLETE.md` - String manipulation
-
-### Namespaces
-- `NAMESPACE_VALIDATION_COMPLETE.md` - Namespace system
-
-### FFI
-- `FFI_ROADMAP.md` - Rust FFI integration
-- `design/RUST_INTEROP_ROADMAP.md` - Rust interop design
-
-### REPL
-- `features/REPL_FEATURES.md` - REPL capabilities
-- `features/AUTOCOMPLETE_COMPLETE.md` - Tab completion
-- `guides/AUTOCOMPLETE_TEST_GUIDE.md` - Testing autocomplete
-- `REPL_INTEGRATION_COMPLETE.md` ⭐ - Professional single-binary architecture
-- `REPL_INTEGRATION_REFACTORING_PLAN.md` - Original refactoring plan
-- `REPL_INTEGRATION_TEST_PLAN.md` - Test strategy
+Use them for implementation history only, not current status.
 
 ---
 
@@ -140,7 +110,7 @@ Recent sessions in reverse chronological order:
 ## 🎓 Learning Path
 
 ### Beginner
-1. Read `LANGUAGE_SPEC.md` - Overview
+1. Read `reference/LANGUAGE_SPEC.md` - Overview
 2. Try examples in REPL
 3. Look at `tests/` folder for examples
 
@@ -194,16 +164,16 @@ docs/
 Many docs have overlapping content. This is intentional:
 - **Detailed docs** (e.g., `AGENTS_COMPLETE.md`) - Deep dive on one feature
 - **Session docs** (e.g., `SESSION_*`) - What changed, context, decisions
-- **Spec docs** (e.g., `LANGUAGE_SPEC.md`) - Consolidated reference
+- **Spec docs** (e.g., `reference/LANGUAGE_SPEC.md`) - Consolidated reference
 
 **Rule of thumb:**
-- Want overview? → `LANGUAGE_SPEC.md`
+- Want overview? → `reference/LANGUAGE_SPEC.md`
 - Want feature details? → `features/` folder
 - Want implementation context? → `sessions/` folder
 - Want to know what changed? → `sessions/` folder (recent first)
 
 ### Maintenance
-- `LANGUAGE_SPEC.md` - Update when features added
+- `reference/LANGUAGE_SPEC.md` - Update when features added
 - `LANGUAGE_PARITY.md` - Update percentage when major features complete
 - `sessions/` - Add new session doc after major work
 - Feature docs - Update when feature changes significantly
@@ -255,7 +225,7 @@ Check `sessions/` folder, files are named with dates or have "Last Updated" in c
 1. Implement feature
 2. Test thoroughly
 3. Create `features/FEATURE_NAME_COMPLETE.md`
-4. Update `LANGUAGE_SPEC.md`
+4. Update `reference/LANGUAGE_SPEC.md`
 5. Update `LANGUAGE_PARITY.md` percentages
 6. Create `sessions/SESSION_DESCRIPTION.md` with context
 

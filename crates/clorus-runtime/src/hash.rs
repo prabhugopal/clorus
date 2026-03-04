@@ -55,8 +55,9 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
                 hasher.finish()
             }
             ValueTag::Symbol => {
-                // Symbols not fully implemented; keep pointer-based hash for now
-                (*val).as_ptr() as u64
+                let mut hasher = DefaultHasher::new();
+                (*val).as_symbol().hash(&mut hasher);
+                hasher.finish()
             }
             ValueTag::Vector => {
                 let vec_ptr = (*val).as_ptr() as *mut crate::vector::PersistentVector;
@@ -100,6 +101,10 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
             ValueTag::OpaquePointer => {
                 (*val).as_ptr() as u64
+            }
+            ValueTag::Exception => {
+                let payload = (*val).as_exception_payload();
+                hash_combine(0xEC7E_0001, clorus_hash(payload))
             }
         }
     }

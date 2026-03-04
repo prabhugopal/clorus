@@ -1,0 +1,26 @@
+(ns test-var-metadata)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(def ^:dynamic ^"stream doc" *stream* 42)
+
+(defn -main []
+  (do
+    (println "Testing var metadata...")
+
+    ;; Symbol lookup still derefs var-backed defs
+    (assert-eq "deref through symbol" *stream* 42)
+
+    (let [m1 (meta #'*stream*)
+          m2 (meta (var *stream*))]
+      (assert-eq "doc" (:doc m1) "stream doc")
+      (assert-eq "dynamic" (:dynamic m1) true)
+      (assert-eq "var and var-quote parity" (:doc m2) "stream doc"))
+
+    (println "var metadata passed")
+    0))
+
+(-main)

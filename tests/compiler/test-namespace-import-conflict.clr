@@ -1,0 +1,8 @@
+; EXPECT_COMPILE_ERROR: Namespace import conflict
+
+(ns tests.compiler.test-namespace-import-conflict
+  (:require [clorus.set :refer [union]]
+            [clorus.set :rename {intersection union}]))
+
+(defn -main [& _args]
+  "SHOULD-NOT-RUN")

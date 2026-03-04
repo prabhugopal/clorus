@@ -1,0 +1,31 @@
+(ns test-core-helpers)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn -main []
+  (do
+    (assert-eq "quot-pos" (quot 7 3) 2.0)
+    (assert-eq "quot-neg-left" (quot -7 3) -2.0)
+    (assert-eq "quot-neg-right" (quot 7 -3) -2.0)
+    (assert-eq "quot-both-neg" (quot -7 -3) 2.0)
+
+    (let [m {:a 1 :b 2}
+          ks (keys m)
+          vs (vals m)]
+      (assert-eq "keys-count" (count ks) 2)
+      (assert-eq "keys-member-0" (contains? m (nth ks 0)) true)
+      (assert-eq "keys-member-1" (contains? m (nth ks 1)) true)
+      (assert-eq "vals-count" (count vs) 2)
+      (assert-eq "vals-sum" (+ (nth vs 0) (nth vs 1)) 3))
+
+    (assert-eq "char-true" (char? "x") true)
+    (assert-eq "char-false-long" (char? "xy") false)
+    (assert-eq "char-false-num" (char? 1) false)
+
+    (println "core helpers tests passed")
+    0))
+
+(-main)

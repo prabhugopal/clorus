@@ -1,0 +1,4 @@
+(ns test-alias-mod-a)
+
+(defn ping-a []
+  1)

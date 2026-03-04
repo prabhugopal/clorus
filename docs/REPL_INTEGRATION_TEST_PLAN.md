@@ -1,5 +1,11 @@
 # Clorus REPL Integration Test Plan
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Purpose
 Ensure REPL functionality remains intact during architectural refactoring from standalone binary to integrated subcommand.
 

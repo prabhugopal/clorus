@@ -1,0 +1,26 @@
+(ns test-metadata-merge-order)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn -main []
+  (do
+    (println "Testing metadata merge order...")
+
+    ;; Reader metadata should merge left-to-right with rightmost winning.
+    (let [v ^{:tag "A"} ^{:tag "B" :doc "d1"} [1]]
+      (assert-eq "reader rightmost tag wins" (:tag (meta v)) "B")
+      (assert-eq "reader doc preserved" (:doc (meta v)) "d1"))
+
+    ;; Reader metadata wrapped around explicit with-meta should apply last.
+    (let [v ^{:doc "outer" :private true}
+             (with-meta [1] {:doc "inner" :private false})]
+      (assert-eq "outer doc overrides inner" (:doc (meta v)) "outer")
+      (assert-eq "outer private overrides inner" (:private (meta v)) true))
+
+    (println "metadata merge order passed")
+    0))
+
+(-main)

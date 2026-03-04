@@ -1,5 +1,11 @@
 # Namespace Validation: Clojure vs Clorus
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_CHECKLIST.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Critical Difference: ❌ Clorus Does NOT Validate Namespace Matching!
 
 ### Clojure Behavior (Strict) ✅

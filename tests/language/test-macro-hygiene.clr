@@ -1,0 +1,33 @@
+(ns tests.language.test-macro-hygiene)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(defmacro hygienic-let [expr]
+  `(let [tmp# ~expr]
+     tmp#))
+
+(defmacro hygienic-pair [x]
+  `(let [a# ~x
+         b# ~x]
+     [a# b#]))
+
+;; Ensure generated locals don't capture user locals
+(let [tmp 77]
+  (assert-eq "hygienic-let result" 5 (hygienic-let 5))
+  (assert-eq "user local unchanged" 77 tmp))
+
+(let [a 10 b 20]
+  (assert-eq "hygienic-pair result" [3 3] (hygienic-pair 3))
+  (assert-eq "a unchanged" 10 a)
+  (assert-eq "b unchanged" 20 b))
+
+;; Auto-gensym symbols should be unique per expansion
+(def e1 (macroexpand '(hygienic-let 1)))
+(def e2 (macroexpand '(hygienic-let 1)))
+(def s1 (nth (nth e1 1) 0))
+(def s2 (nth (nth e2 1) 0))
+(assert-eq "auto-gensym unique per expansion" false (= s1 s2))
+
+(println "macro hygiene passed")

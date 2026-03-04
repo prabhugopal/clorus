@@ -1,0 +1,18 @@
+(ns test-shorthand-rest)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn -main []
+  (do
+    (def f-rest-only #(count %&))
+    (def f-fixed-rest #(+ %1 (count %&)))
+    (assert-eq "rest-only-count" (f-rest-only 1 2 3) 3)
+    (assert-eq "fixed-plus-rest-count" (f-fixed-rest 10 1 2 3) 13)
+    (assert-eq "fixed-plus-empty-rest" (f-fixed-rest 10) 10)
+    (println "shorthand rest tests passed")
+    0))
+
+(-main)

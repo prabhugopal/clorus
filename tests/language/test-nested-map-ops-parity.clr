@@ -1,0 +1,29 @@
+;; Parity checks for nested map APIs: get-in / assoc-in / update-in.
+
+(ns tests.language.test-nested-map-ops-parity)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (let [data {:a {:b 10}}
+        missing {}
+        updated (assoc-in data [:a :c] 20)
+        new-path (assoc-in missing [:x :y :z] 1)
+        bumped (update-in data [:a :b] inc)
+        plus-many (update-in data [:a :b] (fn [x a b] (+ (+ x a) b)) 5 7)
+        initialized (update-in missing [:count] (fn [v] (if v (+ v 1) 1)))]
+    (assert-eq "get-in existing path" (get-in data [:a :b]) 10)
+    (assert-eq "get-in missing path nil" (get-in data [:a :x]) nil)
+    (assert-eq "get-in default value" (get-in data [:a :x] "dflt") "dflt")
+
+    (assert-eq "assoc-in adds nested key" (get-in updated [:a :c]) 20)
+    (assert-eq "assoc-in leaves original untouched" (get-in data [:a :c]) nil)
+    (assert-eq "assoc-in creates deep path" (get-in new-path [:x :y :z]) 1)
+
+    (assert-eq "update-in unary fn" (get-in bumped [:a :b]) 11)
+    (assert-eq "update-in variadic fn args" (get-in plus-many [:a :b]) 22)
+    (assert-eq "update-in initializes missing path" (get-in initialized [:count]) 1)
+    "PASS"))

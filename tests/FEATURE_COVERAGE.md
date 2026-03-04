@@ -2,6 +2,9 @@
 
 This document tracks test coverage for all Clorus language features based on Clojure compatibility goals.
 
+> Canonical parity status lives in `docs/PARITY_CHECKLIST.md`.
+> This matrix is test-inventory focused; if a status conflicts, follow `docs/PARITY_CHECKLIST.md` and update this file.
+
 ## Test Coverage Legend
 - ✅ **Fully Tested** - Comprehensive tests exist
 - 🟡 **Partially Tested** - Basic tests exist, edge cases missing
@@ -51,10 +54,10 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `do` | ✅ | `lang/control/do.clr` | |
 | `let` | ✅ | `core/destructuring-test.clr` | |
 | `loop`/`recur` | ✅ | `core/loop-recur-test.clr` | |
-| `when` | ❌ | - | Macro, needs test |
-| `when-not` | ❌ | - | Macro, needs test |
-| `cond` | ❌ | - | Macro, needs test |
-| `case` | ❌ | - | **NOT IMPLEMENTED** |
+| `when` | ✅ | `features/macros/control-flow-macros-test.clr` | Macro expansion + execution coverage |
+| `when-not` | ✅ | `features/macros/control-flow-macros-test.clr` | Macro expansion + execution coverage |
+| `cond` | ✅ | `features/macros/control-flow-macros-test.clr` | Macro expansion + execution coverage |
+| `case` | 🟡 | `features/macros/cond-case-test.clr` | Macro exists; parity edge-cases still tracked in `docs/PARITY_CHECKLIST.md` |
 
 ### Functions
 | Feature | Status | Test File | Notes |
@@ -201,7 +204,9 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `defprotocol` | ✅ | `polymorphism/test-protocols.clr` | |
 | `extend-type` | ✅ | `polymorphism/test-protocols.clr` | |
 | Protocol dispatch | ✅ | `polymorphism/test-protocols.clr` | |
-| `satisfies?` | ❌ | - | **NOT IMPLEMENTED** |
+| `satisfies?` | ✅ | `language/test-satisfies.clr` | Runtime type/protocol check via protocol registry |
+| `extends?` | ✅ | `language/test-protocol-introspection.clr` | Protocol/type membership check |
+| `implements?` | ✅ | `language/test-protocol-introspection.clr` | Alias-style protocol/value check |
 
 ### Multimethods
 | Feature | Status | Test File | Notes |
@@ -209,8 +214,22 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `defmulti` | ✅ | `polymorphism/test-multimethod.clr` | |
 | `defmethod` | ✅ | `polymorphism/test-multimethod.clr` | |
 | Custom dispatch | ✅ | `polymorphism/test-multimethod.clr` | |
-| `prefer-method` | ❌ | - | Needs test |
-| `remove-method` | ❌ | - | Needs test |
+| Hierarchical dispatch (`isa?`) | ✅ | `language/test-multimethod-hierarchy.clr` | Keyword/symbol/string/number/bool/nil hierarchy keys |
+| `prefer-method` | ✅ | `language/test-multimethod-hierarchy.clr` | Tie-breaking for multiple matching methods |
+| `remove-method` | ✅ | `language/test-multimethod-admin.clr` | Removes dispatch entry for compiled multimethod methods |
+| `methods` | ✅ | `language/test-multimethod-introspection.clr` | Returns dispatch-value -> method function map |
+| `get-method` | ✅ | `language/test-multimethod-introspection.clr` | Returns dispatch-resolved method function (or default) |
+| `prefers` | ✅ | `language/test-multimethod-introspection.clr` | Returns preferred dispatch relation map |
+
+### Hierarchy
+| Feature | Status | Test File | Notes |
+|---------|--------|-----------|-------|
+| `derive` | ✅ | `language/test-hierarchy-isa.clr` | Cycle-safe edge insertion |
+| `underive` | ✅ | `language/test-hierarchy-isa.clr` | Removes parent relation |
+| `isa?` | ✅ | `language/test-hierarchy-isa.clr` | Reflexive + transitive |
+| `parents` | ✅ | `language/test-hierarchy-queries.clr` | Direct parent set |
+| `ancestors` | ✅ | `language/test-hierarchy-queries.clr` | Transitive parent set |
+| `descendants` | ✅ | `language/test-hierarchy-queries.clr` | Reverse transitive set |
 
 ---
 
@@ -227,12 +246,12 @@ This document tracks test coverage for all Clorus language features based on Clo
 ### Macros
 | Feature | Status | Test File | Notes |
 |---------|--------|-----------|-------|
-| `defmacro` | 🟡 | `macros/defmacro-test.clr` | Partial |
-| `macroexpand` | ❌ | - | **NOT IMPLEMENTED** |
-| `macroexpand-1` | ❌ | - | **NOT IMPLEMENTED** |
-| `gensym` | ❌ | - | **NOT IMPLEMENTED** |
-| `&env` | ❌ | - | **NOT IMPLEMENTED** |
-| `&form` | ❌ | - | **NOT IMPLEMENTED** |
+| `defmacro` | 🟡 | `macros/defmacro-test.clr`, `language/test-macro-hygiene.clr` | Baseline hygiene (`foo#` auto-gensym) covered; deeper edge cases pending |
+| `macroexpand` | ✅ | `language/test-macroexpand.clr` | Basic expansion behavior covered |
+| `macroexpand-1` | ✅ | `language/test-macroexpand.clr` | Single-step expansion behavior covered |
+| `gensym` | ✅ | `language/test-gensym.clr` | Runtime uniqueness and prefix behavior covered |
+| `&env` | ✅ | `language/test-macro-env-form.clr` | Baseline local-binding map semantics covered |
+| `&form` | ✅ | `language/test-macro-env-form.clr` | Macro call-form capture baseline covered |
 
 ---
 
@@ -246,8 +265,8 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `:require` | ✅ | `lang/namespaces/require-test.clr` | |
 | `:use` | ✅ | `lang/namespaces/use-test.clr` | |
 | `:as` aliasing | ✅ | `lang/namespaces/alias-test.clr` | |
-| `:refer` | ❌ | - | **NOT IMPLEMENTED** |
-| `:rename` | ❌ | - | **NOT IMPLEMENTED** |
+| `:refer` | ✅ | `language/test-require-refer-rename.clr` | Baseline behavior covered |
+| `:rename` | ✅ | `language/test-require-refer-rename.clr` | Baseline behavior covered |
 
 ### Qualified Calls
 | Feature | Status | Test File | Notes |
@@ -266,9 +285,9 @@ This document tracks test coverage for all Clorus language features based on Clo
 | `catch` | ✅ | `exceptions/try-catch-test.clr` | |
 | `finally` | ✅ | `exceptions/try-catch-test.clr` | |
 | `throw` | ✅ | `exceptions/try-catch-test.clr` | |
-| Multiple catches | ❌ | - | Needs test |
-| `ex-info` | ❌ | - | Needs test |
-| `ex-data` | ❌ | - | Needs test |
+| Multiple catches | 🟡 | `language/test-try-catch-typed.clr` | Typed catches covered; more edge cases pending |
+| `ex-info` | ✅ | `language/test-ex-info.clr` | |
+| `ex-data` | ✅ | `language/test-ex-info.clr` | |
 
 ---
 
@@ -342,10 +361,9 @@ This document tracks test coverage for all Clorus language features based on Clo
 
 ### 🟠 **P1 - High (Common Use)**
 1. `case` statement
-2. `when`, `when-not`, `cond` macros
-3. Type predicates: `seq?`, `coll?`, `fn?`
-4. Map operations: `get-in`, `assoc-in`, `update-in`
-5. `macroexpand`, `gensym`
+2. Type predicates: `seq?`, `coll?`, `fn?`
+3. Map operations: `get-in`, `assoc-in`, `update-in`
+4. Dynamic vars edge cases (`binding`, `set!`)
 
 ### 🟡 **P2 - Medium (Nice to Have)**
 1. `letfn` for mutual recursion
@@ -358,3 +376,4 @@ This document tracks test coverage for all Clorus language features based on Clo
 2. Tagged literals
 3. Character literals
 4. Ratio types
+5. Reader discard `#_` baseline covered by `tests/language/test-reader-discard.clr` (remaining reader forms pending)

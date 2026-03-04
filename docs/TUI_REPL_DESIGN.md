@@ -1,5 +1,11 @@
 # Interactive TUI REPL Design Document
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** 📋 PLANNED (Not Yet Implemented)
 **Priority:** High (Post 100% Language Parity)
 **Estimated Effort:** 5-7 days

@@ -92,6 +92,112 @@ pub extern "C" fn clorus_function_new(
     }
 }
 
+unsafe fn build_rest_vector_from_args(
+    args: *const *mut Value,
+    start: i32,
+    arg_count: i32,
+) -> *mut Value {
+    let mut rest_vec = crate::vector::clorus_vector_empty();
+    for i in start..arg_count {
+        let arg = *args.offset(i as isize);
+        rest_vec = crate::vector::clorus_vector_conj(rest_vec, arg);
+    }
+    rest_vec
+}
+
+unsafe fn call_non_variadic_function(
+    func_ptr: *const u8,
+    args: *const *mut Value,
+    arg_count: i32,
+    env_ptr: *mut i8,
+) -> *mut Value {
+    match arg_count {
+        0 => {
+            let f: extern "C" fn(*mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(env_ptr)
+        }
+        1 => {
+            let f: extern "C" fn(*mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), env_ptr)
+        }
+        2 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), env_ptr)
+        }
+        3 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), env_ptr)
+        }
+        4 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), env_ptr)
+        }
+        5 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), env_ptr)
+        }
+        6 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), *args.offset(5), env_ptr)
+        }
+        _ => {
+            eprintln!("Function call with {} arguments not yet supported", arg_count);
+            Value::nil()
+        }
+    }
+}
+
+unsafe fn call_variadic_function(
+    func_ptr: *const u8,
+    args: *const *mut Value,
+    arg_count: i32,
+    fixed_count: i32,
+    env_ptr: *mut i8,
+) -> *mut Value {
+    if arg_count < fixed_count {
+        eprintln!(
+            "Arity mismatch: variadic function expected at least {}, got {}",
+            fixed_count, arg_count
+        );
+        return Value::nil();
+    }
+
+    let rest_vec = build_rest_vector_from_args(args, fixed_count, arg_count);
+    match fixed_count {
+        0 => {
+            let f: extern "C" fn(*mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(rest_vec, env_ptr)
+        }
+        1 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), rest_vec, env_ptr)
+        }
+        2 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), rest_vec, env_ptr)
+        }
+        3 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), rest_vec, env_ptr)
+        }
+        4 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), rest_vec, env_ptr)
+        }
+        5 => {
+            let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
+            f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), rest_vec, env_ptr)
+        }
+        _ => {
+            eprintln!(
+                "Variadic function with {} fixed arguments is not yet supported",
+                fixed_count
+            );
+            Value::nil()
+        }
+    }
+}
+
 /// Call a function with arguments
 #[no_mangle]
 pub extern "C" fn clorus_function_call(
@@ -100,20 +206,45 @@ pub extern "C" fn clorus_function_call(
     arg_count: i32,
 ) -> *mut Value {
     unsafe {
+        if func_val.is_null() {
+            eprintln!("Attempted to call null as function");
+            return Value::nil();
+        }
+
+        // Be defensive at the runtime boundary: call sites should pass function values.
+        // If a Var is passed, auto-deref it here to avoid UB in mixed call paths.
+        let mut target = func_val;
+        if (*target).tag() == crate::value::ValueTag::Var {
+            let deref = crate::var::clorus_var_get((*target).as_var());
+            if deref.is_null() {
+                eprintln!("Attempted to call unresolved var as function");
+                return Value::nil();
+            }
+            target = deref;
+        }
+
+        let target_tag = (*target).tag();
+        if target_tag != crate::value::ValueTag::Function
+            && target_tag != crate::value::ValueTag::MultiArityFunction
+        {
+            eprintln!("Attempted to call non-function value with tag {:?}", target_tag);
+            return Value::nil();
+        }
+
         // Check if this is a multi-arity function
-        if (*func_val).tag() == crate::value::ValueTag::MultiArityFunction {
+        if target_tag == crate::value::ValueTag::MultiArityFunction {
             // Dispatch to multi-arity function handler
-            return clorus_multi_arity_function_call(func_val, args, arg_count);
+            return clorus_multi_arity_function_call(target, args, arg_count);
         }
 
         // Extract function data (regular single-arity function)
-        let func_data = (*func_val).as_function();
+        let func_data = (*target).as_function();
 
         // Check arity
-        // If arity is negative, it's variadic (accepts any number of args)
-        // For now, variadic functions are not fully supported in clorus_function_call
-        // We'll just accept any arg count for variadic functions
-        if (*func_data).arity >= 0 && (*func_data).arity != arg_count {
+        // Non-variadic: arity >= 0 and exact match required.
+        // Variadic: arity < 0 encodes fixed prefix as (-arity - 1).
+        let encoded_arity = (*func_data).arity;
+        if encoded_arity >= 0 && encoded_arity != arg_count {
             eprintln!("Arity mismatch: expected {}, got {}", (*func_data).arity, arg_count);
             return Value::nil();
         }
@@ -129,41 +260,11 @@ pub extern "C" fn clorus_function_call(
             std::ptr::null_mut()
         };
 
-        // Cast to appropriate function type based on arity
-        // IMPORTANT: All closures take an additional environment parameter as the LAST argument
-        match arg_count {
-            0 => {
-                let f: extern "C" fn(*mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(env_ptr)
-            }
-            1 => {
-                let f: extern "C" fn(*mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), env_ptr)
-            }
-            2 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), env_ptr)
-            }
-            3 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), env_ptr)
-            }
-            4 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), env_ptr)
-            }
-            5 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), env_ptr)
-            }
-            6 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), *args.offset(5), env_ptr)
-            }
-            _ => {
-                eprintln!("Function call with {} arguments not yet supported", arg_count);
-                Value::nil()
-            }
+        if encoded_arity >= 0 {
+            call_non_variadic_function(func_ptr, args, arg_count, env_ptr)
+        } else {
+            let fixed_count = -encoded_arity - 1;
+            call_variadic_function(func_ptr, args, arg_count, fixed_count, env_ptr)
         }
     }
 }
@@ -281,17 +382,29 @@ pub extern "C" fn clorus_multi_arity_function_call(
         // Get arity variants array
         let variants = multi_func_data.offset(1) as *const ArityVariant;
 
-        // Find matching arity variant
-        let mut func_ptr: *const u8 = std::ptr::null();
+        // Find matching arity variant (prefer exact arity over variadic)
+        let mut matched_variant: *const ArityVariant = std::ptr::null();
         for i in 0..(*multi_func_data).arity_count {
-            let variant = &*variants.offset(i as isize);
-            if variant.arity == arg_count || variant.arity < 0 {  // -1 = variadic
-                func_ptr = variant.func_ptr;
+            let variant = variants.offset(i as isize);
+            if (*variant).arity >= 0 && (*variant).arity == arg_count {
+                matched_variant = variant;
                 break;
             }
         }
+        if matched_variant.is_null() {
+            for i in 0..(*multi_func_data).arity_count {
+                let variant = variants.offset(i as isize);
+                if (*variant).arity < 0 {
+                    let fixed_count = -(*variant).arity - 1;
+                    if arg_count >= fixed_count {
+                        matched_variant = variant;
+                        break;
+                    }
+                }
+            }
+        }
 
-        if func_ptr.is_null() {
+        if matched_variant.is_null() {
             eprintln!("Multi-arity function: No matching arity for {} arguments", arg_count);
             eprintln!("Available arities: ");
             for i in 0..(*multi_func_data).arity_count {
@@ -308,41 +421,13 @@ pub extern "C" fn clorus_multi_arity_function_call(
             std::ptr::null_mut()
         };
 
-        // Call the matching arity variant
-        match arg_count {
-            0 => {
-                let f: extern "C" fn(*mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(env_ptr)
-            }
-            1 => {
-                let f: extern "C" fn(*mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), env_ptr)
-            }
-            2 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), env_ptr)
-            }
-            3 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), env_ptr)
-            }
-            4 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), env_ptr)
-            }
-            5 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), env_ptr)
-            }
-            6 => {
-                let f: extern "C" fn(*mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut Value, *mut i8) -> *mut Value = std::mem::transmute(func_ptr);
-                f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), *args.offset(5), env_ptr)
-            }
-            _ => {
-                eprintln!("Function call with {} arguments not yet supported", arg_count);
-                Value::nil()
-            }
+        let func_ptr = (*matched_variant).func_ptr;
+        let encoded_arity = (*matched_variant).arity;
+        if encoded_arity >= 0 {
+            call_non_variadic_function(func_ptr, args, arg_count, env_ptr)
+        } else {
+            let fixed_count = -encoded_arity - 1;
+            call_variadic_function(func_ptr, args, arg_count, fixed_count, env_ptr)
         }
     }
 }
-

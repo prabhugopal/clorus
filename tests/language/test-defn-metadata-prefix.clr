@@ -1,0 +1,35 @@
+(ns test-defn-metadata-prefix)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+^:private
+(defn pfx-alpha
+  "doc-a"
+  [x]
+  (+ x 1))
+
+^{:private false :dynamic true}
+(defn pfx-beta
+  "doc-b"
+  ([] 1)
+  ([x] (+ x 1)))
+
+(defn -main []
+  (do
+    (println "Testing metadata prefix on defn form...")
+    (assert-eq "pfx-alpha private" (:private (meta #'pfx-alpha)) true)
+    (assert-eq "pfx-alpha doc" (:doc (meta #'pfx-alpha)) "doc-a")
+    (assert-eq "pfx-alpha call" (pfx-alpha 2) 3)
+
+    (assert-eq "pfx-beta private" (:private (meta #'pfx-beta)) false)
+    (assert-eq "pfx-beta dynamic" (:dynamic (meta #'pfx-beta)) true)
+    (assert-eq "pfx-beta doc" (:doc (meta #'pfx-beta)) "doc-b")
+    (assert-eq "pfx-beta arity0" (pfx-beta) 1)
+    (assert-eq "pfx-beta arity1" (pfx-beta 3) 4)
+    (println "defn metadata prefix passed")
+    0))
+
+(-main)

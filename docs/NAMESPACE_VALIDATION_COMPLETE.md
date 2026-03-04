@@ -1,5 +1,11 @@
 # Namespace Validation Implementation - Complete! ✅
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Summary
 
 Clorus now enforces strict namespace-to-file-path validation like Clojure, with full support for the underscore/hyphen naming convention.

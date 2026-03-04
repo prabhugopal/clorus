@@ -1,5 +1,11 @@
 # Phase 2a: Interface Files (.clorus-ffi)
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/FFI_ROADMAP.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** 🚧 In Progress
 **Started:** January 26, 2025
 

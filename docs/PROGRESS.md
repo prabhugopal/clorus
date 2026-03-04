@@ -1,5 +1,11 @@
 # Clorus Feature Implementation Progress
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Last Updated:** January 27, 2026
 **Reference:** Based on Jank Programming Language checklist
 **Current Completion:** 40% (18/45 features)

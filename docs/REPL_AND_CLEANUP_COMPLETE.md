@@ -1,5 +1,11 @@
 # Clorus Repository Cleanup & REPL Improvements - Complete ✅
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Date:** January 28, 2026
 **Summary:** Repository organized + Clojure-style REPL output + Project-aware initialization
 

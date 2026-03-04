@@ -1,7 +1,6 @@
 (def m {:name "test" :fn (fn [] 42)})
 (println m)
-;; Load stdlib
-(load "stdlib/core.clr")
+;; Stdlib is loaded by the runner/repl startup.
 
 ;; Test map with a closure from a factory function
 (defn make-adder [n]

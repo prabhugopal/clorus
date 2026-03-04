@@ -1,0 +1,23 @@
+(ns test-defmulti-metadata)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+^:private
+(defmulti area
+  "area-doc"
+  {:dynamic true}
+  :kind)
+
+(defn -main []
+  (do
+    (println "Testing defmulti metadata visibility...")
+    (assert-eq "area doc" (:doc (meta #'area)) "area-doc")
+    (assert-eq "area private" (:private (meta #'area)) true)
+    (assert-eq "area dynamic" (:dynamic (meta #'area)) true)
+    (println "defmulti metadata passed")
+    0))
+
+(-main)

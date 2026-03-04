@@ -1,5 +1,11 @@
 # Phase C: Refinements - COMPLETE
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/ROADMAP_TO_100_PARITY.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** ✅ Complete
 **Completion Date:** January 26, 2025
 **Duration:** ~1 hour

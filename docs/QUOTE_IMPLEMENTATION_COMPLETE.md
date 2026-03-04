@@ -1,5 +1,11 @@
 # Quote Special Form Implementation ✅
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Date:** January 27, 2026
 **Status:** ✅ COMPLETE
 **Feature:** quote and ' reader macro - Prevent evaluation, treat code as data

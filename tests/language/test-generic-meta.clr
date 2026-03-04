@@ -1,0 +1,19 @@
+(ns test-generic-meta)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(def v1 ^{:doc "vec-doc"} [1 2 3])
+(def f1 ^:private (fn [x] (+ x 1)))
+
+(defn -main []
+  (do
+    (println "Testing generic metadata...")
+    (assert-eq "vector meta doc" (:doc (meta v1)) "vec-doc")
+    (assert-eq "fn meta private" (:private (meta f1)) true)
+    (println "generic metadata passed")
+    0))
+
+(-main)

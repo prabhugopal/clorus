@@ -1,0 +1,13 @@
+;; Namespace parity test for :refer and :rename.
+
+(ns tests.language.test-require-refer-rename
+  (:require [clorus.set :as s]
+            [clorus.set :refer [union] :rename {union set-union}]))
+
+(defn -main [& _args]
+  (let [a #{1 2}
+        b #{2 3}
+        _via-alias (s/union a b)
+        _via-refer (union a b)
+        _via-rename (set-union a b)]
+    "PASS"))

@@ -1,5 +1,11 @@
 # Phase 2b: Value* Type System - Implementation Plan
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** 🚧 In Progress
 **Started:** January 26, 2025
 **Estimated:** 9-14 days

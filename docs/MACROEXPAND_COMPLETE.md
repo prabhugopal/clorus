@@ -1,5 +1,11 @@
 # Macroexpand Implementation Complete
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_CHECKLIST.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Status: ✅ FULLY IMPLEMENTED
 
 Added `macroexpand` and `macroexpand-1` builtins for debugging macro expansion.

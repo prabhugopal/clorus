@@ -1,0 +1,13 @@
+(ns tests.language.test-macroexpand)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(def me (macroexpand '(when true (+ 1 2) (+ 3 4))))
+(def me1 (macroexpand-1 '(when true (+ 1 2) (+ 3 4))))
+
+(assert-eq "macroexpand head" "if" (first me))
+(assert-eq "macroexpand-1 head" "if" (first me1))
+
+(println "macroexpand passed")

@@ -1,0 +1,29 @@
+;; Basic parity checks for set! assignment semantics.
+
+(ns tests.language.test-set-bang)
+
+(def ^:dynamic *x* 1)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; set! should mutate local bindings and return the assigned value.
+    (let [a 10
+          assigned (set! a 20)]
+      (assert-eq "set! return local" assigned 20)
+      (assert-eq "set! mutated local" a 20))
+
+    ;; binding currently expands to let; set! should mutate the bound symbol.
+    (assert-eq "set! inside binding"
+               (binding [*x* 2]
+                 (set! *x* 3)
+                 *x*)
+               3)
+
+    ;; root remains unchanged after binding scope exits.
+    (assert-eq "root after binding scope" *x* 1)
+    "PASS"))

@@ -1,5 +1,11 @@
 # REPL Status - January 28, 2026
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## ✅ What's Working
 
 ### Core REPL Functionality

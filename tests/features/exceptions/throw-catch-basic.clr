@@ -1,0 +1,12 @@
+;; Exception semantics target test (currently expected to fail until implementation lands).
+;; Manual run:
+;;   CLORUS_ENTRY_FILE=tests/features/exceptions/throw-catch-basic.clr ./target/release/clorus run --jit
+;;   CLORUS_ENTRY_FILE=tests/features/exceptions/throw-catch-basic.clr ./target/release/clorus run --legacy-run
+
+(defn -main []
+  (let [v (try
+            (throw "boom")
+            (catch e e))]
+    (if (= v "boom")
+      "PASS"
+      (throw (str "FAIL: expected boom, got " v)))))

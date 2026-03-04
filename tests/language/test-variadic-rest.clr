@@ -1,0 +1,33 @@
+(ns test-variadic-rest)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn collect [x & rest]
+  [x (count rest) (nth rest 0) (nth rest 1)])
+
+(def variadic-fn
+  (fn [x & rest]
+    (+ x (count rest))))
+
+(defn multi
+  ([x] x)
+  ([x y & rest]
+   (+ x y (count rest))))
+
+(defn -main []
+  (do
+    (println "Testing variadic rest semantics...")
+
+    (assert-eq "collect" (collect 10 20 30) [10 2 20 30])
+    (assert-eq "variadic-fn no rest" (variadic-fn 7) 7)
+    (assert-eq "variadic-fn with rest" (variadic-fn 7 1 2 3) 10)
+    (assert-eq "multi fixed" (multi 11) 11)
+    (assert-eq "multi variadic" (multi 1 2 3 4) 5)
+
+    (println "variadic rest semantics passed")
+    0))
+
+(-main)

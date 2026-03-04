@@ -1,5 +1,11 @@
 # Lazy Sequences Implementation - Complete
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Summary
 
 Successfully implemented a comprehensive lazy sequence library for Clorus in **pure Clorus code**, demonstrating that advanced features can be built without runtime or compiler changes.

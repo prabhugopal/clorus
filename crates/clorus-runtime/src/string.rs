@@ -76,9 +76,50 @@ unsafe fn value_to_rust_string(val: *mut Value) -> String {
             }
             format!("[{}]", parts.join(" "))
         }
+        ValueTag::List => {
+            let mut parts = Vec::new();
+            let mut current = val;
+            loop {
+                let count = crate::list::clorus_list_count(current);
+                if count == 0 {
+                    break;
+                }
+                let first = crate::list::clorus_list_first(current);
+                parts.push(value_to_rust_string(first));
+                crate::value::clorus_release(first);
+                let next = crate::list::clorus_list_rest(current);
+                if current != val {
+                    crate::value::clorus_release(current);
+                }
+                current = next;
+            }
+            if current != val {
+                crate::value::clorus_release(current);
+            }
+            format!("({})", parts.join(" "))
+        }
         ValueTag::HashMap => {
-            // Simple map representation
-            format!("{{...}}")  // Simplified for now
+            let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
+            let mut entries: Vec<(String, String)> = Vec::new();
+            for (k, v) in (*map_ptr).entries_iter() {
+                entries.push((value_to_rust_string(*k), value_to_rust_string(*v)));
+            }
+            entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+            let rendered: Vec<String> = entries
+                .into_iter()
+                .map(|(k, v)| format!("{} {}", k, v))
+                .collect();
+            format!("{{{}}}", rendered.join(" "))
+        }
+        ValueTag::HashSet => {
+            let set_ptr = (*val).as_ptr() as *mut crate::set::ClorusHashSet;
+            let mut elems: Vec<String> = (*set_ptr)
+                .values()
+                .iter()
+                .map(|e| value_to_rust_string(*e))
+                .collect();
+            elems.sort();
+            format!("#{{{}}}", elems.join(" "))
         }
         _ => format!("#<{:?}>", (*val).header().tag()),
     }
@@ -700,6 +741,10 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
             }
         }
         ValueTag::Nil => "nil".to_string(),
+        ValueTag::Exception => {
+            let payload = (*val).as_exception_payload();
+            format!("(exception {})", value_to_pr_string(payload))
+        }
         ValueTag::Vector => {
             // Print vector as [elem1 elem2 ...]
             let vec_ptr = (*val).as_ptr() as *const PersistentVector;
@@ -727,15 +772,51 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
         }
         ValueTag::List => {
             // Print list as (elem1 elem2 ...)
-            "(...list...)".to_string() // TODO: Implement list printing
+            let mut parts: Vec<String> = Vec::new();
+            let mut current = val;
+            loop {
+                let count = crate::list::clorus_list_count(current);
+                if count == 0 {
+                    break;
+                }
+                let first = crate::list::clorus_list_first(current);
+                parts.push(value_to_pr_string(first));
+                crate::value::clorus_release(first);
+                let next = crate::list::clorus_list_rest(current);
+                if current != val {
+                    crate::value::clorus_release(current);
+                }
+                current = next;
+            }
+            if current != val {
+                crate::value::clorus_release(current);
+            }
+            format!("({})", parts.join(" "))
         }
         ValueTag::HashMap => {
-            // Print map as {:key1 val1, :key2 val2}
-            "{...map...}".to_string() // TODO: Implement map printing
+            // Print map as {:k v ...}. Ordering is not guaranteed by runtime map.
+            let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
+            let mut entries: Vec<(String, String)> = Vec::new();
+            for (k, v) in (*map_ptr).entries_iter() {
+                entries.push((value_to_pr_string(*k), value_to_pr_string(*v)));
+            }
+            entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+            let rendered: Vec<String> = entries
+                .into_iter()
+                .map(|(k, v)| format!("{} {}", k, v))
+                .collect();
+            format!("{{{}}}", rendered.join(" "))
         }
         ValueTag::HashSet => {
-            // Print set as #{elem1 elem2}
-            "#{...set...}".to_string() // TODO: Implement set printing
+            // Print set as #{elem1 elem2}. Ordering is normalized for deterministic output.
+            let set_ptr = (*val).as_ptr() as *mut crate::set::ClorusHashSet;
+            let mut elems: Vec<String> = (*set_ptr)
+                .values()
+                .iter()
+                .map(|e| value_to_pr_string(*e))
+                .collect();
+            elems.sort();
+            format!("#{{{}}}", elems.join(" "))
         }
         ValueTag::Function => {
             "#<function>".to_string()
@@ -771,7 +852,7 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
             }
         }
         ValueTag::Symbol => {
-            "symbol".to_string() // TODO: Implement when Symbol type is added
+            (*val).as_symbol().to_string()
         }
         ValueTag::OpaquePointer => {
             "#<opaque-pointer>".to_string()

@@ -1,0 +1,37 @@
+(ns test-defn-var-metadata)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn alpha
+  "alpha-doc"
+  {:private true :dynamic true}
+  [x]
+  (+ x 1))
+
+(defn beta
+  "beta-doc"
+  {:private false}
+  ([] 0)
+  ([x] x)
+  ([x y] (+ x y)))
+
+(defn -main []
+  (do
+    (println "Testing defn var metadata visibility...")
+    (assert-eq "alpha doc" (:doc (meta #'alpha)) "alpha-doc")
+    (assert-eq "alpha private" (:private (meta #'alpha)) true)
+    (assert-eq "alpha dynamic" (:dynamic (meta #'alpha)) true)
+    (assert-eq "alpha call works" (alpha 4) 5)
+
+    (assert-eq "beta doc" (:doc (meta #'beta)) "beta-doc")
+    (assert-eq "beta private" (:private (meta #'beta)) false)
+    (assert-eq "beta arity0" (beta) 0)
+    (assert-eq "beta arity1" (beta 9) 9)
+    (assert-eq "beta arity2" (beta 2 3) 5)
+    (println "defn var metadata passed")
+    0))
+
+(-main)

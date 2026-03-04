@@ -1,5 +1,11 @@
 # Clorus Standard Library - Implementation Roadmap
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/ROADMAP_TO_100_PARITY.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Based on Clojure's proven design**
 **Date:** 2025-01-30
 

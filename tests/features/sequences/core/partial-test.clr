@@ -1,4 +1,4 @@
-;; First 100 lines of stdlib/core.clr to test
+;; First 100 lines of stdlib/clorus/core.clr to test
 (defn partial [f & args]
   (fn [& more-args]
     (apply f (concat args more-args))))

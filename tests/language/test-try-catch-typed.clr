@@ -1,0 +1,24 @@
+;; Typed catch routing smoke test for language-level exceptions.
+
+(defn -main []
+  (let [a (try
+            (throw "boom")
+            (catch Number e
+              "wrong")
+            (catch String e
+              "ok"))
+        b (try
+            (throw 42)
+            (catch String e
+              "wrong")
+            (catch Number e
+              "ok"))
+        c (try
+            (throw :kw)
+            (catch Number e
+              "wrong")
+            (catch e
+              "ok"))]
+    (if (and (= a "ok") (= b "ok") (= c "ok"))
+      "PASS"
+      (throw "FAIL: typed catch dispatch mismatch"))))

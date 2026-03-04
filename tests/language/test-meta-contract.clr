@@ -1,0 +1,41 @@
+(ns test-meta-contract)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(def ^{:doc "d0"} *mv* 10)
+
+(defn -main []
+  (do
+    (println "Testing metadata contract (map-or-nil)...")
+
+    ;; Generic value metadata: invalid metadata should raise typed exception payload.
+    (let [v (with-meta [1 2 3] {:k 1})]
+      (let [ex (try (with-meta v 42)
+                    (catch Exception e e))]
+        (assert-eq "generic invalid ex type" (:type ex) :clorus/exception)
+        (assert-eq "generic invalid ex message" (ex-message ex) "with-meta metadata must be a map or nil")
+        (assert-eq "generic invalid ex data op" (:op (ex-data ex)) "with-meta")
+        (assert-eq "generic invalid ex data actual" (:actual (ex-data ex)) "long"))
+      (assert-eq "generic invalid leaves metadata intact" (:k (meta v)) 1)
+      (with-meta v nil)
+      (assert-eq "generic nil clears metadata" (meta v) nil))
+
+    ;; Var metadata: invalid metadata should raise typed exception payload.
+    (with-meta #'*mv* {:doc "d1" :tag "long"})
+    (let [ex (try (with-meta #'*mv* 42)
+                  (catch Exception e e))]
+      (assert-eq "var invalid ex type" (:type ex) :clorus/exception)
+      (assert-eq "var invalid ex data actual" (:actual (ex-data ex)) "long"))
+    (assert-eq "var invalid leaves doc intact" (:doc (meta #'*mv*)) "d1")
+    (assert-eq "var invalid leaves tag intact" (:tag (meta #'*mv*)) "long")
+    (with-meta #'*mv* nil)
+    (assert-eq "var nil clears doc" (:doc (meta #'*mv*)) nil)
+    (assert-eq "var nil clears tag" (:tag (meta #'*mv*)) nil)
+
+    (println "metadata contract passed")
+    0))
+
+(-main)

@@ -1,0 +1,32 @@
+(ns test-multimethod-dispatch)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defmulti area (fn [shape] (get shape :type)))
+
+(defmethod area :circle [shape]
+  (get shape :radius))
+
+(defmethod area :rectangle [shape]
+  (* (get shape :width) (get shape :height)))
+
+(defmethod area :default [shape]
+  0)
+
+(defn -main []
+  (do
+    (println "Testing multimethod dispatch...")
+    (def circle {:type :circle :radius 5})
+    (def rect {:type :rectangle :width 10 :height 3})
+    (def weird {:type :triangle :side 9})
+
+    (assert-eq "circle area" (area circle) 5)
+    (assert-eq "rect area" (area rect) 30)
+    (assert-eq "default area" (area weird) 0)
+    (println "multimethod dispatch passed")
+    0))
+
+(-main)

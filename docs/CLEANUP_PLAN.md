@@ -1,5 +1,11 @@
 # Clorus Codebase Cleanup and Organization Plan
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Overview
 
 This document provides a step-by-step plan to organize and clean up the Clorus codebase, moving files to their proper locations according to the project organization guidelines.

@@ -1,5 +1,11 @@
 # GUI Main Thread Limitation on macOS
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/GUI_REPL_USAGE.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Executive Summary
 
 **Finding**: egui/winit cannot be used from a REPL on macOS due to a fundamental platform requirement: the EventLoop **must** be created on the main thread.

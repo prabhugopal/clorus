@@ -25,6 +25,24 @@ static FORCE_LINK_CHAN_CLOSE: unsafe extern "C" fn(*mut Value) -> *mut Value = c
 static FORCE_LINK_ALTS: unsafe extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::channel::clorus_alts;
 #[used]
 static FORCE_LINK_GO: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::go_block::clorus_go;
+#[used]
+static FORCE_LINK_DERIVE: extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_derive;
+#[used]
+static FORCE_LINK_UNDERIVE: extern "C" fn(*mut Value, *mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_underive;
+#[used]
+static FORCE_LINK_ISA_I32: extern "C" fn(*mut Value, *mut Value) -> i32 = clorus_runtime::hierarchy::clorus_isa_i32;
+#[used]
+static FORCE_LINK_PARENTS: extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_parents;
+#[used]
+static FORCE_LINK_ANCESTORS: extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_ancestors;
+#[used]
+static FORCE_LINK_DESCENDANTS: extern "C" fn(*mut Value) -> *mut Value = clorus_runtime::hierarchy::clorus_descendants;
+#[used]
+static FORCE_LINK_PROTOCOL_SATISFIES: extern "C" fn(*const std::ffi::c_char, *const std::ffi::c_char) -> i32 =
+    clorus_runtime::protocols::clorus_protocol_satisfies_type_i32;
+#[used]
+static FORCE_LINK_GENSYM: extern "C" fn(*const std::ffi::c_char) -> *mut Value =
+    clorus_runtime::value::clorus_gensym;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

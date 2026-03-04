@@ -6,7 +6,7 @@
 /// - `->>` (thread-last)
 /// - User-defined macros via defmacro
 
-use crate::ast::Expr;
+use crate::ast::{Expr, Pattern, MapPatternKey};
 use std::collections::HashMap;
 
 /// Registry for user-defined macros
@@ -14,6 +14,7 @@ use std::collections::HashMap;
 pub struct MacroRegistry {
     macros: HashMap<String, MacroDefinition>,
     gensym_counter: u64, // Counter for generating unique symbols
+    local_env: Vec<String>, // Current lexical locals for &env
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +29,7 @@ impl MacroRegistry {
         MacroRegistry {
             macros: HashMap::new(),
             gensym_counter: 0,
+            local_env: Vec::new(),
         }
     }
 
@@ -41,6 +43,25 @@ impl MacroRegistry {
 
     pub fn get(&self, name: &str) -> Option<&MacroDefinition> {
         self.macros.get(name)
+    }
+
+    fn current_env_expr(&self) -> Expr {
+        // Clojure stores compiler LocalBinding objects as values.
+        // We model this as a map of symbol -> :local-binding for parity-oriented macro code.
+        let mut entries = Vec::new();
+        for name in &self.local_env {
+            entries.push((
+                Expr::Symbol(name.clone()),
+                Expr::Keyword("local-binding".to_string()),
+            ));
+        }
+        Expr::Map(entries)
+    }
+
+    fn push_local(&mut self, name: &str) {
+        if name != "_" && !self.local_env.iter().any(|n| n == name) {
+            self.local_env.push(name.to_string());
+        }
     }
 
     /// Generate a unique symbol for macro hygiene
@@ -79,6 +100,18 @@ pub fn expand_macros_once(expr: &Expr) -> Expr {
 
 fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
     match expr {
+        // Macroexpand-1: expand one outer macro step and return quoted data form.
+        Expr::Call { func, args } if func == "macroexpand-1" => {
+            if args.len() != 1 {
+                return Expr::Nil;
+            }
+            let target = extract_macroexpand_target(&args[0]);
+            let expanded = expand_macros_once_with_registry(&target, registry);
+            Expr::Quote {
+                expr: Box::new(to_data_form(&expanded)),
+            }
+        }
+
         // Thread-first macro: (-> x (f a) (g b)) => (g (f x a) b)
         Expr::Call { func, args } if func == "->" => {
             expand_thread_first_once(args, registry)
@@ -184,7 +217,7 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             // Check if it's a user-defined macro
             if let Some(macro_def) = registry.macros.get(func).cloned() {
                 // Expand the macro once (without recursing into result)
-                apply_user_macro(&macro_def, args)
+                apply_user_macro(&macro_def, func, args, registry)
             } else {
                 // Not a macro - return as-is (don't recurse into args)
                 expr.clone()
@@ -381,8 +414,32 @@ fn expand_binding_impl(args: &[Expr], _recurse: bool) -> Expr {
     expand_binding(args, &mut registry)
 }
 
-fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
+pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
     match expr {
+        // Macroexpand: fully expand macros and return quoted data form.
+        Expr::Call { func, args } if func == "macroexpand" => {
+            if args.len() != 1 {
+                return Expr::Nil;
+            }
+            let target = extract_macroexpand_target(&args[0]);
+            let expanded = expand_macros_with_registry(&target, registry);
+            Expr::Quote {
+                expr: Box::new(to_data_form(&expanded)),
+            }
+        }
+
+        // Macroexpand-1: expand one outer macro step and return quoted data form.
+        Expr::Call { func, args } if func == "macroexpand-1" => {
+            if args.len() != 1 {
+                return Expr::Nil;
+            }
+            let target = extract_macroexpand_target(&args[0]);
+            let expanded = expand_macros_once_with_registry(&target, registry);
+            Expr::Quote {
+                expr: Box::new(to_data_form(&expanded)),
+            }
+        }
+
         // Thread-first macro: (-> x (f a) (g b)) => (g (f x a) b)
         Expr::Call { func, args } if func == "->" => {
             expand_thread_first(args, registry)
@@ -480,25 +537,9 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
 
         // User-defined macro call
         Expr::Call { func, args } => {
-            // Check for gensym call (compile-time symbol generation)
-            if func == "gensym" {
-                let prefix = if !args.is_empty() {
-                    // If there's an argument, it should be a string for the prefix
-                    match &args[0] {
-                        Expr::String(s) => Some(s.as_str()),
-                        _ => None,
-                    }
-                } else {
-                    None
-                };
-
-                let sym = registry.gensym(prefix);
-                return Expr::Symbol(sym);
-            }
-
             if let Some(macro_def) = registry.get(func).cloned() {
                 // Expand user macro (clone macro_def to avoid borrow conflict)
-                let expanded = expand_user_macro(&macro_def, args, registry);
+                let expanded = expand_user_macro(&macro_def, func, args, registry);
                 // Recursively expand the result (macros can generate macro calls)
                 expand_macros_with_registry(&expanded, registry)
             } else {
@@ -532,27 +573,59 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
 
         // Recursively expand macros in other expressions
         Expr::Let { bindings, body } => {
-            let expanded_bindings: Vec<_> = bindings
-                .iter()
-                .map(|(name, value)| (name.clone(), Box::new(expand_macros_with_registry(value, registry))))
-                .collect();
+            let saved_env = registry.local_env.clone();
+            let mut expanded_bindings = Vec::with_capacity(bindings.len());
+            for (pattern, value) in bindings {
+                let expanded_value = expand_macros_with_registry(value, registry);
+                expanded_bindings.push((pattern.clone(), Box::new(expanded_value)));
+
+                let mut locals = Vec::new();
+                collect_pattern_symbols(pattern, &mut locals);
+                for local in locals {
+                    registry.push_local(&local);
+                }
+            }
+            let expanded_body = expand_macros_with_registry(body, registry);
+            registry.local_env = saved_env;
             Expr::Let {
                 bindings: expanded_bindings,
-                body: Box::new(expand_macros_with_registry(body, registry)),
+                body: Box::new(expanded_body),
             }
         }
 
         Expr::Letfn { bindings, body } => {
-            let expanded_bindings: Vec<_> = bindings
-                .iter()
-                .map(|(name, params, rest_param, fn_body)| {
-                    (name.clone(), params.clone(), rest_param.clone(),
-                     Box::new(expand_macros_with_registry(fn_body, registry)))
-                })
-                .collect();
+            let saved_env = registry.local_env.clone();
+            for (name, _, _, _) in bindings {
+                registry.push_local(name);
+            }
+
+            let mut expanded_bindings = Vec::with_capacity(bindings.len());
+            for (name, params, rest_param, fn_body) in bindings {
+                let saved_fn_env = registry.local_env.clone();
+                let mut param_locals = Vec::new();
+                for p in params {
+                    collect_pattern_symbols(p, &mut param_locals);
+                }
+                for local in param_locals {
+                    registry.push_local(&local);
+                }
+                if let Some(rest) = rest_param {
+                    registry.push_local(rest);
+                }
+                let expanded_body = expand_macros_with_registry(fn_body, registry);
+                registry.local_env = saved_fn_env;
+                expanded_bindings.push((
+                    name.clone(),
+                    params.clone(),
+                    rest_param.clone(),
+                    Box::new(expanded_body),
+                ));
+            }
+            let expanded_outer_body = expand_macros_with_registry(body, registry);
+            registry.local_env = saved_env;
             Expr::Letfn {
                 bindings: expanded_bindings,
-                body: Box::new(expand_macros_with_registry(body, registry)),
+                body: Box::new(expanded_outer_body),
             }
         }
 
@@ -562,29 +635,61 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
             metadata: metadata.clone(),  // Metadata doesn't need macro expansion
         },
 
-        Expr::Defn { name, params, rest_param, body } => Expr::Defn {
-            name: name.clone(),
-            params: params.clone(),
-            rest_param: rest_param.clone(),
-            body: Box::new(expand_macros_with_registry(body, registry)),
+        Expr::Defn { name, params, rest_param, body, metadata } => {
+            let saved_env = registry.local_env.clone();
+            let mut param_locals = Vec::new();
+            for p in params {
+                collect_pattern_symbols(p, &mut param_locals);
+            }
+            for local in param_locals {
+                registry.push_local(&local);
+            }
+            if let Some(rest) = rest_param {
+                registry.push_local(rest);
+            }
+            let expanded_body = expand_macros_with_registry(body, registry);
+            registry.local_env = saved_env;
+            Expr::Defn {
+                name: name.clone(),
+                params: params.clone(),
+                rest_param: rest_param.clone(),
+                body: Box::new(expanded_body),
+                metadata: metadata.clone(),
+            }
         },
 
         Expr::Declare { names } => Expr::Declare {
             names: names.clone(),
         },
 
-        Expr::DefnMulti { name, arities } => {
+        Expr::DefnMulti { name, arities, metadata } => {
             let expanded_arities = arities
                 .iter()
                 .map(|arity| crate::ast::FunctionArity {
                     params: arity.params.clone(),
                     rest_param: arity.rest_param.clone(),
-                    body: Box::new(expand_macros_with_registry(&arity.body, registry)),
+                    body: Box::new({
+                        let saved_env = registry.local_env.clone();
+                        let mut param_locals = Vec::new();
+                        for p in &arity.params {
+                            collect_pattern_symbols(p, &mut param_locals);
+                        }
+                        for local in param_locals {
+                            registry.push_local(&local);
+                        }
+                        if let Some(rest) = &arity.rest_param {
+                            registry.push_local(rest);
+                        }
+                        let expanded = expand_macros_with_registry(&arity.body, registry);
+                        registry.local_env = saved_env;
+                        expanded
+                    }),
                 })
                 .collect();
             Expr::DefnMulti {
                 name: name.clone(),
                 arities: expanded_arities,
+                metadata: metadata.clone(),
             }
         },
 
@@ -648,11 +753,12 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
             }
         },
 
-        Expr::Defmulti { name, dispatch_fn } => {
+        Expr::Defmulti { name, dispatch_fn, metadata } => {
             // Expand macros in dispatch function
             Expr::Defmulti {
                 name: name.clone(),
                 dispatch_fn: Box::new(expand_macros_with_registry(dispatch_fn, registry)),
+                metadata: metadata.clone(),
             }
         },
 
@@ -666,10 +772,40 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
             }
         },
 
-        Expr::Fn { params, rest_param, body } => Expr::Fn {
-            params: params.clone(),
-            rest_param: rest_param.clone(),
-            body: Box::new(expand_macros_with_registry(body, registry)),
+        Expr::PreferMethod { name, preferred_dispatch, over_dispatch } => {
+            Expr::PreferMethod {
+                name: name.clone(),
+                preferred_dispatch: Box::new(expand_macros_with_registry(preferred_dispatch, registry)),
+                over_dispatch: Box::new(expand_macros_with_registry(over_dispatch, registry)),
+            }
+        },
+
+        Expr::RemoveMethod { name, dispatch_value } => {
+            Expr::RemoveMethod {
+                name: name.clone(),
+                dispatch_value: Box::new(expand_macros_with_registry(dispatch_value, registry)),
+            }
+        },
+
+        Expr::Fn { params, rest_param, body } => {
+            let saved_env = registry.local_env.clone();
+            let mut param_locals = Vec::new();
+            for p in params {
+                collect_pattern_symbols(p, &mut param_locals);
+            }
+            for local in param_locals {
+                registry.push_local(&local);
+            }
+            if let Some(rest) = rest_param {
+                registry.push_local(rest);
+            }
+            let expanded_body = expand_macros_with_registry(body, registry);
+            registry.local_env = saved_env;
+            Expr::Fn {
+                params: params.clone(),
+                rest_param: rest_param.clone(),
+                body: Box::new(expanded_body),
+            }
         },
 
         Expr::FnMulti { arities } => {
@@ -678,7 +814,22 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
                 .map(|arity| crate::ast::FunctionArity {
                     params: arity.params.clone(),
                     rest_param: arity.rest_param.clone(),
-                    body: Box::new(expand_macros_with_registry(&arity.body, registry)),
+                    body: Box::new({
+                        let saved_env = registry.local_env.clone();
+                        let mut param_locals = Vec::new();
+                        for p in &arity.params {
+                            collect_pattern_symbols(p, &mut param_locals);
+                        }
+                        for local in param_locals {
+                            registry.push_local(&local);
+                        }
+                        if let Some(rest) = &arity.rest_param {
+                            registry.push_local(rest);
+                        }
+                        let expanded = expand_macros_with_registry(&arity.body, registry);
+                        registry.local_env = saved_env;
+                        expanded
+                    }),
                 })
                 .collect();
             Expr::FnMulti {
@@ -760,13 +911,23 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
         }
 
         Expr::Loop { bindings, body } => {
-            let expanded_bindings: Vec<_> = bindings
-                .iter()
-                .map(|(name, value)| (name.clone(), Box::new(expand_macros_with_registry(value, registry))))
-                .collect();
+            let saved_env = registry.local_env.clone();
+            let mut expanded_bindings = Vec::with_capacity(bindings.len());
+            for (pattern, value) in bindings {
+                let expanded_value = expand_macros_with_registry(value, registry);
+                expanded_bindings.push((pattern.clone(), Box::new(expanded_value)));
+
+                let mut locals = Vec::new();
+                collect_pattern_symbols(pattern, &mut locals);
+                for local in locals {
+                    registry.push_local(&local);
+                }
+            }
+            let expanded_body = expand_macros_with_registry(body, registry);
+            registry.local_env = saved_env;
             Expr::Loop {
                 bindings: expanded_bindings,
-                body: Box::new(expand_macros_with_registry(body, registry)),
+                body: Box::new(expanded_body),
             }
         }
 
@@ -789,10 +950,14 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
         Expr::Try { body, catch_clauses, finally_block } => {
             let expanded_body = Box::new(expand_macros_with_registry(body, registry));
             let expanded_catch = catch_clauses.iter().map(|clause| {
+                let saved_env = registry.local_env.clone();
+                registry.push_local(&clause.binding);
+                let expanded_handler = expand_macros_with_registry(&clause.handler, registry);
+                registry.local_env = saved_env;
                 crate::ast::CatchClause {
                     exception_type: clause.exception_type.clone(),
                     binding: clause.binding.clone(),
-                    handler: Box::new(expand_macros_with_registry(&clause.handler, registry)),
+                    handler: Box::new(expanded_handler),
                 }
             }).collect();
             let expanded_finally = finally_block.as_ref().map(|f| Box::new(expand_macros_with_registry(f, registry)));
@@ -807,6 +972,13 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
         Expr::Throw { expr } => {
             Expr::Throw {
                 expr: Box::new(expand_macros_with_registry(expr, registry))
+            }
+        }
+
+        Expr::SetBang { target, value } => {
+            Expr::SetBang {
+                target: target.clone(),
+                value: Box::new(expand_macros_with_registry(value, registry)),
             }
         }
 
@@ -825,8 +997,172 @@ fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) -> Exp
     }
 }
 
+fn extract_macroexpand_target(arg: &Expr) -> Expr {
+    match arg {
+        Expr::Quote { expr } => (**expr).clone(),
+        other => other.clone(),
+    }
+}
+
+fn pattern_to_expr(p: &Pattern) -> Expr {
+    match p {
+        Pattern::Symbol(s) => Expr::Symbol(s.clone()),
+        Pattern::Ignore => Expr::Symbol("_".to_string()),
+        Pattern::Vector { elements, rest, as_binding } => {
+            let mut out: Vec<Expr> = elements.iter().map(pattern_to_expr).collect();
+            if let Some(r) = rest {
+                out.push(Expr::Symbol("&".to_string()));
+                out.push(Expr::Symbol(r.clone()));
+            }
+            if let Some(a) = as_binding {
+                out.push(Expr::Keyword(":as".to_string()));
+                out.push(Expr::Symbol(a.clone()));
+            }
+            Expr::Vector(out)
+        }
+        Pattern::Map { bindings, defaults } => {
+            let mut entries: Vec<(Expr, Expr)> = Vec::new();
+            for (k, v) in bindings {
+                let key_expr = match k {
+                    MapPatternKey::Keyword(s) => Expr::Keyword(s.clone()),
+                    MapPatternKey::Symbol(s) => Expr::Symbol(s.clone()),
+                    MapPatternKey::Str(s) => Expr::String(s.clone()),
+                    MapPatternKey::Sym(s) => Expr::List(vec![
+                        Expr::Symbol("quote".to_string()),
+                        Expr::Symbol(s.clone()),
+                    ]),
+                };
+                entries.push((key_expr, pattern_to_expr(v)));
+            }
+            if let Some(defs) = defaults {
+                let def_entries: Vec<(Expr, Expr)> = defs
+                    .iter()
+                    .map(|(k, v)| (Expr::Symbol(k.clone()), to_data_form(v)))
+                    .collect();
+                entries.push((Expr::Keyword(":or".to_string()), Expr::Map(def_entries)));
+            }
+            Expr::Map(entries)
+        }
+    }
+}
+
+fn to_data_form(expr: &Expr) -> Expr {
+    match expr {
+        Expr::Long(_)
+        | Expr::Double(_)
+        | Expr::String(_)
+        | Expr::Symbol(_)
+        | Expr::Keyword(_)
+        | Expr::Bool(_)
+        | Expr::Nil => expr.clone(),
+
+        Expr::Vector(items) => Expr::Vector(items.iter().map(to_data_form).collect()),
+        Expr::List(items) => Expr::List(items.iter().map(to_data_form).collect()),
+        Expr::Set(items) => Expr::Set(items.iter().map(to_data_form).collect()),
+        Expr::Map(entries) => Expr::Map(
+            entries
+                .iter()
+                .map(|(k, v)| (to_data_form(k), to_data_form(v)))
+                .collect(),
+        ),
+
+        Expr::Call { func, args } => {
+            let mut out = Vec::with_capacity(args.len() + 1);
+            out.push(Expr::Symbol(func.clone()));
+            out.extend(args.iter().map(to_data_form));
+            Expr::List(out)
+        }
+
+        Expr::If { condition, then_branch, else_branch } => Expr::List(vec![
+            Expr::Symbol("if".to_string()),
+            to_data_form(condition),
+            to_data_form(then_branch),
+            to_data_form(else_branch),
+        ]),
+
+        Expr::Do { exprs } => {
+            let mut out = Vec::with_capacity(exprs.len() + 1);
+            out.push(Expr::Symbol("do".to_string()));
+            out.extend(exprs.iter().map(to_data_form));
+            Expr::List(out)
+        }
+
+        Expr::Let { bindings, body } => {
+            let mut b = Vec::with_capacity(bindings.len() * 2);
+            for (pat, val) in bindings {
+                b.push(pattern_to_expr(pat));
+                b.push(to_data_form(val));
+            }
+            Expr::List(vec![
+                Expr::Symbol("let".to_string()),
+                Expr::Vector(b),
+                to_data_form(body),
+            ])
+        }
+
+        Expr::Loop { bindings, body } => {
+            let mut b = Vec::with_capacity(bindings.len() * 2);
+            for (pat, val) in bindings {
+                b.push(pattern_to_expr(pat));
+                b.push(to_data_form(val));
+            }
+            Expr::List(vec![
+                Expr::Symbol("loop".to_string()),
+                Expr::Vector(b),
+                to_data_form(body),
+            ])
+        }
+
+        Expr::Recur { args } => {
+            let mut out = Vec::with_capacity(args.len() + 1);
+            out.push(Expr::Symbol("recur".to_string()));
+            out.extend(args.iter().map(to_data_form));
+            Expr::List(out)
+        }
+
+        Expr::Throw { expr } => Expr::List(vec![
+            Expr::Symbol("throw".to_string()),
+            to_data_form(expr),
+        ]),
+
+        Expr::SetBang { target, value } => Expr::List(vec![
+            Expr::Symbol("set!".to_string()),
+            Expr::Symbol(target.clone()),
+            to_data_form(value),
+        ]),
+
+        Expr::Deref { expr } => Expr::List(vec![
+            Expr::Symbol("deref".to_string()),
+            to_data_form(expr),
+        ]),
+
+        Expr::Quote { expr } => Expr::List(vec![
+            Expr::Symbol("quote".to_string()),
+            to_data_form(expr),
+        ]),
+
+        Expr::SyntaxQuote { expr } => Expr::List(vec![
+            Expr::Symbol("syntax-quote".to_string()),
+            to_data_form(expr),
+        ]),
+
+        Expr::Unquote { expr } => Expr::List(vec![
+            Expr::Symbol("unquote".to_string()),
+            to_data_form(expr),
+        ]),
+
+        Expr::UnquoteSplicing { expr } => Expr::List(vec![
+            Expr::Symbol("unquote-splicing".to_string()),
+            to_data_form(expr),
+        ]),
+
+        // Fallback: keep structural info available even when exact reader shape differs.
+        _ => Expr::String(format!("{:?}", expr)),
+    }
+}
+
 /// Expand binding macro:
-/// (binding [x 1 y 2] body...) => (let [x 1 y 2] body...)
+/// (binding [*x* 1 *y* 2] body...) => Expr::Binding {...}
 fn expand_binding(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     if args.len() < 2 {
         return Expr::Nil;
@@ -844,12 +1180,12 @@ fn expand_binding(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     let mut bindings = Vec::with_capacity(raw_bindings.len() / 2);
     let mut i = 0;
     while i < raw_bindings.len() {
-        let pattern = match &raw_bindings[i] {
-            Expr::Symbol(s) => crate::ast::Pattern::Symbol(s.clone()),
+        let name = match &raw_bindings[i] {
+            Expr::Symbol(s) => s.clone(),
             _ => return Expr::Nil,
         };
         let value = expand_macros_with_registry(&raw_bindings[i + 1], registry);
-        bindings.push((pattern, Box::new(value)));
+        bindings.push((name, Box::new(value)));
         i += 2;
     }
 
@@ -864,16 +1200,121 @@ fn expand_binding(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         }
     };
 
-    Expr::Let {
+    Expr::Binding {
         bindings,
         body: Box::new(body_expr),
     }
 }
 
 /// Apply a user-defined macro without recursively expanding arguments (for macroexpand-1)
-fn apply_user_macro(macro_def: &MacroDefinition, args: &[Expr]) -> Expr {
+fn macro_form_expr(func: &str, args: &[Expr]) -> Expr {
+    let mut form_items = Vec::with_capacity(args.len() + 1);
+    form_items.push(Expr::Symbol(func.to_string()));
+    form_items.extend(args.iter().cloned());
+    Expr::List(form_items)
+}
+
+fn collect_pattern_symbols(pattern: &Pattern, out: &mut Vec<String>) {
+    match pattern {
+        Pattern::Symbol(name) => {
+            if name != "_" && !out.iter().any(|s| s == name) {
+                out.push(name.clone());
+            }
+        }
+        Pattern::Ignore => {}
+        Pattern::Vector { elements, rest, as_binding } => {
+            for p in elements {
+                collect_pattern_symbols(p, out);
+            }
+            if let Some(rest_name) = rest {
+                if rest_name != "_" && !out.iter().any(|s| s == rest_name) {
+                    out.push(rest_name.clone());
+                }
+            }
+            if let Some(as_name) = as_binding {
+                if as_name != "_" && !out.iter().any(|s| s == as_name) {
+                    out.push(as_name.clone());
+                }
+            }
+        }
+        Pattern::Map { bindings, .. } => {
+            for (_key, binding_pattern) in bindings {
+                collect_pattern_symbols(binding_pattern, out);
+            }
+        }
+    }
+}
+
+fn resolve_auto_gensym_symbol(
+    name: &str,
+    registry: &mut MacroRegistry,
+    auto_gensyms: &mut HashMap<String, String>,
+) -> String {
+    auto_gensyms
+        .entry(name.to_string())
+        .or_insert_with(|| registry.gensym(Some(&name[..name.len() - 1])))
+        .clone()
+}
+
+fn rewrite_pattern_auto_gensym(
+    pattern: &Pattern,
+    registry: &mut MacroRegistry,
+    auto_gensyms: &mut HashMap<String, String>,
+) -> Pattern {
+    match pattern {
+        Pattern::Symbol(name) if name.ends_with('#') => {
+            Pattern::Symbol(resolve_auto_gensym_symbol(name, registry, auto_gensyms))
+        }
+        Pattern::Symbol(_) | Pattern::Ignore => pattern.clone(),
+        Pattern::Vector {
+            elements,
+            rest,
+            as_binding,
+        } => Pattern::Vector {
+            elements: elements
+                .iter()
+                .map(|p| rewrite_pattern_auto_gensym(p, registry, auto_gensyms))
+                .collect(),
+            rest: rest.as_ref().map(|r| {
+                if r.ends_with('#') {
+                    resolve_auto_gensym_symbol(r, registry, auto_gensyms)
+                } else {
+                    r.clone()
+                }
+            }),
+            as_binding: as_binding.as_ref().map(|a| {
+                if a.ends_with('#') {
+                    resolve_auto_gensym_symbol(a, registry, auto_gensyms)
+                } else {
+                    a.clone()
+                }
+            }),
+        },
+        Pattern::Map { bindings, defaults } => Pattern::Map {
+            bindings: bindings
+                .iter()
+                .map(|(k, p)| {
+                    (
+                        k.clone(),
+                        rewrite_pattern_auto_gensym(p, registry, auto_gensyms),
+                    )
+                })
+                .collect(),
+            defaults: defaults.clone(),
+        },
+    }
+}
+
+fn apply_user_macro(
+    macro_def: &MacroDefinition,
+    func: &str,
+    args: &[Expr],
+    registry: &mut MacroRegistry,
+) -> Expr {
     // Create parameter substitution map WITHOUT expanding arguments
     let mut substitutions = HashMap::new();
+    substitutions.insert("&form".to_string(), macro_form_expr(func, args));
+    substitutions.insert("&env".to_string(), registry.current_env_expr());
 
     // Bind fixed parameters
     for (i, param) in macro_def.params.iter().enumerate() {
@@ -891,16 +1332,18 @@ fn apply_user_macro(macro_def: &MacroDefinition, args: &[Expr]) -> Expr {
     }
 
     // Substitute parameters in the macro body
-    substitute_params(&macro_def.body, &substitutions)
+    substitute_params(&macro_def.body, &substitutions, registry)
 }
 
 /// Expand a user-defined macro call
-fn expand_user_macro(macro_def: &MacroDefinition, args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+fn expand_user_macro(macro_def: &MacroDefinition, func: &str, args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     // First, expand macros in the arguments (arguments are evaluated before substitution)
     let expanded_args: Vec<Expr> = args.iter().map(|a| expand_macros_with_registry(a, registry)).collect();
 
     // Create parameter substitution map
     let mut substitutions = HashMap::new();
+    substitutions.insert("&form".to_string(), macro_form_expr(func, args));
+    substitutions.insert("&env".to_string(), registry.current_env_expr());
 
     // Bind fixed parameters
     for (i, param) in macro_def.params.iter().enumerate() {
@@ -917,12 +1360,85 @@ fn expand_user_macro(macro_def: &MacroDefinition, args: &[Expr], registry: &mut 
         substitutions.insert(rest_param.clone(), Expr::List(rest_args));
     }
 
-    // Substitute parameters in the macro body
-    substitute_params(&macro_def.body, &substitutions)
+    // Substitute parameters in the macro body and evaluate compile-time intrinsics
+    // (currently: gensym) within macro expansion context.
+    let substituted = substitute_params(&macro_def.body, &substitutions, registry);
+    evaluate_compile_time_intrinsics(&substituted, registry)
+}
+
+fn evaluate_compile_time_intrinsics(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
+    match expr {
+        Expr::Call { func, args } if func == "gensym" => {
+            let prefix = if args.is_empty() {
+                None
+            } else if args.len() == 1 {
+                match &args[0] {
+                    Expr::String(s) => Some(s.as_str()),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            Expr::Symbol(registry.gensym(prefix))
+        }
+        Expr::Call { func, args } => Expr::Call {
+            func: func.clone(),
+            args: args
+                .iter()
+                .map(|a| evaluate_compile_time_intrinsics(a, registry))
+                .collect(),
+        },
+        Expr::Vector(items) => Expr::Vector(
+            items
+                .iter()
+                .map(|e| evaluate_compile_time_intrinsics(e, registry))
+                .collect(),
+        ),
+        Expr::List(items) => Expr::List(
+            items
+                .iter()
+                .map(|e| evaluate_compile_time_intrinsics(e, registry))
+                .collect(),
+        ),
+        Expr::Map(entries) => Expr::Map(
+            entries
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        evaluate_compile_time_intrinsics(k, registry),
+                        evaluate_compile_time_intrinsics(v, registry),
+                    )
+                })
+                .collect(),
+        ),
+        Expr::Set(items) => Expr::Set(
+            items
+                .iter()
+                .map(|e| evaluate_compile_time_intrinsics(e, registry))
+                .collect(),
+        ),
+        Expr::Quote { expr: inner } => Expr::Quote {
+            expr: Box::new(evaluate_compile_time_intrinsics(inner, registry)),
+        },
+        Expr::SyntaxQuote { expr: inner } => Expr::SyntaxQuote {
+            expr: Box::new(evaluate_compile_time_intrinsics(inner, registry)),
+        },
+        Expr::Unquote { expr: inner } => Expr::Unquote {
+            expr: Box::new(evaluate_compile_time_intrinsics(inner, registry)),
+        },
+        Expr::UnquoteSplicing { expr: inner } => Expr::UnquoteSplicing {
+            expr: Box::new(evaluate_compile_time_intrinsics(inner, registry)),
+        },
+        _ => expr.clone(),
+    }
 }
 
 /// Substitute parameters in an expression
-fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
+fn substitute_params(
+    expr: &Expr,
+    substitutions: &HashMap<String, Expr>,
+    registry: &mut MacroRegistry,
+) -> Expr {
     match expr {
         Expr::Symbol(name) => {
             // If this symbol is a parameter, substitute it
@@ -932,20 +1448,21 @@ fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr
         Expr::SyntaxQuote { expr: inner } => {
             // In syntax-quote, process unquotes and return the evaluated result
             // The syntax-quote is part of the macro template, not the expanded output
-            substitute_in_syntax_quote(inner, substitutions)
+            let mut auto_gensyms = HashMap::new();
+            substitute_in_syntax_quote(inner, substitutions, registry, &mut auto_gensyms)
         }
 
         Expr::Unquote { expr: inner } => {
             // Unquote: substitute and evaluate
             Expr::Unquote {
-                expr: Box::new(substitute_params(inner, substitutions))
+                expr: Box::new(substitute_params(inner, substitutions, registry))
             }
         }
 
         Expr::UnquoteSplicing { expr: inner } => {
             // Unquote-splicing: substitute (splicing handled by caller)
             Expr::UnquoteSplicing {
-                expr: Box::new(substitute_params(inner, substitutions))
+                expr: Box::new(substitute_params(inner, substitutions, registry))
             }
         }
 
@@ -955,7 +1472,7 @@ fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr
                 match item {
                     Expr::UnquoteSplicing { expr: inner } => {
                         // Splice: if inner evaluates to a list, splice its elements
-                        let substituted = substitute_params(inner, substitutions);
+                        let substituted = substitute_params(inner, substitutions, registry);
                         if let Expr::List(splice_items) = substituted {
                             result.extend(splice_items);
                         } else {
@@ -963,32 +1480,35 @@ fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr
                             result.push(Expr::UnquoteSplicing { expr: Box::new(substituted) });
                         }
                     }
-                    _ => result.push(substitute_params(item, substitutions))
+                    _ => result.push(substitute_params(item, substitutions, registry))
                 }
             }
             Expr::List(result)
         }
 
         Expr::Vector(items) => {
-            Expr::Vector(items.iter().map(|e| substitute_params(e, substitutions)).collect())
+            Expr::Vector(items.iter().map(|e| substitute_params(e, substitutions, registry)).collect())
         }
 
         Expr::Map(entries) => {
             Expr::Map(entries.iter().map(|(k, v)| {
-                (substitute_params(k, substitutions), substitute_params(v, substitutions))
+                (
+                    substitute_params(k, substitutions, registry),
+                    substitute_params(v, substitutions, registry),
+                )
             }).collect())
         }
 
         Expr::Set(items) => {
-            Expr::Set(items.iter().map(|e| substitute_params(e, substitutions)).collect())
+            Expr::Set(items.iter().map(|e| substitute_params(e, substitutions, registry)).collect())
         }
 
         Expr::Let { bindings, body } => {
             Expr::Let {
                 bindings: bindings.iter().map(|(name, value)| {
-                    (name.clone(), Box::new(substitute_params(value, substitutions)))
+                    (name.clone(), Box::new(substitute_params(value, substitutions, registry)))
                 }).collect(),
-                body: Box::new(substitute_params(body, substitutions))
+                body: Box::new(substitute_params(body, substitutions, registry))
             }
         }
 
@@ -996,30 +1516,30 @@ fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr
             Expr::Letfn {
                 bindings: bindings.iter().map(|(name, params, rest_param, fn_body)| {
                     (name.clone(), params.clone(), rest_param.clone(),
-                     Box::new(substitute_params(fn_body, substitutions)))
+                     Box::new(substitute_params(fn_body, substitutions, registry)))
                 }).collect(),
-                body: Box::new(substitute_params(body, substitutions))
+                body: Box::new(substitute_params(body, substitutions, registry))
             }
         }
 
         Expr::If { condition, then_branch, else_branch } => {
             Expr::If {
-                condition: Box::new(substitute_params(condition, substitutions)),
-                then_branch: Box::new(substitute_params(then_branch, substitutions)),
-                else_branch: Box::new(substitute_params(else_branch, substitutions))
+                condition: Box::new(substitute_params(condition, substitutions, registry)),
+                then_branch: Box::new(substitute_params(then_branch, substitutions, registry)),
+                else_branch: Box::new(substitute_params(else_branch, substitutions, registry))
             }
         }
 
         Expr::Do { exprs } => {
             Expr::Do {
-                exprs: exprs.iter().map(|e| substitute_params(e, substitutions)).collect()
+                exprs: exprs.iter().map(|e| substitute_params(e, substitutions, registry)).collect()
             }
         }
 
         Expr::Call { func, args } => {
             Expr::Call {
                 func: func.clone(),
-                args: args.iter().map(|e| substitute_params(e, substitutions)).collect()
+                args: args.iter().map(|e| substitute_params(e, substitutions, registry)).collect()
             }
         }
 
@@ -1028,18 +1548,24 @@ fn substitute_params(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr
     }
 }
 
-/// Substitute params within syntax-quote (process unquotes)
-fn substitute_in_syntax_quote(expr: &Expr, substitutions: &HashMap<String, Expr>) -> Expr {
+/// Substitute params within syntax-quote (process unquotes).
+/// Also supports auto-gensym symbols (`foo#`) with per-expansion stability.
+fn substitute_in_syntax_quote(
+    expr: &Expr,
+    substitutions: &HashMap<String, Expr>,
+    registry: &mut MacroRegistry,
+    auto_gensyms: &mut HashMap<String, String>,
+) -> Expr {
     match expr {
         Expr::Unquote { expr: inner } => {
             // Inside syntax-quote, unquote evaluates to the substituted value
-            substitute_params(inner, substitutions)
+            substitute_params(inner, substitutions, registry)
         }
 
         Expr::UnquoteSplicing { expr: inner } => {
             // Keep the unquote-splicing for parent to handle
             Expr::UnquoteSplicing {
-                expr: Box::new(substitute_params(inner, substitutions))
+                expr: Box::new(substitute_params(inner, substitutions, registry))
             }
         }
 
@@ -1049,7 +1575,7 @@ fn substitute_in_syntax_quote(expr: &Expr, substitutions: &HashMap<String, Expr>
                 match item {
                     Expr::UnquoteSplicing { expr: inner } => {
                         // Splice: if inner evaluates to a list, splice its elements
-                        let substituted = substitute_params(inner, substitutions);
+                        let substituted = substitute_params(inner, substitutions, registry);
                         if let Expr::List(splice_items) = substituted {
                             result.extend(splice_items);
                         } else {
@@ -1057,28 +1583,51 @@ fn substitute_in_syntax_quote(expr: &Expr, substitutions: &HashMap<String, Expr>
                             result.push(Expr::UnquoteSplicing { expr: Box::new(substituted) });
                         }
                     }
-                    _ => result.push(substitute_in_syntax_quote(item, substitutions))
+                    _ => result.push(substitute_in_syntax_quote(item, substitutions, registry, auto_gensyms))
                 }
             }
             Expr::List(result)
         }
 
         Expr::Vector(items) => {
-            Expr::Vector(items.iter().map(|e| substitute_in_syntax_quote(e, substitutions)).collect())
+            Expr::Vector(
+                items
+                    .iter()
+                    .map(|e| substitute_in_syntax_quote(e, substitutions, registry, auto_gensyms))
+                    .collect(),
+            )
         }
 
         Expr::Call { func, args } => {
             Expr::Call {
                 func: func.clone(),
-                args: args.iter().map(|e| substitute_in_syntax_quote(e, substitutions)).collect()
+                args: args
+                    .iter()
+                    .map(|e| substitute_in_syntax_quote(e, substitutions, registry, auto_gensyms))
+                    .collect(),
             }
         }
 
         Expr::If { condition, then_branch, else_branch } => {
             Expr::If {
-                condition: Box::new(substitute_in_syntax_quote(condition, substitutions)),
-                then_branch: Box::new(substitute_in_syntax_quote(then_branch, substitutions)),
-                else_branch: Box::new(substitute_in_syntax_quote(else_branch, substitutions))
+                condition: Box::new(substitute_in_syntax_quote(
+                    condition,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
+                then_branch: Box::new(substitute_in_syntax_quote(
+                    then_branch,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
+                else_branch: Box::new(substitute_in_syntax_quote(
+                    else_branch,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
             }
         }
 
@@ -1088,7 +1637,7 @@ fn substitute_in_syntax_quote(expr: &Expr, substitutions: &HashMap<String, Expr>
                 match expr {
                     Expr::UnquoteSplicing { expr: inner } => {
                         // Splice: if inner evaluates to a list, splice its elements
-                        let substituted = substitute_params(inner, substitutions);
+                        let substituted = substitute_params(inner, substitutions, registry);
                         if let Expr::List(splice_items) = substituted {
                             result.extend(splice_items);
                         } else {
@@ -1096,10 +1645,94 @@ fn substitute_in_syntax_quote(expr: &Expr, substitutions: &HashMap<String, Expr>
                             result.push(Expr::UnquoteSplicing { expr: Box::new(substituted) });
                         }
                     }
-                    _ => result.push(substitute_in_syntax_quote(expr, substitutions))
+                    _ => result.push(substitute_in_syntax_quote(
+                        expr,
+                        substitutions,
+                        registry,
+                        auto_gensyms,
+                    ))
                 }
             }
             Expr::Do { exprs: result }
+        }
+
+        Expr::Let { bindings, body } => {
+            let rewritten_bindings = bindings
+                .iter()
+                .map(|(pattern, value)| {
+                    (
+                        rewrite_pattern_auto_gensym(pattern, registry, auto_gensyms),
+                        Box::new(substitute_in_syntax_quote(
+                            value,
+                            substitutions,
+                            registry,
+                            auto_gensyms,
+                        )),
+                    )
+                })
+                .collect();
+            Expr::Let {
+                bindings: rewritten_bindings,
+                body: Box::new(substitute_in_syntax_quote(
+                    body,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
+            }
+        }
+
+        Expr::Loop { bindings, body } => {
+            let rewritten_bindings = bindings
+                .iter()
+                .map(|(pattern, value)| {
+                    (
+                        rewrite_pattern_auto_gensym(pattern, registry, auto_gensyms),
+                        Box::new(substitute_in_syntax_quote(
+                            value,
+                            substitutions,
+                            registry,
+                            auto_gensyms,
+                        )),
+                    )
+                })
+                .collect();
+            Expr::Loop {
+                bindings: rewritten_bindings,
+                body: Box::new(substitute_in_syntax_quote(
+                    body,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
+            }
+        }
+
+        Expr::Quote { expr: inner } => {
+            Expr::Quote {
+                expr: Box::new(substitute_in_syntax_quote(
+                    inner,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
+            }
+        }
+
+        Expr::SyntaxQuote { expr: inner } => {
+            Expr::SyntaxQuote {
+                expr: Box::new(substitute_in_syntax_quote(
+                    inner,
+                    substitutions,
+                    registry,
+                    auto_gensyms,
+                )),
+            }
+        }
+
+        Expr::Symbol(name) if name.ends_with('#') => {
+            let resolved = resolve_auto_gensym_symbol(name, registry, auto_gensyms);
+            Expr::Symbol(resolved)
         }
 
         // Everything else stays as-is (quoted)
@@ -2355,54 +2988,57 @@ mod tests {
 
     #[test]
     fn test_gensym_basic() {
-        // Test basic gensym
+        // Direct gensym should remain a normal runtime call outside macro compile-time context.
         use crate::parser::parse_str;
 
         let code = "(gensym)";
         let exprs = parse_str(code).unwrap();
         let expanded = expand_macros(&exprs[0]);
 
-        // Should expand to a symbol
-        if let Expr::Symbol(s) = expanded {
-            assert!(s.starts_with("G__"));
+        if let Expr::Call { func, args } = expanded {
+            assert_eq!(func, "gensym");
+            assert_eq!(args.len(), 0);
         } else {
-            panic!("Expected symbol from gensym, got: {:?}", expanded);
+            panic!("Expected runtime gensym call, got: {:?}", expanded);
         }
     }
 
     #[test]
     fn test_gensym_with_prefix() {
-        // Test gensym with prefix
+        // Prefixed gensym should also remain a runtime call outside macro compile-time context.
         use crate::parser::parse_str;
 
         let code = "(gensym \"tmp\")";
         let exprs = parse_str(code).unwrap();
         let expanded = expand_macros(&exprs[0]);
 
-        // Should expand to a symbol with prefix
-        if let Expr::Symbol(s) = expanded {
-            assert!(s.starts_with("tmp__G__"));
+        if let Expr::Call { func, args } = expanded {
+            assert_eq!(func, "gensym");
+            assert_eq!(args.len(), 1);
+            assert_eq!(args[0], Expr::String("tmp".to_string()));
         } else {
-            panic!("Expected symbol from gensym, got: {:?}", expanded);
+            panic!("Expected runtime gensym call, got: {:?}", expanded);
         }
     }
 
     #[test]
     fn test_gensym_uniqueness() {
-        // Test that gensym generates unique symbols
+        // Compile-time gensym inside macro expansion should generate unique symbols.
         use crate::parser::parse_str;
 
         let code = r#"
-            (gensym "x")
-            (gensym "x")
-            (gensym "x")
+            (defmacro make-x [] (gensym "x"))
+            (make-x)
+            (make-x)
+            (make-x)
         "#;
         let exprs = parse_str(code).unwrap();
 
         let mut registry = MacroRegistry::new();
-        let sym1 = expand_macros_with_registry(&exprs[0], &mut registry);
-        let sym2 = expand_macros_with_registry(&exprs[1], &mut registry);
-        let sym3 = expand_macros_with_registry(&exprs[2], &mut registry);
+        let _defmacro = expand_macros_with_registry(&exprs[0], &mut registry);
+        let sym1 = expand_macros_with_registry(&exprs[1], &mut registry);
+        let sym2 = expand_macros_with_registry(&exprs[2], &mut registry);
+        let sym3 = expand_macros_with_registry(&exprs[3], &mut registry);
 
         // All should be different
         assert_ne!(sym1, sym2);
@@ -2434,6 +3070,38 @@ mod tests {
             assert!(s.contains("test__G__"), "Expected generated symbol to contain test__G__, got: {}", s);
         } else {
             panic!("Expected symbol from macro expansion, got: {:?}", expanded);
+        }
+    }
+
+    #[test]
+    fn test_auto_gensym_in_syntax_quote_macro() {
+        use crate::parser::parse_str;
+
+        let code = r#"
+            (defmacro hygienic-let [expr]
+              `(let [tmp# ~expr] tmp#))
+            (hygienic-let 1)
+        "#;
+
+        let exprs = parse_str(code).unwrap();
+        let mut registry = MacroRegistry::new();
+        let _defmacro = expand_macros_with_registry(&exprs[0], &mut registry);
+        let expanded = expand_macros_with_registry(&exprs[1], &mut registry);
+
+        match expanded {
+            Expr::Let { bindings, body } => {
+                assert_eq!(bindings.len(), 1);
+                match &bindings[0].0 {
+                    Pattern::Symbol(name) => assert!(name.contains("__G__"), "expected auto-gensym binding, got {}", name),
+                    other => panic!("Expected symbol binding, got {:?}", other),
+                }
+                assert_eq!(*bindings[0].1, Expr::Long(1));
+                match body.as_ref() {
+                    Expr::Symbol(name) => assert!(name.contains("__G__"), "expected auto-gensym body symbol, got {}", name),
+                    other => panic!("Expected symbol body, got {:?}", other),
+                }
+            }
+            other => panic!("Expected let from hygienic macro expansion, got {:?}", other),
         }
     }
 

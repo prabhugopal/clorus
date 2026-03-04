@@ -290,7 +290,7 @@ mkdir -p docs/sessions/2025-01
 mv docs/guides/RUST_FFI_GUIDE.md docs/guide/
 
 # Move reference docs
-mv docs/LANGUAGE_SPEC.md docs/reference/
+mv docs/reference/LANGUAGE_SPEC.md docs/reference/
 mv docs/reference/LINKING.md docs/reference/  # Keep
 
 # Move implementation docs

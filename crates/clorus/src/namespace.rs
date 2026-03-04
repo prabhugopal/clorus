@@ -119,6 +119,10 @@ impl NamespaceContext {
             }
         }
 
+        for (source_symbol, local_symbol) in &spec.rename {
+            self.add_import(local_symbol, &spec.module, source_symbol);
+        }
+
         // Add :refer :all if specified
         if spec.refer_all {
             self.add_refer_all(&spec.module);
@@ -262,6 +266,7 @@ mod tests {
             alias: Some("str".to_string()),
             refer: vec![],
             refer_all: false,
+            rename: vec![],
         };
 
         ctx.process_require(&spec);
@@ -278,6 +283,7 @@ mod tests {
             alias: None,
             refer: vec!["sin".to_string(), "cos".to_string()],
             refer_all: false,
+            rename: vec![],
         };
 
         ctx.process_require(&spec);
@@ -293,6 +299,26 @@ mod tests {
     }
 
     #[test]
+    fn test_process_require_with_rename() {
+        let mut ctx = NamespaceContext::new("my.app.core");
+
+        let spec = RequireSpec {
+            module: "clorus.set".to_string(),
+            alias: None,
+            refer: vec!["union".to_string()],
+            refer_all: false,
+            rename: vec![("union".to_string(), "set-union".to_string())],
+        };
+
+        ctx.process_require(&spec);
+
+        assert_eq!(
+            ctx.imports.get("set-union"),
+            Some(&("clorus.set".to_string(), "union".to_string()))
+        );
+    }
+
+    #[test]
     fn test_process_require_with_refer_all() {
         let mut ctx = NamespaceContext::new("my.app.core");
 
@@ -301,6 +327,7 @@ mod tests {
             alias: None,
             refer: vec![],
             refer_all: true,
+            rename: vec![],
         };
 
         ctx.process_require(&spec);

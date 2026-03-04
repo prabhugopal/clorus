@@ -1,5 +1,11 @@
 # Hot Reload Architecture Design Document
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** 📋 DESIGN (Not Yet Implemented)
 **Priority:** High (Post Core Features)
 **Estimated Effort:** 3-4 days implementation

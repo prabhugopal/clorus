@@ -47,6 +47,11 @@ impl ProtocolRegistry {
         let key = (type_name.to_string(), protocol_name.to_string(), method_name.to_string());
         self.methods.get(&key).copied()
     }
+
+    /// Check whether a type has any method registered for a protocol.
+    pub fn type_satisfies_protocol(&self, type_name: &str, protocol_name: &str) -> bool {
+        self.methods.keys().any(|(ty, proto, _)| ty == type_name && proto == protocol_name)
+    }
 }
 
 /// Register a protocol method implementation
@@ -134,6 +139,40 @@ pub extern "C" fn clorus_lookup_protocol_method(
                     eprintln!("[PROTOCOL] Lookup FAILED: type='{}', protocol='{}', method='{}'", type_str, protocol_str, method_str);
                 }
                 result
+            }
+            Err(_) => 0,
+        }
+    }
+}
+
+/// Check whether a type satisfies a protocol.
+/// Returns 1 when at least one protocol method is registered for (type, protocol), else 0.
+#[no_mangle]
+pub extern "C" fn clorus_protocol_satisfies_type_i32(
+    type_name: *const c_char,
+    protocol_name: *const c_char,
+) -> i32 {
+    unsafe {
+        if type_name.is_null() || protocol_name.is_null() {
+            return 0;
+        }
+
+        let type_str = match CStr::from_ptr(type_name).to_str() {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+        let protocol_str = match CStr::from_ptr(protocol_name).to_str() {
+            Ok(s) => s,
+            Err(_) => return 0,
+        };
+
+        match PROTOCOL_REGISTRY.read() {
+            Ok(registry) => {
+                if registry.type_satisfies_protocol(type_str, protocol_str) {
+                    1
+                } else {
+                    0
+                }
             }
             Err(_) => 0,
         }

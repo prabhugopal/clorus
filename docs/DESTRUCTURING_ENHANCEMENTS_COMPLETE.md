@@ -1,5 +1,11 @@
 # Destructuring Enhancements - Complete
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Status: ✅ FULLY IMPLEMENTED
 
 Added advanced destructuring features to bring Clorus to 100% Clojure parity for destructuring.

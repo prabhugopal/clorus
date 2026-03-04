@@ -1,5 +1,11 @@
 # Dependency-Ordered Roadmap to 100% Parity
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/ROADMAP_TO_100_PARITY.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Philosophy:** Build each layer ONCE on solid foundation. Never go backwards.
 
 **Last Updated:** January 26, 2026

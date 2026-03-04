@@ -2,10 +2,11 @@
 ///
 /// Strategy: Keep all source code and recompile everything for each expression.
 /// This ensures variables and functions persist across REPL lines.
-use clorus::{parse, expand_macros, CodeGen, ModuleLoader};
+use clorus::{parse, CodeGen, ModuleLoader};
 use clorus::codegen::RustLibrary;
-use clorus_codegen::namespace_context::NamespaceContext;
+use clorus_codegen::namespace_context::{ImportBinding, NamespaceContext};
 use clorus_syntax::{Expr, RequireSpec};
+use clorus_syntax::macros::{expand_macros_with_registry, MacroRegistry};
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
 use std::collections::{HashSet, HashMap};
@@ -29,6 +30,8 @@ pub enum EvalKind {
     Def(String),
     /// (defn name ...) - display #'namespace/name
     Defn(String),
+    /// (defmacro name ...) - display #'namespace/name
+    Defmacro(String),
     /// (ns name) - display nil
     Namespace,
     /// (require ...) or (use ...) - display nil
@@ -60,11 +63,11 @@ pub struct ReplEngine<'ctx> {
     symbol_registry: HashMap<String, HashSet<String>>,
     /// Stdlib loaded flag - stdlib is loaded once and never recompiled
     stdlib_loaded: bool,
-    /// Parsed stdlib expressions to include in every evaluation
-    stdlib_exprs: Vec<Expr>,
     /// Parsed module expressions (from required modules) to include in every evaluation
     /// Stored as (namespace, aliases, expr) tuples to preserve namespace context and aliases
     module_exprs: Vec<(String, HashMap<String, String>, Expr)>,
+    /// Persistent REPL macro registry so `(defmacro ...)` is available across inputs
+    macro_registry: MacroRegistry,
     /// Track executed init forms for later reference
     /// Stores parsed expressions that have been successfully compiled and executed
     executed_init_exprs: Vec<(String, Expr)>,
@@ -84,8 +87,8 @@ impl<'ctx> ReplEngine<'ctx> {
             clip_namespaces: HashSet::new(),
             symbol_registry: HashMap::new(),
             stdlib_loaded: false,
-            stdlib_exprs: Vec::new(),
             module_exprs: Vec::new(),
+            macro_registry: MacroRegistry::new(),
             executed_init_exprs: Vec::new(),
         };
 
@@ -107,34 +110,30 @@ impl<'ctx> ReplEngine<'ctx> {
             return Ok(0);
         }
 
-        // Store stdlib expressions - they'll be included in every evaluation
-        self.stdlib_exprs = exprs.clone();
-
-        // Track namespace for symbol registration
-        // Register symbols in clorus.core namespace so AUTO_IMPORT_NAMESPACES works
+        // We replay stdlib forms through executed_init_exprs so they use the same
+        // codepath as project init/history defs (stable in REPL).
         let mut current_ns = "clorus.core".to_string();
         let mut symbols_registered = 0;
+        let mut macro_registry = MacroRegistry::new();
 
-        // Register all symbols from stdlib
-        for expr in &exprs {
-            let expanded_expr = expand_macros(expr);
+        for expr in exprs {
+            let expanded_expr = expand_macros_with_registry(&expr, &mut macro_registry);
 
-            // Handle namespace declarations
-            if let Expr::Ns { name, .. } = &expanded_expr {
-                current_ns = name.clone();
-                continue;
-            }
-
-            // Register def/defn symbols
-            let symbol_name = match &expanded_expr {
-                Expr::Def { name, .. } => Some(name.clone()),
-                Expr::Defn { name, .. } => Some(name.clone()),
-                _ => None,
-            };
-
-            if let Some(name) = symbol_name {
-                self.register_symbol(&current_ns, &name);
-                symbols_registered += 1;
+            match &expanded_expr {
+                Expr::Ns { name, .. } => {
+                    current_ns = name.clone();
+                }
+                Expr::Require { .. } | Expr::Use { .. } | Expr::Declare { .. } => {
+                    // Skip directives; no runtime evaluation needed here.
+                }
+                Expr::Def { name, .. } | Expr::Defn { name, .. } => {
+                    self.register_symbol(&current_ns, name);
+                    symbols_registered += 1;
+                    self.executed_init_exprs.push((current_ns.clone(), expr.clone()));
+                }
+                _ => {
+                    self.executed_init_exprs.push((current_ns.clone(), expr.clone()));
+                }
             }
         }
 
@@ -163,9 +162,10 @@ impl<'ctx> ReplEngine<'ctx> {
 
         let mut current_ns = "clorus.core".to_string();
         let mut symbols_registered = 0;
+        let mut macro_registry = MacroRegistry::new();
 
         for expr in &exprs {
-            let expanded_expr = expand_macros(expr);
+            let expanded_expr = expand_macros_with_registry(expr, &mut macro_registry);
 
             if let Expr::Ns { name, .. } = &expanded_expr {
                 current_ns = name.clone();
@@ -184,67 +184,13 @@ impl<'ctx> ReplEngine<'ctx> {
             }
         }
 
-        self.stdlib_loaded = true;
+        // Do not mark stdlib as fully loaded here. This path only registers names.
+        // Full callable stdlib defs are provided by load_stdlib_batch().
         self.loaded_modules.insert("clorus.core".to_string());
         self.set_namespace("user");
 
         Ok(symbols_registered)
     }
-
-    /// Load the standard library (deprecated - use load_stdlib_batch)
-    fn load_stdlib(&mut self) -> Result<(), String> {
-        // This method is now unused - stdlib is loaded via load_stdlib_batch in lib.rs
-        // Keeping it for backward compatibility but it does nothing
-        Ok(())
-    }
-
-    /*
-    /// Old load_stdlib method - kept for reference
-    /// Load the standard library into init_forms
-    fn load_stdlib(&mut self) -> Result<(), String> {
-        use std::path::{Path, PathBuf};
-        use std::fs;
-
-        // Find stdlib relative to the binary location
-        let mut stdlib_paths: Vec<PathBuf> = Vec::new();
-
-        // Try to find stdlib relative to executable
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                // From target/release/ go up to project root
-                if let Some(target_dir) = exe_dir.parent() {
-                    if let Some(project_root) = target_dir.parent() {
-                        stdlib_paths.push(project_root.join("stdlib/core.clr"));
-                        stdlib_paths.push(project_root.join("stdlib/minimal.clr"));
-                    }
-                }
-            }
-        }
-
-        // Also try current directory (for local development)
-        stdlib_paths.push(PathBuf::from("stdlib/core.clr"));
-        stdlib_paths.push(PathBuf::from("stdlib/minimal.clr"));
-        stdlib_paths.push(PathBuf::from("../stdlib/core.clr"));
-        stdlib_paths.push(PathBuf::from("../stdlib/minimal.clr"));
-        stdlib_paths.push(PathBuf::from("../../stdlib/core.clr"));
-        stdlib_paths.push(PathBuf::from("../../stdlib/minimal.clr"));
-
-        for path in stdlib_paths {
-            if path.exists() {
-                let source = fs::read_to_string(&path)
-                    .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
-
-                // Add stdlib source to init_forms AS A SINGLE BATCH
-                // This avoids O(n²) recompilation and preserves namespace context
-                self.init_forms.push(source);
-
-                return Ok(());
-            }
-        }
-
-        Err("stdlib not found in any standard location".to_string())
-    }
-    */
 
     /// Get the current namespace name
     pub fn current_namespace(&self) -> &str {
@@ -273,7 +219,13 @@ impl<'ctx> ReplEngine<'ctx> {
             if namespace != *auto_ns {
                 if let Some(symbols) = self.get_namespace_symbols(auto_ns) {
                     for symbol in symbols.clone() {
-                        self.namespace.imports.insert(symbol, auto_ns.to_string());
+                        self.namespace.imports.insert(
+                            symbol.clone(),
+                            ImportBinding {
+                                namespace: auto_ns.to_string(),
+                                symbol,
+                            },
+                        );
                     }
                 }
             }
@@ -295,7 +247,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
     /// Convert namespace to file path
     /// demos.shapes-demo → src/demos/shapes-demo.clrs
-    /// clorus.core → $CLORUS_HOME/stdlib/core.clr or ~/.clorus/stdlib/core.clr (global stdlib)
+    /// clorus.core → $CLORUS_HOME/stdlib/clorus/core.clr or ~/.clorus/stdlib/clorus/core.clr (global stdlib)
     fn namespace_to_path(&self, namespace: &str) -> Result<std::path::PathBuf, String> {
         use std::path::PathBuf;
         use std::env;
@@ -308,37 +260,31 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Check if this is a clorus.* namespace (stdlib)
         if parts[0] == "clorus" {
-            // Try to load from global stdlib directories (like Clojure does with clojure.core)
-            // Try CLORUS_HOME/stdlib first, then ~/.clorus/stdlib
+            // Clojure-style mapping: clorus.set -> stdlib/clorus/set.clr
+            // Search CLORUS_HOME/stdlib first, then ~/.clorus/stdlib.
             let stdlib_paths = vec![
                 env::var("CLORUS_HOME").ok().map(|home| PathBuf::from(home).join("stdlib")),
                 env::var("HOME").ok().map(|home| PathBuf::from(home).join(".clorus/stdlib")),
             ];
 
-            // Convert clorus.core → core.clr
-            let stdlib_file = if parts.len() == 2 {
-                format!("{}.clr", parts[1])
-            } else {
-                // For nested namespaces like clorus.string.utils → string/utils.clr
-                let mut subpath = PathBuf::new();
-                for part in &parts[1..parts.len()-1] {
-                    subpath = subpath.join(part);
-                }
-                subpath = subpath.join(format!("{}.clr", parts[parts.len()-1]));
-                subpath.to_string_lossy().to_string()
-            };
+            // Convert clorus.string.utils -> clorus/string/utils.clr
+            let mut ns_path = PathBuf::new();
+            for part in &parts[..parts.len() - 1] {
+                ns_path = ns_path.join(part);
+            }
+            ns_path = ns_path.join(format!("{}.clr", parts[parts.len() - 1]));
 
             for stdlib_dir in stdlib_paths.into_iter().flatten() {
-                let stdlib_path = stdlib_dir.join(&stdlib_file);
+                let stdlib_path = stdlib_dir.join(&ns_path);
                 if stdlib_path.exists() {
                     return Ok(stdlib_path);
                 }
             }
 
-            // Stdlib not found
             return Err(format!(
-                "Stdlib module not found: {} (looking for {} in CLORUS_HOME/stdlib or ~/.clorus/stdlib)",
-                namespace, stdlib_file
+                "Stdlib module not found: {} (expected {} in CLORUS_HOME/stdlib or ~/.clorus/stdlib)",
+                namespace,
+                ns_path.to_string_lossy()
             ));
         }
 
@@ -470,17 +416,38 @@ impl<'ctx> ReplEngine<'ctx> {
         }
 
         // Handle :refer :all - import all symbols from the module
-        if spec.refer.len() == 1 && spec.refer[0] == ":all" {
+        if spec.refer_all {
             // Look up all symbols in the target namespace
             if let Some(symbols) = self.get_namespace_symbols(&spec.module).cloned() {
                 for symbol in symbols {
-                    self.namespace.imports.insert(symbol, spec.module.clone());
+                    self.namespace.imports.insert(
+                        symbol.clone(),
+                        ImportBinding {
+                            namespace: spec.module.clone(),
+                            symbol,
+                        },
+                    );
                 }
             }
         } else {
             // Add specific referred symbols to imports
             for symbol in &spec.refer {
-                self.namespace.imports.insert(symbol.clone(), spec.module.clone());
+                self.namespace.imports.insert(
+                    symbol.clone(),
+                    ImportBinding {
+                        namespace: spec.module.clone(),
+                        symbol: symbol.clone(),
+                    },
+                );
+            }
+            for (source_symbol, local_symbol) in &spec.rename {
+                self.namespace.imports.insert(
+                    local_symbol.clone(),
+                    ImportBinding {
+                        namespace: spec.module.clone(),
+                        symbol: source_symbol.clone(),
+                    },
+                );
             }
         }
     }
@@ -495,8 +462,9 @@ impl<'ctx> ReplEngine<'ctx> {
         }
 
         let mut current_ns = self.namespace.current.clone();
+        let mut macro_registry = MacroRegistry::new();
         for expr in exprs {
-            let expanded = expand_macros(&expr);
+            let expanded = expand_macros_with_registry(&expr, &mut macro_registry);
 
             match &expanded {
                 Expr::Ns { name, requires, rust_imports } => {
@@ -567,6 +535,7 @@ impl<'ctx> ReplEngine<'ctx> {
         let eval_kind = match &exprs[0] {
             Expr::Def { name, .. } => EvalKind::Def(name.clone()),
             Expr::Defn { name, .. } => EvalKind::Defn(name.clone()),
+            Expr::Defmacro { name, .. } => EvalKind::Defmacro(name.clone()),
             Expr::Ns { .. } => EvalKind::Namespace,
             Expr::Require { .. } | Expr::Use { .. } => EvalKind::Import,
             _ => EvalKind::Value,
@@ -647,6 +616,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
         // Create a fresh CodeGen for this evaluation
         let mut codegen = CodeGen::new(self.context, "repl_session");
+        let mut macro_registry = self.macro_registry.clone();
 
         // Register all Rust FFI libraries
         for lib in &self.rust_libraries {
@@ -671,48 +641,11 @@ impl<'ctx> ReplEngine<'ctx> {
         let codegen_ns = clorus_codegen::NamespaceContext {
             current: self.namespace.current.clone(),
             aliases: self.namespace.aliases.clone(),
-            imports: HashMap::new(), // Simplified for now
+            imports: self.namespace.imports.clone(),
         };
         codegen.set_namespace(codegen_ns);
 
-        // IMPORTANT: Compile stdlib FIRST (in every evaluation so functions are available)
-        // Use "user" namespace for stdlib compilation (no mangling)
-        let stdlib_codegen_ns = clorus_codegen::NamespaceContext {
-            current: "user".to_string(),
-            aliases: HashMap::new(),
-            imports: HashMap::new(),
-        };
-        codegen.set_namespace(stdlib_codegen_ns);
-
-        for (stdlib_idx, stdlib_expr) in self.stdlib_exprs.iter().enumerate() {
-            let expanded = expand_macros(stdlib_expr);
-
-            // Skip namespace declarations
-            if matches!(expanded, Expr::Ns { .. }) {
-                continue;
-            }
-
-            // Skip declare statements
-            if let Expr::Declare { names } = &expanded {
-                for name in names {
-                    codegen.add_forward_declaration(name);
-                }
-                continue;
-            }
-
-            // Compile def/defn directly (don't wrap in functions)
-            // Wrapping def/defn causes LLVM codegen issues
-            if matches!(expanded, Expr::Def { .. } | Expr::Defn { .. }) {
-                codegen.compile_expr(&expanded)?;
-                continue;
-            }
-
-            // Only wrap non-def expressions in functions
-            let fn_name = format!("stdlib_{}", stdlib_idx);
-            codegen.wrap_in_function(&expanded, &fn_name)?;
-        }
-
-        // Compile loaded module expressions (after stdlib, before user history)
+        // Compile loaded module expressions (before user/project history replay)
         // These are from required modules (e.g., demos.shapes-demo)
         // Each expression is compiled with its module's namespace AND aliases to properly resolve references
         for (module_idx, (module_namespace, module_aliases, module_expr)) in self.module_exprs.iter().enumerate() {
@@ -724,7 +657,7 @@ impl<'ctx> ReplEngine<'ctx> {
             };
             codegen.set_namespace(module_codegen_ns);
 
-            let expanded = expand_macros(module_expr);
+            let expanded = expand_macros_with_registry(module_expr, &mut macro_registry);
 
             // Skip namespace declarations (already processed)
             if matches!(expanded, Expr::Ns { .. }) {
@@ -747,7 +680,7 @@ impl<'ctx> ReplEngine<'ctx> {
         let user_codegen_ns = clorus_codegen::NamespaceContext {
             current: self.namespace.current.clone(),
             aliases: self.namespace.aliases.clone(),
-            imports: HashMap::new(),
+            imports: self.namespace.imports.clone(),
         };
         codegen.set_namespace(user_codegen_ns.clone());
 
@@ -767,11 +700,11 @@ impl<'ctx> ReplEngine<'ctx> {
             let exec_codegen_ns = clorus_codegen::NamespaceContext {
                 current: init_ns.clone(),
                 aliases: self.namespace.aliases.clone(),
-                imports: HashMap::new(),
+                imports: self.namespace.imports.clone(),
             };
             codegen.set_namespace(exec_codegen_ns);
 
-            let expanded = expand_macros(init_expr);
+            let expanded = expand_macros_with_registry(init_expr, &mut macro_registry);
 
             // Skip namespace declarations and compile-time directives
             if matches!(expanded, Expr::Ns { .. } | Expr::Require { .. } | Expr::Use { .. }) {
@@ -836,7 +769,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
             // Process ALL expressions in this init form (not just first one!)
             for (expr_idx, expr) in init_exprs.iter().enumerate() {
-                let expanded_expr = expand_macros(expr);
+                let expanded_expr = expand_macros_with_registry(expr, &mut macro_registry);
 
                 // Handle namespace declarations
                 if let clorus_syntax::Expr::Ns { name, requires, rust_imports } = &expanded_expr {
@@ -864,7 +797,7 @@ impl<'ctx> ReplEngine<'ctx> {
                     let codegen_ns = clorus_codegen::NamespaceContext {
                         current: self.namespace.current.clone(),
                         aliases: self.namespace.aliases.clone(),
-                        imports: HashMap::new(),
+                        imports: self.namespace.imports.clone(),
                     };
                     codegen.set_namespace(codegen_ns);
 
@@ -948,7 +881,7 @@ impl<'ctx> ReplEngine<'ctx> {
             let expr = &historical_exprs[0];
 
             // Expand macros before compiling
-            let expanded_expr = expand_macros(expr);
+            let expanded_expr = expand_macros_with_registry(expr, &mut macro_registry);
 
             // Check if this is a def or defn expression
             let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
@@ -968,7 +901,7 @@ impl<'ctx> ReplEngine<'ctx> {
             eprintln!("DEBUG eval_internal: Compiling current expression...");
         }
         let current_expr = &exprs[0];
-        let expanded_current = expand_macros(current_expr);
+        let expanded_current = expand_macros_with_registry(current_expr, &mut macro_registry);
         let fn_name = format!("eval_{}", self.expr_count);
         self.expr_count += 1;
         if repl_debug_enabled() {
@@ -1066,13 +999,14 @@ impl<'ctx> ReplEngine<'ctx> {
             // Register symbol in the registry (for :refer :all support)
             // This tracks symbols defined interactively in the REPL
             match &eval_kind {
-                EvalKind::Def(name) | EvalKind::Defn(name) => {
+                EvalKind::Def(name) | EvalKind::Defn(name) | EvalKind::Defmacro(name) => {
                     let current_ns = self.namespace.current.clone();
                     self.register_symbol(&current_ns, name);
                 }
                 _ => {}
             }
 
+            self.macro_registry = macro_registry;
             Ok(EvalResult { value, kind: eval_kind })
         }
     }

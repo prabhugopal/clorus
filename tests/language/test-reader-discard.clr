@@ -1,0 +1,21 @@
+(ns tests.language.test-reader-discard)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+;; Top-level discard
+#_ (def dropped-top-level 42)
+(def kept-top-level 7)
+(assert-eq "top-level discard" 7 kept-top-level)
+
+;; Discard inside vector literal
+(def v [1 #_ 999 2 3])
+(assert-eq "vector discard count" 3 (count v))
+(assert-eq "vector discard values" [1 2 3] v)
+
+;; Discard before form in do
+(def result (do #_ (throw "should-not-eval") (+ 1 2)))
+(assert-eq "do discard" 3 result)
+
+(println "reader discard passed")

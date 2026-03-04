@@ -1,0 +1,30 @@
+(ns test-satisfies)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defprotocol P
+  (ping [this] "ping implementation"))
+
+(deftype Impl [v]
+  P
+  (ping [this]
+    (:v this)))
+
+(deftype Other [v])
+
+(defn -main []
+  (do
+    (let [ok (->Impl 10)
+          no (->Other 20)]
+      (assert-eq "impl ping" (ping ok) 10)
+      (assert-eq "satisfies? protocol symbol" (satisfies? P ok) true)
+      (assert-eq "satisfies? qualified symbol" (satisfies? test-satisfies/P ok) true)
+      (assert-eq "other does not satisfy" (satisfies? P no) false)
+      (assert-eq "map does not satisfy" (satisfies? P {:v 1}) false)
+      (println "satisfies? passed")
+      0)))
+
+(-main)

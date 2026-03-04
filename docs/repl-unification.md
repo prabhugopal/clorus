@@ -1,5 +1,11 @@
 # REPL Unification Plan
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 Goal: keep REPL and compiled mode aligned by using a single runtime model and a consistent IR pipeline.
 
 ## Current Strategy (Phase 1)

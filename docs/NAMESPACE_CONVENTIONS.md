@@ -1,5 +1,11 @@
 # Clorus Namespace Conventions & Clojure Parity
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Question 1: Folder Structure Convention
 
 ### YES - Clorus Follows Clojure Folder Structure! ✅

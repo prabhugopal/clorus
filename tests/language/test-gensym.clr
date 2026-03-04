@@ -1,0 +1,15 @@
+(ns tests.language.test-gensym)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(def g1 (gensym))
+(def g2 (gensym))
+(def p1 (gensym "tmp"))
+(def p2 (gensym "tmp"))
+
+(assert-eq "gensym unique default" false (= g1 g2))
+(assert-eq "gensym unique prefixed" false (= p1 p2))
+
+(println "gensym passed")

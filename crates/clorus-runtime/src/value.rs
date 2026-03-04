@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::cell::Cell;
 
 static RELEASE_SEQ: AtomicU64 = AtomicU64::new(1);
+static GENSYM_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone)]
 struct FreedInfo {
@@ -27,6 +28,7 @@ static FREED_INFO: OnceLock<Mutex<HashMap<usize, FreedInfo>>> = OnceLock::new();
 static FREED_ALLOC_INFO: OnceLock<Mutex<HashMap<usize, AllocInfo>>> = OnceLock::new();
 static ALLOC_INFO: OnceLock<Mutex<HashMap<usize, AllocInfo>>> = OnceLock::new();
 static VALUE_RC_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static VALUE_METADATA: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
 
 thread_local! {
     static VALUE_RC_LOCK_DEPTH: Cell<u32> = const { Cell::new(0) };
@@ -34,6 +36,157 @@ thread_local! {
 
 struct ValueRcSection {
     _guard: Option<std::sync::MutexGuard<'static, ()>>,
+}
+
+pub(crate) fn value_meta_get(val: *mut Value) -> *mut Value {
+    if val.is_null() {
+        return Value::nil();
+    }
+
+    let key = val as usize;
+    if let Ok(map) = VALUE_METADATA.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+        if let Some(meta_raw) = map.get(&key).copied() {
+            let meta = meta_raw as *mut Value;
+            if !meta.is_null() {
+                clorus_retain(meta);
+                return meta;
+            }
+        }
+    }
+
+    Value::nil()
+}
+
+fn metadata_type_name(val: *mut Value) -> &'static str {
+    unsafe {
+        if val.is_null() {
+            return "nil";
+        }
+        match (*val).tag() {
+            ValueTag::Nil => "nil",
+            ValueTag::Long => "long",
+            ValueTag::Double => "double",
+            ValueTag::Bool => "boolean",
+            ValueTag::String => "string",
+            ValueTag::Keyword => "keyword",
+            ValueTag::Symbol => "symbol",
+            ValueTag::List => "list",
+            ValueTag::Vector => "vector",
+            ValueTag::HashMap => "map",
+            ValueTag::HashSet => "set",
+            ValueTag::Function => "function",
+            ValueTag::MultiArityFunction => "function",
+            ValueTag::Atom => "atom",
+            ValueTag::Ref => "ref",
+            ValueTag::Agent => "agent",
+            ValueTag::Channel => "channel",
+            ValueTag::OpaquePointer => "opaque-pointer",
+            ValueTag::Var => "var",
+            ValueTag::Exception => "exception",
+        }
+    }
+}
+
+pub(crate) fn metadata_type_error(op: &str, meta: *mut Value) -> *mut Value {
+    unsafe {
+        let map_empty = crate::map::clorus_map_empty;
+        let map_assoc = crate::map::clorus_map_assoc;
+
+        let mut data = map_empty();
+        let key_op = Value::keyword("op");
+        let val_op = Value::string(op);
+        data = map_assoc(data, key_op, val_op);
+        clorus_release(key_op);
+        clorus_release(val_op);
+
+        let key_expected = Value::keyword("expected");
+        let val_expected = Value::string("map-or-nil");
+        data = map_assoc(data, key_expected, val_expected);
+        clorus_release(key_expected);
+        clorus_release(val_expected);
+
+        let key_actual = Value::keyword("actual");
+        let val_actual = Value::string(metadata_type_name(meta));
+        data = map_assoc(data, key_actual, val_actual);
+        clorus_release(key_actual);
+        clorus_release(val_actual);
+
+        let mut ex = map_empty();
+        let key_type = Value::keyword("type");
+        let val_type = Value::keyword("clorus/exception");
+        ex = map_assoc(ex, key_type, val_type);
+        clorus_release(key_type);
+        clorus_release(val_type);
+
+        let key_msg = Value::keyword("message");
+        let val_msg = Value::string("with-meta metadata must be a map or nil");
+        ex = map_assoc(ex, key_msg, val_msg);
+        clorus_release(key_msg);
+        clorus_release(val_msg);
+
+        let key_data = Value::keyword("data");
+        ex = map_assoc(ex, key_data, data);
+        clorus_release(key_data);
+        clorus_release(data);
+
+        let key_cause = Value::keyword("cause");
+        let val_cause = Value::nil();
+        ex = map_assoc(ex, key_cause, val_cause);
+        clorus_release(key_cause);
+        clorus_release(val_cause);
+
+        Value::exception(ex)
+    }
+}
+
+pub(crate) fn value_meta_set(val: *mut Value, meta: *mut Value) {
+    if val.is_null() {
+        return;
+    }
+
+    let key = val as usize;
+    let mut should_store = false;
+    unsafe {
+        if !meta.is_null() {
+            match (*meta).tag() {
+                ValueTag::Nil => should_store = false,
+                ValueTag::HashMap => should_store = true,
+                _ => return,
+            }
+        }
+    }
+
+    if let Ok(mut map) = VALUE_METADATA.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+        if let Some(old_raw) = map.remove(&key) {
+            let old = old_raw as *mut Value;
+            if !old.is_null() {
+                clorus_release(old);
+            }
+        }
+
+        if should_store {
+            unsafe {
+                clorus_retain(meta);
+            }
+            map.insert(key, meta as usize);
+        }
+    }
+}
+
+pub(crate) fn value_meta_clear(val: *mut Value) {
+    if val.is_null() {
+        return;
+    }
+
+    let key = val as usize;
+    if let Ok(mut map) = VALUE_METADATA.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+        if let Some(old_raw) = map.remove(&key) {
+            let old = old_raw as *mut Value;
+            if !old.is_null() {
+                clorus_release(old);
+            }
+        }
+    }
 }
 
 impl ValueRcSection {
@@ -94,6 +247,7 @@ pub enum ValueTag {
     Var = 16,  // Var for dynamic bindings (shifted by 1)
     MultiArityFunction = 17,  // Multi-arity function with runtime dispatch
     OpaquePointer = 18,  // FFI opaque pointer (window, etc.)
+    Exception = 19,      // Language-level exception payload wrapper
 }
 
 /// Header for all heap-allocated values
@@ -242,6 +396,21 @@ impl Value {
         ptr
     }
 
+    /// Create a symbol value
+    /// Note: Symbols should be interned via symbol::intern_symbol for efficiency.
+    pub fn symbol(s: &str) -> *mut Self {
+        let boxed_string = Box::new(s.to_string());
+        let val = Box::new(Value {
+            header: Header::new(ValueTag::Symbol),
+            data: ValueData {
+                ptr: Box::into_raw(boxed_string) as *mut u8,
+            },
+        });
+        let ptr = Box::into_raw(val);
+        record_alloc(ptr, ValueTag::Symbol);
+        ptr
+    }
+
     /// Create a value wrapping a heap pointer
     pub fn from_ptr(tag: ValueTag, ptr: *mut u8) -> *mut Self {
         let val = Box::new(Value {
@@ -280,6 +449,12 @@ impl Value {
         &*ptr
     }
 
+    /// Get the symbol value (unsafe - caller must ensure tag is Symbol)
+    pub unsafe fn as_symbol(&self) -> &str {
+        let ptr = self.data.ptr as *const String;
+        &*ptr
+    }
+
     /// Get the pointer value (unsafe - caller must ensure tag is not Number/Bool/Nil)
     pub unsafe fn as_ptr(&self) -> *mut u8 {
         self.data.ptr
@@ -290,9 +465,24 @@ impl Value {
         Self::from_ptr(ValueTag::OpaquePointer, ptr)
     }
 
+    /// Create an exception value wrapping a payload.
+    pub fn exception(payload: *mut Value) -> *mut Self {
+        unsafe {
+            if !payload.is_null() {
+                (*payload).header().retain();
+            }
+        }
+        Self::from_ptr(ValueTag::Exception, payload as *mut u8)
+    }
+
     /// Get the opaque pointer value (unsafe - caller must ensure tag is OpaquePointer)
     pub unsafe fn as_opaque_pointer(&self) -> *mut u8 {
         self.data.ptr
+    }
+
+    /// Get the exception payload (unsafe - caller must ensure tag is Exception).
+    pub unsafe fn as_exception_payload(&self) -> *mut Value {
+        self.data.ptr as *mut Value
     }
 
     /// Create a function value from FunctionData pointer
@@ -348,6 +538,7 @@ impl fmt::Debug for Value {
                 ValueTag::Nil => write!(f, "Nil"),
                 ValueTag::String => write!(f, "String(\"{}\")", self.as_string()),
                 ValueTag::Keyword => write!(f, "Keyword(:{})", self.as_keyword()),
+                ValueTag::Exception => write!(f, "Exception({:p})", self.as_exception_payload()),
                 _ => write!(
                     f,
                     "{:?}({:p})",
@@ -682,6 +873,37 @@ pub extern "C" fn clorus_value_opaque_pointer(ptr: *mut u8) -> *mut Value {
     Value::opaque_pointer(ptr)
 }
 
+/// Create an exception Value (for language-level throw/catch).
+#[no_mangle]
+pub extern "C" fn clorus_value_exception(payload: *mut Value) -> *mut Value {
+    Value::exception(payload)
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_exception_payload(val: *mut Value) -> *mut Value {
+    unsafe {
+        if val.is_null() || (*val).header().tag() != ValueTag::Exception {
+            return std::ptr::null_mut();
+        }
+        (*val).as_exception_payload()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_is_exception(val: *mut Value) -> bool {
+    unsafe {
+        if val.is_null() {
+            return false;
+        }
+        (*val).header().tag() == ValueTag::Exception
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_is_exception_i32(val: *mut Value) -> i32 {
+    if clorus_is_exception(val) { 1 } else { 0 }
+}
+
 /// Extract opaque pointer from Value (for LLVM codegen FFI calls)
 #[no_mangle]
 pub extern "C" fn clorus_extract_opaque_pointer(val: *mut Value) -> *mut u8 {
@@ -860,8 +1082,28 @@ pub extern "C" fn clorus_value_is_nil(val: *mut Value) -> i32 {
     }
 }
 
+/// Get metadata attached to a value.
+#[no_mangle]
+pub extern "C" fn clorus_value_meta(val: *mut Value) -> *mut Value {
+    value_meta_get(val)
+}
+
+/// Attach metadata to a value and return the value.
+#[no_mangle]
+pub extern "C" fn clorus_value_with_meta(val: *mut Value, meta: *mut Value) -> *mut Value {
+    if val.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    value_meta_set(val, meta);
+    clorus_retain(val);
+    val
+}
+
 /// Deallocate a value and its contents
 unsafe fn deallocate_value(val: *mut Value) {
+    value_meta_clear(val);
+
     match (*val).header.tag() {
         ValueTag::Long | ValueTag::Double | ValueTag::Bool | ValueTag::Nil => {
             // Just free the Value itself
@@ -942,16 +1184,12 @@ unsafe fn deallocate_value(val: *mut Value) {
             drop(Box::from_raw(val));
         }
         ValueTag::Keyword => {
-            // Keywords are interned and never deallocated
-            // They live for the program lifetime
-            // Just drop the Value wrapper (the String stays alive in the intern table)
-            // NOTE: This assumes keywords are always created via intern_keyword
-            drop(Box::from_raw(val));
+            // Interned value: intentionally leaked for process lifetime.
+            // Avoid freeing interned pointers referenced by global tables.
         }
         ValueTag::Symbol => {
-            // TODO: Implement when we add symbol type
-            // For now, just free the Value
-            drop(Box::from_raw(val));
+            // Interned value: intentionally leaked for process lifetime.
+            // Avoid freeing interned pointers referenced by global tables.
         }
         ValueTag::Function => {
             // Release function data
@@ -1017,6 +1255,13 @@ unsafe fn deallocate_value(val: *mut Value) {
         ValueTag::OpaquePointer => {
             // Opaque pointers are managed by FFI layer
             // Just free the Value wrapper, not the pointer itself
+            drop(Box::from_raw(val));
+        }
+        ValueTag::Exception => {
+            let payload = (*val).as_exception_payload();
+            if !payload.is_null() {
+                clorus_release(payload);
+            }
             drop(Box::from_raw(val));
         }
     }
@@ -1218,6 +1463,17 @@ pub extern "C" fn clorus_is_fn(val: *mut Value) -> bool {
     }
 }
 
+/// Check if value is a Var
+#[no_mangle]
+pub extern "C" fn clorus_is_var(val: *mut Value) -> bool {
+    if val.is_null() {
+        return false;
+    }
+    unsafe {
+        (*val).header().tag() == ValueTag::Var
+    }
+}
+
 #[inline]
 fn bool_to_i32(b: bool) -> i32 {
     if b { 1 } else { 0 }
@@ -1245,6 +1501,8 @@ pub extern "C" fn clorus_is_seq_i32(val: *mut Value) -> i32 { bool_to_i32(clorus
 pub extern "C" fn clorus_is_coll_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_coll(val)) }
 #[no_mangle]
 pub extern "C" fn clorus_is_fn_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_fn(val)) }
+#[no_mangle]
+pub extern "C" fn clorus_is_var_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_var(val)) }
 
 /// Compare two values for equality
 /// Returns 1 (true) if equal, 0 (false) if not equal
@@ -1329,9 +1587,9 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
             }
 
             ValueTag::Symbol => {
-                // TODO: Implement proper symbol comparison
-                // For now, use pointer equality
-                (*left).as_ptr() == (*right).as_ptr()
+                let left_sym = (*left).as_symbol();
+                let right_sym = (*right).as_symbol();
+                left_sym == right_sym
             }
 
             ValueTag::Vector => {
@@ -1397,19 +1655,35 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
 
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer => (*left).as_ptr() == (*right).as_ptr(),
+            ValueTag::OpaquePointer | ValueTag::Exception => (*left).as_ptr() == (*right).as_ptr(),
         }
     }
 }
 
 /// Create a symbol value from a C string pointer
 /// Used for map destructuring with :syms
-/// Note: Currently symbols are not fully implemented, so this creates a keyword instead
 #[no_mangle]
 pub extern "C" fn clorus_symbol(name_ptr: *const std::os::raw::c_char) -> *mut Value {
-    // For now, symbols behave like keywords
-    // TODO: Implement proper Symbol type when needed
-    crate::keyword::clorus_keyword(name_ptr)
+    if name_ptr.is_null() {
+        return Value::nil();
+    }
+    let name = unsafe { CStr::from_ptr(name_ptr).to_string_lossy().to_string() };
+    crate::symbol::intern_symbol(&name)
+}
+
+/// Create a generated symbol-like value.
+/// `prefix_ptr` may be null (defaults to \"G\").
+#[no_mangle]
+pub extern "C" fn clorus_gensym(prefix_ptr: *const std::os::raw::c_char) -> *mut Value {
+    let prefix = if prefix_ptr.is_null() {
+        "G".to_string()
+    } else {
+        unsafe { CStr::from_ptr(prefix_ptr).to_string_lossy().to_string() }
+    };
+    let n = GENSYM_SEQ.fetch_add(1, Ordering::Relaxed);
+    let sym = format!("{}__G__{}", prefix, n);
+    let c = CString::new(sym).expect("gensym should never contain NUL");
+    clorus_symbol(c.as_ptr())
 }
 
 #[cfg(test)]

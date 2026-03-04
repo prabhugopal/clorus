@@ -1,0 +1,34 @@
+(ns tests.language.test-macro-env-form)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(defmacro show-env []
+  &env)
+
+(defmacro show-form [& _]
+  `(quote ~&form))
+
+;; Global expansion site should have empty lexical env
+(def global-env (show-env))
+(assert-eq "global &env empty" 0 (count global-env))
+
+;; Lexical locals from let should be visible in &env
+(def let-env
+  (let [band "zeppelin" city "london"]
+    (show-env)))
+(assert-eq "let env contains band" true (contains? let-env 'band))
+(assert-eq "let env contains city" true (contains? let-env 'city))
+
+;; &form should preserve the macro call shape
+(def f1 (show-form))
+(assert-eq "&form no-args first" 'show-form (first f1))
+(assert-eq "&form no-args count" 1 (count f1))
+
+(def f2 (show-form 1 (+ 2 3)))
+(assert-eq "&form args first" 'show-form (first f2))
+(assert-eq "&form args count" 3 (count f2))
+(assert-eq "&form args second" 1 (nth f2 1))
+
+(println "macro &env/&form passed")

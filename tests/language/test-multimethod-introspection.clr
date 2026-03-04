@@ -1,0 +1,51 @@
+(ns test-multimethod-introspection)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn assert-truthy [label x]
+  (if x
+    true
+    (throw (str "assert failed: " label))))
+
+(defmulti pick (fn [m] (get m :kind)))
+
+(defmethod pick :a [m]
+  :A)
+
+(defmethod pick :b [m]
+  :B)
+
+(defmethod pick :default [m]
+  :DEFAULT)
+
+(prefer-method pick :a :b)
+
+(defn -main []
+  (do
+    (let [method-map (methods pick)
+          method-a (get method-map :a)
+          method-b (get method-map :b)]
+      (assert-truthy "methods contains :a" method-a)
+      (assert-truthy "methods contains :b" method-b)
+      (assert-eq "methods :a callable" (method-a {:kind :a}) :A)
+      (assert-eq "methods :b callable" (method-b {:kind :b}) :B))
+
+    (let [gm-a (get-method pick :a)
+          gm-z (get-method pick :z)]
+      (assert-truthy "get-method :a" gm-a)
+      (assert-eq "get-method :a callable" (gm-a {:kind :a}) :A)
+      (assert-truthy "get-method default" gm-z)
+      (assert-eq "get-method default callable" (gm-z {:kind :z}) :DEFAULT))
+
+    (let [pref-map (prefers pick)
+          pref-a (get pref-map :a)]
+      (assert-truthy "prefers has :a entry" pref-a)
+      (assert-truthy "prefers tracks :b" (contains? pref-a :b)))
+
+    (println "multimethod introspection passed")
+    0))
+
+(-main)

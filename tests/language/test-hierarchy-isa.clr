@@ -1,0 +1,27 @@
+(ns test-hierarchy-isa)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn -main []
+  (do
+    (println "Testing derive/underive/isa? ...")
+
+    (assert-eq "isa reflexive" (isa? :animal :animal) true)
+    (assert-eq "isa before derive" (isa? :dog :animal) false)
+
+    (derive :dog :animal)
+    (assert-eq "isa after derive" (isa? :dog :animal) true)
+
+    (derive :poodle :dog)
+    (assert-eq "isa transitive" (isa? :poodle :animal) true)
+
+    (underive :dog :animal)
+    (assert-eq "underive removes transitive" (isa? :poodle :animal) false)
+
+    (println "hierarchy isa passed")
+    0))
+
+(-main)

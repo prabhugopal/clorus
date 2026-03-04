@@ -1,0 +1,36 @@
+(ns test-protocol-introspection)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defprotocol Q
+  (q [this] "q"))
+
+(deftype QImpl [v]
+  Q
+  (q [this] (:v this)))
+
+(deftype QOther [v])
+
+(defn -main []
+  (do
+    (let [ok (->QImpl 7)
+          no (->QOther 8)]
+      (assert-eq "extends? by type symbol" (extends? Q QImpl) true)
+      (assert-eq "extends? by type string" (extends? Q "QImpl") true)
+      (assert-eq "extends? false" (extends? Q QOther) false)
+
+      (assert-eq "implements? by value" (implements? Q ok) true)
+      (assert-eq "implements? false" (implements? Q no) false)
+
+      ;; satisfies? remains value-oriented but accepts names as well
+      (assert-eq "satisfies? by value" (satisfies? Q ok) true)
+      (assert-eq "satisfies? false" (satisfies? Q no) false)
+      (assert-eq "satisfies? by type" (satisfies? Q QImpl) true)
+
+      (println "protocol introspection passed")
+      0)))
+
+(-main)

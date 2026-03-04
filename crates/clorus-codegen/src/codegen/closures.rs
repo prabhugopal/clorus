@@ -24,8 +24,11 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Symbol(name) => {
                 // If it's not bound locally and not already collected, it's free
                 // Check both local variables and parameter context (for nested closures)
-                if !bound.contains(name) && !seen.contains(name) &&
-                   (self.variables.contains_key(name) || self.parameter_context.contains_key(name)) {
+                if !bound.contains(name)
+                    && !seen.contains(name)
+                    && (self.variables.contains_key(name)
+                        || self.parameter_context.contains_key(name))
+                {
                     free_vars.push(name.clone());
                     seen.insert(name.clone());
                 }
@@ -60,8 +63,11 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Call { func, args } => {
                 // func is a String (function name) - check if it's a free variable
                 // Check both local variables and parameter context (for nested closures)
-                if !bound.contains(func) && !seen.contains(func) &&
-                   (self.variables.contains_key(func) || self.parameter_context.contains_key(func)) {
+                if !bound.contains(func)
+                    && !seen.contains(func)
+                    && (self.variables.contains_key(func)
+                        || self.parameter_context.contains_key(func))
+                {
                     free_vars.push(func.clone());
                     seen.insert(func.clone());
                 }
@@ -70,7 +76,11 @@ impl<'ctx> CodeGen<'ctx> {
                     self.collect_free_vars(arg, free_vars, seen, bound);
                 }
             }
-            Expr::If { condition, then_branch, else_branch } => {
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.collect_free_vars(condition, free_vars, seen, bound);
                 self.collect_free_vars(then_branch, free_vars, seen, bound);
                 self.collect_free_vars(else_branch, free_vars, seen, bound);
@@ -91,7 +101,11 @@ impl<'ctx> CodeGen<'ctx> {
                     self.collect_free_vars(val, free_vars, seen, bound);
                 }
             }
-            Expr::Fn { params, rest_param, body } => {
+            Expr::Fn {
+                params,
+                rest_param,
+                body,
+            } => {
                 // Nested function - parameters are bound within the function body
                 let mut new_bound = bound.clone();
                 for param in params {

@@ -1,0 +1,31 @@
+(ns test-alter-reset-meta)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(def ^"d0" *m* 1)
+
+(defn add-meta-kv [m k v]
+  (assoc m k v))
+
+(defn -main []
+  (do
+    (println "Testing alter-meta! / reset-meta! ...")
+
+    (assert-eq "initial doc" (:doc (meta #'*m*)) "d0")
+
+    (let [r (reset-meta! #'*m* {:doc "r1" :private true})]
+      (assert-eq "reset return" (:doc r) "r1")
+      (assert-eq "reset applied doc" (:doc (meta #'*m*)) "r1")
+      (assert-eq "reset applied private" (:private (meta #'*m*)) true))
+
+    (let [r2 (alter-meta! #'*m* add-meta-kv :tag "long")]
+      (assert-eq "alter return" (:tag r2) "long")
+      (assert-eq "alter applied" (:tag (meta #'*m*)) "long"))
+
+    (println "alter-meta! / reset-meta! passed")
+    0))
+
+(-main)

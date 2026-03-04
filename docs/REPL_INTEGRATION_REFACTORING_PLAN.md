@@ -1,5 +1,11 @@
 # REPL Integration Refactoring Plan
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Executive Summary
 
 **Current Architecture:** Standalone `repl` binary (separate from `clorus` binary)

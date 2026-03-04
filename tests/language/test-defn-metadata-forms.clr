@@ -1,0 +1,21 @@
+(ns test-defn-metadata-forms)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn add1
+  "add one"
+  {:private true}
+  [x]
+  (+ x 1))
+
+(defn -main []
+  (do
+    (println "Testing defn docstring/attr-map forms...")
+    (assert-eq "defn still callable" (add1 4) 5)
+    (println "defn metadata forms passed")
+    0))
+
+(-main)

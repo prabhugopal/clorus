@@ -1,0 +1,29 @@
+(ns test-with-meta-vary-meta)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(def ^"doc0" *cfg* 100)
+
+(defn add-doc-suffix [m suffix]
+  (assoc m :doc (str (:doc m) suffix)))
+
+(defn -main []
+  (do
+    (println "Testing with-meta / vary-meta on vars...")
+
+    (assert-eq "initial doc" (:doc (meta #'*cfg*)) "doc0")
+
+    (with-meta #'*cfg* {:doc "doc1" :dynamic true})
+    (assert-eq "with-meta doc" (:doc (meta #'*cfg*)) "doc1")
+    (assert-eq "with-meta dynamic" (:dynamic (meta #'*cfg*)) true)
+
+    (vary-meta #'*cfg* add-doc-suffix "-x")
+    (assert-eq "vary-meta doc" (:doc (meta #'*cfg*)) "doc1-x")
+
+    (println "with-meta / vary-meta passed")
+    0))
+
+(-main)

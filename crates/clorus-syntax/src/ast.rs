@@ -71,6 +71,7 @@ pub enum Expr {
         params: Vec<Pattern>,
         rest_param: Option<String>, // Parameter after &, collects remaining args
         body: Box<Expr>,
+        metadata: Option<Vec<(Expr, Expr)>>,
     },
 
     /// Multi-arity function definition: (defn greet ([] "Hi") ([name] (str "Hi " name)))
@@ -78,6 +79,7 @@ pub enum Expr {
     DefnMulti {
         name: String,
         arities: Vec<FunctionArity>,
+        metadata: Option<Vec<(Expr, Expr)>>,
     },
 
     /// Forward declaration: (declare foo bar baz)
@@ -171,6 +173,13 @@ pub enum Expr {
     Binding {
         bindings: Vec<(String, Box<Expr>)>,  // var name -> new value
         body: Box<Expr>,
+    },
+
+    /// Assignment expression: (set! target value)
+    /// Updates a local binding or var and returns the assigned value.
+    SetBang {
+        target: String,
+        value: Box<Expr>,
     },
 
     /// Use/import statement: (use rust.fs) or (use rust.fs [read write])
@@ -272,6 +281,7 @@ pub enum Expr {
     Defmulti {
         name: String,          // Multimethod name, e.g., "area"
         dispatch_fn: Box<Expr>, // Dispatch function, e.g., :type or (fn [x] (:type x))
+        metadata: Option<Vec<(Expr, Expr)>>,
     },
 
     /// Method implementation for a multimethod
@@ -281,6 +291,22 @@ pub enum Expr {
         dispatch_value: Box<Expr>, // Dispatch value, e.g., :circle
         params: Vec<Pattern>,      // Parameters
         body: Box<Expr>,           // Implementation body
+    },
+
+    /// Multimethod preference declaration
+    /// (prefer-method area :square :rectangle)
+    /// Declares that :square should win over :rectangle when both match.
+    PreferMethod {
+        name: String,
+        preferred_dispatch: Box<Expr>,
+        over_dispatch: Box<Expr>,
+    },
+
+    /// Remove a dispatch value implementation from a multimethod
+    /// (remove-method area :circle)
+    RemoveMethod {
+        name: String,
+        dispatch_value: Box<Expr>,
     },
 
     /// Try/Catch/Finally: (try body (catch type var handler) (finally cleanup))
@@ -305,6 +331,7 @@ pub struct RequireSpec {
     pub alias: Option<String>,     // :as math
     pub refer: Vec<String>,        // :refer [sin cos]
     pub refer_all: bool,           // :refer :all
+    pub rename: Vec<(String, String)>, // :rename {old new}
 }
 
 /// Specification for importing a Rust FFI library

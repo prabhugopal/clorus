@@ -1,0 +1,29 @@
+;; Namespace resolution parity edge cases:
+;; - local defs should shadow referred/renamed symbols
+;; - alias/qualified calls should still resolve imported vars
+
+(ns tests.language.test-namespace-resolution-edge
+  (:require [clorus.set :as s]
+            [clorus.set :refer [union] :rename {union set-union}]))
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+;; Shadow referred symbol `union`
+(defn union [a b]
+  :local-union)
+
+;; Shadow renamed symbol `set-union`
+(defn set-union [a b]
+  :local-renamed-union)
+
+(defn -main [& _args]
+  (let [a #{1 2}
+        b #{2 3}]
+    (assert-eq "local union shadows refer" (union a b) :local-union)
+    (assert-eq "local set-union shadows rename" (set-union a b) :local-renamed-union)
+    (assert-eq "alias call still resolves imported var" (s/union a b) #{1 2 3})
+    (assert-eq "qualified full-ns call still resolves imported var" (clorus.set/union a b) #{1 2 3})
+    "PASS"))

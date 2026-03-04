@@ -1,0 +1,13 @@
+[
+  {"name": "arith-add", "expr": "(+ 1 2)"},
+  {"name": "arith-mul", "expr": "(* 7 6)"},
+  {"name": "let-binding", "expr": "(let [x 10 y 20] (+ x y))"},
+  {"name": "vector-eq", "expr": "(= [1 2 3] [1 2 3])"},
+  {"name": "map-into-vector", "expr": "(into [] (map inc [1 2 3]))"},
+  {"name": "reduce-sum", "expr": "(reduce + [1 2 3 4 5])"},
+  {"name": "str-join", "expr": "(str \"hello\" \"-\" 42)"},
+  {"name": "assoc-map", "expr": "(assoc {:a 1} :b 2)"},
+  {"name": "get-map", "expr": "(get {:a 1 :b 2} :b)"},
+  {"name": "nth-vector", "expr": "(nth [10 20 30] 1)"},
+  {"name": "conj-vector", "expr": "(conj [1 2] 3)"}
+]

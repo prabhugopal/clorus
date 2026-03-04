@@ -32,6 +32,7 @@ pub enum Token {
     // Reader macros
     ShorthandFnStart(Span),  // #(
     HashSetStart(Span),      // #{
+    ReaderDiscard(Span),     // #_ (discard next form)
     VarQuote(Span),          // #' (var quote)
     Meta(Span),              // ^ (metadata prefix)
     Quote(Span),             // '
@@ -58,7 +59,7 @@ impl Token {
         match self {
             Token::LParen(s) | Token::RParen(s) | Token::LBracket(s) | Token::RBracket(s)
             | Token::LBrace(s) | Token::RBrace(s) | Token::ShorthandFnStart(s)
-            | Token::HashSetStart(s) | Token::VarQuote(s) | Token::Meta(s) | Token::Quote(s)
+            | Token::HashSetStart(s) | Token::ReaderDiscard(s) | Token::VarQuote(s) | Token::Meta(s) | Token::Quote(s)
             | Token::SyntaxQuote(s) | Token::Unquote(s) | Token::UnquoteSplicing(s)
             | Token::Deref(s) | Token::Nil(s) | Token::Eof(s) => *s,
             Token::Long(_, s) | Token::Double(_, s) | Token::String(_, s)
@@ -369,6 +370,15 @@ impl Lexer {
                     self.advance(); // skip {
                     let span = self.make_span(start_pos, start_line, start_col);
                     Ok(Token::HashSetStart(span))
+                } else if self.peek_char(1) == Some('_') {
+                    // Reader discard: #_form (discard next form)
+                    let start_pos = self.position;
+                    let start_line = self.line;
+                    let start_col = self.column;
+                    self.advance(); // skip #
+                    self.advance(); // skip _
+                    let span = self.make_span(start_pos, start_line, start_col);
+                    Ok(Token::ReaderDiscard(span))
                 } else if self.peek_char(1) == Some('\'') {
                     // Var quote: #'symbol
                     let start_pos = self.position;
@@ -530,5 +540,13 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         assert!(matches!(&tokens[0], Token::String(s, _) if s == "hello"));
         assert!(matches!(&tokens[1], Token::String(s, _) if s == "world\n"));
+    }
+
+    #[test]
+    fn test_reader_discard_token() {
+        let mut lexer = Lexer::new("#_ 42");
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0], Token::ReaderDiscard(_)));
+        assert!(matches!(tokens[1], Token::Long(42, _)));
     }
 }

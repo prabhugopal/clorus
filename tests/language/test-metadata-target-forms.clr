@@ -1,0 +1,30 @@
+(ns test-metadata-target-forms)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn -main []
+  (do
+    (println "Testing metadata on target forms...")
+
+    (let [f ^:private (fn [x] x)]
+      (assert-eq "fn metadata private" (:private (meta f)) true)
+      (assert-eq "fn still callable" (f 7) 7))
+
+    (let [v ^String [1 2]]
+      (assert-eq "vector tag symbol" (:tag (meta v)) 'String))
+
+    (let [m ^"docstr" {:a 1}]
+      (assert-eq "map doc metadata" (:doc (meta m)) "docstr")
+      (assert-eq "map value intact" (:a m) 1))
+
+    (let [q ^:quoted '(1 2 3)]
+      (assert-eq "quoted list metadata" (:quoted (meta q)) true)
+      (assert-eq "quoted list intact" (first q) 1))
+
+    (println "metadata target forms passed")
+    0))
+
+(-main)

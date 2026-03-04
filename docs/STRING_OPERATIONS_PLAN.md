@@ -1,5 +1,11 @@
 # String Operations Implementation Plan
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/ROADMAP_TO_100_PARITY.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Overview
 
 Implement comprehensive string operations for Clorus, enabling real-world application development. Currently at **10% string support**, target is **80%+** (production-ready).

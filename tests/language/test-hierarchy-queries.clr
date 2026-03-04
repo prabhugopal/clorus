@@ -1,0 +1,46 @@
+(ns test-hierarchy-queries)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defn assert-truthy [label x]
+  (if x
+    true
+    (throw (str "assert failed: " label))))
+
+(defn -main []
+  (do
+    (derive :mammal :animal)
+    (derive :aquatic :animal)
+    (derive :animal :living)
+    (derive :platypus :mammal)
+    (derive :platypus :aquatic)
+
+    (let [p (parents :platypus)]
+      (assert-truthy "parents includes :mammal" (contains? p :mammal))
+      (assert-truthy "parents includes :aquatic" (contains? p :aquatic))
+      (assert-eq "parents excludes transitive :animal" (contains? p :animal) false))
+
+    (let [a (ancestors :platypus)]
+      (assert-truthy "ancestors includes :mammal" (contains? a :mammal))
+      (assert-truthy "ancestors includes :aquatic" (contains? a :aquatic))
+      (assert-truthy "ancestors includes :animal" (contains? a :animal))
+      (assert-truthy "ancestors includes :living" (contains? a :living)))
+
+    (let [d (descendants :animal)]
+      (assert-truthy "descendants includes :mammal" (contains? d :mammal))
+      (assert-truthy "descendants includes :aquatic" (contains? d :aquatic))
+      (assert-truthy "descendants includes :platypus" (contains? d :platypus))
+      (assert-eq "descendants excludes ancestor :living" (contains? d :living) false))
+
+    (underive :platypus :aquatic)
+    (let [p2 (parents :platypus)]
+      (assert-eq "underive removed :aquatic" (contains? p2 :aquatic) false)
+      (assert-truthy "underive kept :mammal" (contains? p2 :mammal)))
+
+    (println "hierarchy queries passed")
+    0))
+
+(-main)

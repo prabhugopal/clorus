@@ -1,0 +1,39 @@
+(ns test-multimethod-hierarchy)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed: " label " actual=" actual " expected=" expected))))
+
+(defmulti classify identity)
+
+(defmethod classify :mammal [_]
+  :M)
+
+(defmethod classify :aquatic [_]
+  :A)
+
+(defmethod classify :default [_]
+  :D)
+
+(defn -main []
+  (do
+    (println "Testing multimethod hierarchy dispatch...")
+
+    (derive :whale :mammal)
+    (assert-eq "hierarchy dispatch" (classify :whale) :M)
+
+    (derive :platypus :mammal)
+    (derive :platypus :aquatic)
+    (assert-eq "before prefer keeps insertion order" (classify :platypus) :M)
+
+    (prefer-method classify :aquatic :mammal)
+    (assert-eq "prefer-method breaks tie" (classify :platypus) :A)
+
+    (remove-method classify :aquatic)
+    (assert-eq "remove-method fallback" (classify :platypus) :M)
+
+    (println "multimethod hierarchy passed")
+    0))
+
+(-main)

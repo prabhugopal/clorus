@@ -1,0 +1,57 @@
+;; Dynamic var edge-case coverage for binding restoration semantics.
+
+(ns tests.language.test-binding-edge)
+
+(def ^:dynamic *x* 1)
+
+(defn bump-x! []
+  (do
+    (set! *x* (+ *x* 1))
+    *x*))
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "initial" *x* 1)
+
+    (assert-eq "simple binding"
+               (binding [*x* 2] *x*)
+               2)
+    (assert-eq "restored after simple binding" *x* 1)
+
+    (assert-eq "nested binding inner"
+               (binding [*x* 2]
+                 (binding [*x* 3] *x*))
+               3)
+    (assert-eq "restored after nested binding" *x* 1)
+
+    (assert-eq "closure observes dynamic value inside binding"
+               (binding [*x* 7]
+                 (let [f (fn [] *x*)]
+                   (f)))
+               7)
+    (assert-eq "closure outside binding sees root"
+               (let [f (fn [] *x*)]
+                 (f))
+               1)
+
+    (assert-eq "set! inside called fn updates thread binding"
+               (binding [*x* 10]
+                 (bump-x!))
+               11)
+    (assert-eq "root preserved after called fn set! in binding" *x* 1)
+
+    (assert-eq "binding restored after throw/catch"
+               (do
+                 (try
+                   (binding [*x* 9]
+                     (throw "boom"))
+                   (catch e :caught))
+                 *x*)
+               1)
+
+    "PASS"))

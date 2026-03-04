@@ -1,5 +1,11 @@
 # Interface File Organization - Best Practices
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/FFI_ROADMAP.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Status:** ✅ Complete
 **Date:** January 26, 2025
 

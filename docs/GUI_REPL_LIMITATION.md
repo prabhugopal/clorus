@@ -1,5 +1,11 @@
 # GUI + REPL Known Limitation (macOS)
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/GUI_REPL_USAGE.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## The Problem
 
 On macOS, GUI windows created with eframe/egui **cannot be reliably closed and reopened** in the same REPL session.

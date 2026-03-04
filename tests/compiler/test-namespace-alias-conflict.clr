@@ -1,0 +1,8 @@
+; EXPECT_COMPILE_ERROR: Namespace alias conflict
+
+(ns tests.compiler.test-namespace-alias-conflict
+  (:require [test-alias-mod-a :as s]
+            [test-alias-mod-b :as s]))
+
+(defn -main [& _args]
+  "SHOULD-NOT-RUN")

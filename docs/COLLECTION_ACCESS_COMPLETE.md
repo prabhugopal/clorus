@@ -1,5 +1,11 @@
 # Collection Access Functions Implementation Complete ✅
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/reference/LANGUAGE_SPEC.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 **Date:** January 27, 2026
 **Status:** ✅ COMPLETE
 **Feature:** Core collection access functions (get, nth, first, rest, last, count)

@@ -138,21 +138,38 @@ pub extern "C" fn clorus_map_assoc(
     key: *mut Value,
     val: *mut Value
 ) -> *mut Value {
-    if map_val.is_null() {
-        return clorus_map_empty();
-    }
-
     unsafe {
-        let map_ptr = (*map_val).as_ptr() as *mut ClorusHashMap;
+        let target_map = if map_val.is_null() {
+            let map = ClorusHashMap::empty();
+            Value::from_ptr(crate::value::ValueTag::HashMap, map as *mut u8)
+        } else if (*map_val).header().tag() != crate::value::ValueTag::HashMap {
+            let map = ClorusHashMap::empty();
+            Value::from_ptr(crate::value::ValueTag::HashMap, map as *mut u8)
+        } else if (*map_val).as_ptr().is_null() {
+            let map = ClorusHashMap::empty();
+            Value::from_ptr(crate::value::ValueTag::HashMap, map as *mut u8)
+        } else {
+            map_val
+        };
+        let map_ptr = (*target_map).as_ptr() as *mut ClorusHashMap;
+        if map_ptr.is_null() {
+            crate::value::clorus_retain(target_map);
+            return target_map;
+        }
+        if key.is_null() {
+            crate::value::clorus_retain(target_map);
+            return target_map;
+        }
+        let value_to_store = if val.is_null() { Value::nil() } else { val };
 
         // For now, mutate in place
         // TODO: In Phase C, create a new persistent map
-        (*map_ptr).assoc(key, val);
+        (*map_ptr).assoc(key, value_to_store);
 
         // Return the same map (will be new persistent copy in Phase C).
         // Retain to allow caller to release both old and "new" maps safely.
-        crate::value::clorus_retain(map_val);
-        map_val
+        crate::value::clorus_retain(target_map);
+        target_map
     }
 }
 
@@ -163,7 +180,13 @@ pub extern "C" fn clorus_map_get(map_val: *mut Value, key: *mut Value) -> *mut V
     }
 
     unsafe {
+        if (*map_val).header().tag() != crate::value::ValueTag::HashMap {
+            return Value::nil();
+        }
         let map_ptr = (*map_val).as_ptr() as *mut ClorusHashMap;
+        if map_ptr.is_null() {
+            return Value::nil();
+        }
         (*map_ptr).get(key)
     }
 }
@@ -175,7 +198,13 @@ pub extern "C" fn clorus_map_count(map_val: *mut Value) -> u64 {
     }
 
     unsafe {
+        if (*map_val).header().tag() != crate::value::ValueTag::HashMap {
+            return 0;
+        }
         let map_ptr = (*map_val).as_ptr() as *mut ClorusHashMap;
+        if map_ptr.is_null() {
+            return 0;
+        }
         (*map_ptr).count()
     }
 }

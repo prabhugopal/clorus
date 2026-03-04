@@ -1,5 +1,11 @@
 # Clorus Codebase Cleanup - Complete ✅
 
+> **Status:** Archived (Historical)
+> **Canonical replacement:** `docs/PARITY_EXECUTION_PLAN.md`
+>
+> This document is kept for historical context. For current behavior and parity status, use the canonical document above.
+
+
 ## Summary
 
 Successfully cleaned up and organized the Clorus codebase, establishing clear separation between runtime infrastructure (Rust) and standard library code (Clorus).

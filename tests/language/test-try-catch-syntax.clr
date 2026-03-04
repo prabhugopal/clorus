@@ -1,0 +1,18 @@
+;; try/catch parser + codegen smoke test.
+;; Current runtime does not fully implement thrown-exception catching;
+;; this test validates supported syntax + non-throw path behavior.
+
+(defn -main []
+  (let [a (try
+            42
+            (catch e
+              0))
+        b (try
+            7
+            (catch Error e
+              0)
+            (finally
+              99))]
+    (if (and (= a 42) (= b 7))
+      "PASS"
+      (throw "FAIL: try/catch syntax behavior mismatch"))))
