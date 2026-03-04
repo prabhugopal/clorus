@@ -1,0 +1,32 @@
+(ns tests.stdlib.test-core-hofs)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn assert-vec [label actual expected]
+  (do
+    (assert-eq (str label " count") (count actual) (count expected))
+    (loop [i 0]
+      (if (< i (count expected))
+        (do
+          (assert-eq (str label " idx=" i) (nth actual i) (nth expected i))
+          (recur (+ i 1)))
+        true))))
+
+(defn -main [& _args]
+  (do
+    (assert-vec "keep non-nil"
+                (keep (fn [x] (if (odd? x) x nil)) [1 2 3 4])
+                [1 3])
+    (assert-vec "mapcat duplicates"
+                (mapcat (fn [x] [x x]) [1 2 3])
+                [1 1 2 2 3 3])
+    (assert-eq "every? true" (every? (fn [x] (> x 0)) [1 2 3]) true)
+    (assert-eq "every? false" (every? (fn [x] (> x 1)) [1 2 3]) false)
+    (assert-eq "not-any? true" (not-any? (fn [x] (= x 9)) [1 2 3]) true)
+    (assert-eq "not-any? false" (not-any? (fn [x] (= x 2)) [1 2 3]) false)
+    (assert-eq "not-every? true" (not-every? (fn [x] (> x 1)) [1 2 3]) true)
+    (assert-eq "not-every? false" (not-every? (fn [x] (> x 0)) [1 2 3]) false)
+    "PASS"))
