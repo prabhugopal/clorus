@@ -1,0 +1,34 @@
+(ns tests.stdlib.test-core-apply-call-shape)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn add4 [a b c d]
+  (+ (+ a b) (+ c d)))
+
+(defn sum-many
+  ([a b] (+ a b))
+  ([a b & more]
+   (loop [acc (+ a b)
+          xs more]
+     (if (empty? xs)
+       acc
+       (recur (+ acc (first xs)) (rest xs))))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "apply dispatch to fixed-arity fn"
+               (apply add4 [1 2 3 4])
+               10)
+    (assert-eq "apply dispatch to fixed-arity fn with prefix args"
+               (apply add4 1 [2 3 4])
+               10)
+    (assert-eq "apply dispatch to variadic fn"
+               (apply sum-many [1 2 3 4 5])
+               15)
+    (assert-eq "apply dispatch to variadic fn with prefix args"
+               (apply sum-many 1 2 [3 4 5])
+               15)
+    "PASS"))

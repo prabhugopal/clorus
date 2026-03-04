@@ -475,7 +475,9 @@
   ([m k f x y]
    (assoc m k (f (get m k) x y)))
   ([m k f x y z]
-   (assoc m k (f (get m k) x y z))))
+   (assoc m k (f (get m k) x y z)))
+  ([m k f x y z & more]
+   (assoc m k (apply f (get m k) x y z more))))
 
 ;; merge-with - Merge maps, combining collisions with function
 ;; Example: (merge-with + {:a 1 :b 2} {:a 10 :c 3}) ; => {:a 11 :b 2 :c 3}

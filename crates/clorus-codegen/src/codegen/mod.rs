@@ -12842,16 +12842,24 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "apply" => {
-                // apply takes 2 args: function, collection
-                if args.len() != 2 {
-                    return Err("apply requires 2 arguments: function, collection".to_string());
+                // apply takes 2+ args: function, [arg1 ...], collection
+                if args.len() < 2 {
+                    return Err(
+                        "apply requires at least 2 arguments: function, [args...], collection"
+                            .to_string(),
+                    );
                 }
 
                 // Compile the function expression - supports both named functions and closures
                 let func_val = self.compile_expr(&args[0])?;
 
-                // Compile the collection
-                let coll_ptr = self.compile_expr(&args[1])?;
+                // Last argument must be a collection whose elements are appended.
+                let coll_ptr = self.compile_expr(args.last().unwrap())?;
+                let fixed_args: Vec<PointerValue<'ctx>> = args[1..args.len() - 1]
+                    .iter()
+                    .map(|arg| self.compile_expr(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let fixed_count = fixed_args.len() as u64;
 
                 // Get collection count
                 let count_fn = self
@@ -12867,6 +12875,11 @@ impl<'ctx> CodeGen<'ctx> {
                     .left()
                     .unwrap()
                     .into_int_value();
+                let fixed_count_i64 = self.context.i64_type().const_int(fixed_count, false);
+                let total_count_i64 = self
+                    .builder
+                    .build_int_add(count_i64, fixed_count_i64, "apply_total_count")
+                    .unwrap();
 
                 // Get nth function
                 let nth_fn = self
@@ -12874,11 +12887,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .get_function("clorus_nth")
                     .ok_or("clorus_nth not declared")?;
 
-                // Build argument vector by extracting each element
-                // For now, support up to 10 arguments
-                let max_args = 10usize;
-
-                // Create a loop to extract arguments
+                // Create loop blocks to append collection elements after fixed args.
                 let current_fn = self
                     .builder
                     .get_insert_block()
@@ -12889,35 +12898,35 @@ impl<'ctx> CodeGen<'ctx> {
                 let body_block = self.context.append_basic_block(current_fn, "apply_body");
                 let end_block = self.context.append_basic_block(current_fn, "apply_end");
 
-                // Allocate space for argument array (fixed size for now)
                 let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                let arg_array_type = value_ptr_type.array_type(max_args as u32);
-                let arg_array = self
+                // Allocate exact-size argument array at runtime.
+                let args_array = self
                     .builder
-                    .build_alloca(arg_array_type, "arg_array")
+                    .build_array_alloca(value_ptr_type, total_count_i64, "apply_args_array")
                     .unwrap();
 
-                // Index counter
+                // Pre-fill fixed args at indices [0..fixed_count).
+                for (i, arg_val) in fixed_args.iter().enumerate() {
+                    let idx = self.context.i64_type().const_int(i as u64, false);
+                    let elem_ptr = unsafe {
+                        self.builder
+                            .build_gep(value_ptr_type, args_array, &[idx], "apply_fixed_arg_ptr")
+                            .unwrap()
+                    };
+                    self.builder.build_store(elem_ptr, *arg_val).unwrap();
+                }
+
+                // Index counter over collection elements.
                 let index_alloca = self
                     .builder
-                    .build_alloca(self.context.i64_type(), "apply_index")
+                    .build_alloca(self.context.i64_type(), "apply_coll_index")
                     .unwrap();
                 self.builder
                     .build_store(index_alloca, self.context.i64_type().const_zero())
                     .unwrap();
-
-                // Actual count storage
-                let actual_count_alloca = self
-                    .builder
-                    .build_alloca(self.context.i64_type(), "actual_count")
-                    .unwrap();
-                self.builder
-                    .build_store(actual_count_alloca, count_i64)
-                    .unwrap();
-
                 self.builder.build_unconditional_branch(loop_block).unwrap();
 
-                // Loop condition: index < count && index < max_args
+                // Loop condition: index < collection_count
                 self.builder.position_at_end(loop_block);
                 let current_index = self
                     .builder
@@ -12925,33 +12934,20 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_int_value();
 
-                let cond1 = self
+                let condition = self
                     .builder
                     .build_int_compare(
                         inkwell::IntPredicate::SLT,
                         current_index,
                         count_i64,
-                        "cond1",
+                        "apply_loop_cond",
                     )
                     .unwrap();
-
-                let max_args_const = self.context.i64_type().const_int(max_args as u64, false);
-                let cond2 = self
-                    .builder
-                    .build_int_compare(
-                        inkwell::IntPredicate::SLT,
-                        current_index,
-                        max_args_const,
-                        "cond2",
-                    )
-                    .unwrap();
-
-                let condition = self.builder.build_and(cond1, cond2, "loop_cond").unwrap();
                 self.builder
                     .build_conditional_branch(condition, body_block, end_block)
                     .unwrap();
 
-                // Loop body: extract element and store in array
+                // Loop body: extract collection element and store after fixed args.
                 self.builder.position_at_end(body_block);
                 let elem = self
                     .builder
@@ -12966,14 +12962,17 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_pointer_value();
 
-                // Store in arg_array[index]
+                let target_index = self
+                    .builder
+                    .build_int_add(current_index, fixed_count_i64, "apply_target_index")
+                    .unwrap();
                 let elem_ptr = unsafe {
                     self.builder
                         .build_gep(
-                            arg_array_type,
-                            arg_array,
-                            &[self.context.i64_type().const_zero(), current_index],
-                            "elem_ptr",
+                            value_ptr_type,
+                            args_array,
+                            &[target_index],
+                            "apply_elem_ptr",
                         )
                         .unwrap()
                 };
@@ -12993,28 +12992,9 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // After loop: call function with extracted arguments using dynamic dispatch
                 self.builder.position_at_end(end_block);
-
-                // Load actual count
-                let actual_count = self
-                    .builder
-                    .build_load(self.context.i64_type(), actual_count_alloca, "actual_count")
-                    .unwrap()
-                    .into_int_value();
-
-                // Cast arg_array to *const *mut Value for clorus_function_call
-                let args_array_ptr = self
-                    .builder
-                    .build_pointer_cast(
-                        arg_array,
-                        value_ptr_type.ptr_type(AddressSpace::default()),
-                        "args_array_cast",
-                    )
-                    .unwrap();
-
-                // Cast count to i32 for clorus_function_call
                 let count_i32 = self
                     .builder
-                    .build_int_cast(actual_count, self.context.i32_type(), "count_i32")
+                    .build_int_cast(total_count_i64, self.context.i32_type(), "count_i32")
                     .unwrap();
 
                 // Call clorus_function_call for dynamic dispatch
@@ -13027,7 +13007,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_call(
                         function_call_fn,
-                        &[func_val.into(), args_array_ptr.into(), count_i32.into()],
+                        &[func_val.into(), args_array.into(), count_i32.into()],
                         "apply_call",
                     )
                     .unwrap();
