@@ -1,7 +1,7 @@
 # Clorus Clojure Parity Checklist
 
 Last updated: 2026-03-04
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 173, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 175, Failed 0, Skipped 1.
 
 ## How to use this checklist
 - `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
@@ -56,6 +56,7 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
   - [x] remaining alias/refer/rename collision and error-path cases
 - [x] Dynamic vars: finish `set!` semantics and edge coverage
 - [x] Dynamic vars: nested restoration and function-boundary behavior
+- [x] Dynamic vars: throw/rethrow restoration paths
 - [x] Collections parity: `get-in` deep edge matrix
 - [x] Collections parity: `assoc-in` deep edge matrix
 - [x] Collections parity: `update-in` deep edge matrix

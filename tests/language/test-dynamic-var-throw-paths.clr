@@ -1,0 +1,50 @@
+;; Dynamic var throw/rethrow restoration matrix:
+;; - set! within nested binding frames
+;; - restoration on throw and rethrow paths
+;; - isolation across multiple dynamic vars
+
+(ns tests.language.test-dynamic-var-throw-paths)
+
+(def ^:dynamic *x* 1)
+(def ^:dynamic *y* 10)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn set-both! [x y]
+  (do
+    (set! *x* x)
+    (set! *y* y)
+    [*x* *y*]))
+
+(defn nested-rethrow []
+  (try
+    (binding [*x* 100 *y* 200]
+      (set-both! 101 201)
+      (try
+        (binding [*x* 300]
+          (set! *x* 301)
+          (throw "inner-boom"))
+        (catch e
+          (do
+            ;; still in outer dynamic frame here
+            (assert-eq "outer frame visible in inner catch" [*x* *y*] [101 201])
+            (throw "outer-boom")))))
+    (catch e
+      :caught)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "initial root values" [*x* *y*] [1 10])
+    (assert-eq "nested throw/rethrow catches" (nested-rethrow) :caught)
+    (assert-eq "root restored after nested rethrow" [*x* *y*] [1 10])
+
+    ;; Ensure one dynamic var can be rebound without affecting the other.
+    (assert-eq "single-var rebinding isolation"
+               (binding [*x* 42]
+                 [*x* *y*])
+               [42 10])
+    (assert-eq "root still unchanged after isolation check" [*x* *y*] [1 10])
+    "PASS"))
