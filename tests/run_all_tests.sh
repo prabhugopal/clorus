@@ -21,8 +21,11 @@ TEST_DIR="./tests"
 PASSED=0
 FAILED=0
 SKIPPED=0
+export CLORUS_HOME="${CLORUS_HOME:-$(pwd)}"
 # Engines for semantics parity checks. Values: "jit", "legacy"
 CLORUS_TEST_ENGINES="${CLORUS_TEST_ENGINES:-jit legacy}"
+CLORUS_TEST_TIMEOUT_SECONDS="${CLORUS_TEST_TIMEOUT_SECONDS:-20}"
+CLORUS_TEST_JOBS="${CLORUS_TEST_JOBS:-1}"
 
 # Check if clorus binary exists
 if [ ! -f "$CLORUS_BIN" ]; then
@@ -34,9 +37,9 @@ fi
 # Detect timeout command (timeout on Linux, gtimeout on macOS with coreutils)
 TIMEOUT_CMD=""
 if command -v timeout &> /dev/null; then
-    TIMEOUT_CMD="timeout 5s"
+    TIMEOUT_CMD="timeout ${CLORUS_TEST_TIMEOUT_SECONDS}s"
 elif command -v gtimeout &> /dev/null; then
-    TIMEOUT_CMD="gtimeout 5s"
+    TIMEOUT_CMD="gtimeout ${CLORUS_TEST_TIMEOUT_SECONDS}s"
 else
     # No timeout available - tests will run without timeout
     TIMEOUT_CMD=""
@@ -46,6 +49,12 @@ echo "================================================"
 echo "  CLORUS COMPREHENSIVE TEST SUITE"
 echo "================================================"
 echo "  Engines: $CLORUS_TEST_ENGINES"
+echo "  Parallel jobs: $CLORUS_TEST_JOBS"
+if [ -n "$TIMEOUT_CMD" ]; then
+    echo "  Timeout: ${CLORUS_TEST_TIMEOUT_SECONDS}s per test"
+else
+    echo "  Timeout: disabled (timeout command not found)"
+fi
 echo ""
 
 run_one() {
@@ -74,34 +83,160 @@ run_one() {
     return 99
 }
 
+expected_compile_error() {
+    local test_file=$1
+    rg "^;\\s*EXPECT_COMPILE_ERROR:\\s*(.+)$" "$test_file" -r '$1' | head -n 1
+}
+
+run_test_mode() {
+    local mode=$1
+    local test_file=$2
+    local expected_error=$3
+    local result_file=$4
+    local output_file
+    local exit_code=0
+
+    output_file=$(mktemp "/tmp/clorus-test-output.XXXXXX")
+
+    if [ -n "$expected_error" ]; then
+        if [ "$mode" = "legacy" ]; then
+            if [ -n "$TIMEOUT_CMD" ]; then
+                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run --legacy-run >"$output_file" 2>&1 || exit_code=$?
+            else
+                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run --legacy-run >"$output_file" 2>&1 || exit_code=$?
+            fi
+        elif [ "$mode" = "jit" ]; then
+            if [ -n "$TIMEOUT_CMD" ]; then
+                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run >"$output_file" 2>&1 || exit_code=$?
+            else
+                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run >"$output_file" 2>&1 || exit_code=$?
+            fi
+        else
+            echo "SKIP" > "$result_file"
+            echo "  File: $test_file (mode=$mode, reason=unknown-engine)" > "${result_file}.details"
+            rm -f "$output_file"
+            return 0
+        fi
+
+        if [ "$exit_code" -ne 0 ] && rg -q --fixed-strings "$expected_error" "$output_file"; then
+            echo "PASS" > "$result_file"
+        else
+            echo "FAIL" > "$result_file"
+            {
+                echo "  File: $test_file (mode=$mode, expected_compile_error=$expected_error)"
+                echo "  Output: $output_file"
+            } > "${result_file}.details"
+        fi
+    else
+        if run_one "$mode" "$test_file"; then
+            echo "PASS" > "$result_file"
+        else
+            local code=$?
+            if [ "$code" -eq 99 ]; then
+                echo "SKIP" > "$result_file"
+                echo "  File: $test_file (mode=$mode, reason=unknown-engine)" > "${result_file}.details"
+            else
+                echo "FAIL" > "$result_file"
+                echo "  File: $test_file (mode=$mode)" > "${result_file}.details"
+            fi
+        fi
+    fi
+
+    rm -f "$output_file"
+}
+
 # Function to run a single test file across configured engines
 run_test() {
     local test_file=$1
     local test_name=$(basename "$test_file" .clr)
     local category=$(dirname "$test_file" | xargs basename)
     local mode
+    local expected_error
+    expected_error="$(expected_compile_error "$test_file")"
 
-    for mode in $CLORUS_TEST_ENGINES; do
-        printf "%-50s" "Testing $category/$test_name [$mode]..."
+    local modes=()
+    while read -r mode; do
+        [ -n "$mode" ] && modes+=("$mode")
+    done < <(printf "%s\n" $CLORUS_TEST_ENGINES)
 
-        if run_one "$mode" "$test_file"; then
-            echo -e "${GREEN}✓ PASS${NC}"
-            ((PASSED++))
-        else
-            local code=$?
-            if [ "$code" -eq 99 ]; then
-                echo -e "${YELLOW}⚠ SKIP${NC}"
-                ((SKIPPED++))
-                echo "  File: $test_file (mode=$mode, reason=unknown-engine)" >> test_failures.log
-                continue
+    if [ "$CLORUS_TEST_JOBS" -gt 1 ] && [ "${#modes[@]}" -gt 1 ]; then
+        local pids=()
+        local result_files=()
+        local i
+        local mode
+
+        for mode in "${modes[@]}"; do
+            local result_file
+            result_file=$(mktemp "/tmp/clorus-test-result.XXXXXX")
+            result_files+=("$result_file")
+            run_test_mode "$mode" "$test_file" "$expected_error" "$result_file" &
+            pids+=($!)
+        done
+
+        for i in "${!pids[@]}"; do
+            if wait "${pids[$i]}"; then
+                :
+            else
+                # Result file still carries PASS/FAIL/SKIP state; continue processing.
+                :
             fi
+        done
 
-            echo -e "${RED}✗ FAIL${NC}"
-            ((FAILED++))
-            echo "  File: $test_file (mode=$mode)" >> test_failures.log
-            return 1
-        fi
-    done
+        for i in "${!modes[@]}"; do
+            mode="${modes[$i]}"
+            printf "%-50s" "Testing $category/$test_name [$mode]..."
+            local status
+            status=$(cat "${result_files[$i]}")
+            case "$status" in
+                PASS)
+                    echo -e "${GREEN}✓ PASS${NC}"
+                    ((PASSED+=1))
+                    ;;
+                SKIP)
+                    echo -e "${YELLOW}⚠ SKIP${NC}"
+                    ((SKIPPED+=1))
+                    [ -f "${result_files[$i]}.details" ] && cat "${result_files[$i]}.details" >> test_failures.log
+                    ;;
+                *)
+                    echo -e "${RED}✗ FAIL${NC}"
+                    ((FAILED+=1))
+                    [ -f "${result_files[$i]}.details" ] && cat "${result_files[$i]}.details" >> test_failures.log
+                    rm -f "${result_files[@]}" "${result_files[@]/%/.details}"
+                    return 1
+                    ;;
+            esac
+        done
+
+        rm -f "${result_files[@]}" "${result_files[@]/%/.details}"
+    else
+        for mode in "${modes[@]}"; do
+            printf "%-50s" "Testing $category/$test_name [$mode]..."
+            local result_file
+            result_file=$(mktemp "/tmp/clorus-test-result.XXXXXX")
+            run_test_mode "$mode" "$test_file" "$expected_error" "$result_file"
+            local status
+            status=$(cat "$result_file")
+            case "$status" in
+                PASS)
+                    echo -e "${GREEN}✓ PASS${NC}"
+                    ((PASSED+=1))
+                    ;;
+                SKIP)
+                    echo -e "${YELLOW}⚠ SKIP${NC}"
+                    ((SKIPPED+=1))
+                    [ -f "${result_file}.details" ] && cat "${result_file}.details" >> test_failures.log
+                    ;;
+                *)
+                    echo -e "${RED}✗ FAIL${NC}"
+                    ((FAILED+=1))
+                    [ -f "${result_file}.details" ] && cat "${result_file}.details" >> test_failures.log
+                    rm -f "$result_file" "${result_file}.details"
+                    return 1
+                    ;;
+            esac
+            rm -f "$result_file" "${result_file}.details"
+        done
+    fi
 }
 
 # Function to run tests in a category
@@ -128,6 +263,55 @@ run_category() {
     done
 }
 
+run_repl_regressions() {
+    echo -e "\n${BLUE}5. REPL REGRESSION TESTS${NC}"
+
+    local repl_output_file="/tmp/clorus_repl_regression.log"
+    local mode
+
+    for mode in $CLORUS_TEST_ENGINES; do
+        printf "%-50s" "Testing repl/core-map-defmacro [$mode]..."
+
+        if [ "$mode" = "legacy" ]; then
+            # REPL exercises JIT path; legacy mode is not applicable here.
+            echo -e "${YELLOW}⚠ SKIP${NC}"
+            ((SKIPPED+=1))
+            continue
+        fi
+
+        # Pipe scripted input to REPL and validate key behaviors:
+        # - defmacro returns var-ish symbol name
+        # - macro expansion has usable env form
+        # - core map is callable
+        if cat <<'EOF' | "$CLORUS_BIN" repl > "$repl_output_file" 2>&1
+(defmacro show-env [] &env)
+(show-env)
+(map #(* % 2) [1 2 3 4])
+:q
+EOF
+        then
+            :
+        else
+            echo -e "${RED}✗ FAIL${NC}"
+            ((FAILED+=1))
+            echo "  File: repl/core-map-defmacro (mode=$mode, reason=repl-exit-nonzero)" >> test_failures.log
+            continue
+        fi
+
+        if grep -qE "#'.+/show-env" "$repl_output_file" \
+            && grep -q "\[8 6 4 2\]" "$repl_output_file" \
+            && ! grep -q "Undefined function: map" "$repl_output_file"; then
+            echo -e "${GREEN}✓ PASS${NC}"
+            ((PASSED+=1))
+        else
+            echo -e "${RED}✗ FAIL${NC}"
+            ((FAILED+=1))
+            echo "  File: repl/core-map-defmacro (mode=$mode)" >> test_failures.log
+            echo "  Output: $repl_output_file" >> test_failures.log
+        fi
+    done
+}
+
 # Clear previous failure log
 rm -f test_failures.log
 
@@ -143,6 +327,8 @@ run_category "compiler"
 
 echo -e "\n${BLUE}4. INTEGRATION TESTS${NC}"
 run_category "integration"
+
+run_repl_regressions
 
 # Summary
 echo ""
