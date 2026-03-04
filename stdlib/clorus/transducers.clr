@@ -102,19 +102,32 @@
 ;; Transducer Application
 ;; =============================================================================
 
+(defn completing
+  "Takes a reducing fn f of 2 args and returns a fn that supports completion arity.
+   2-arity path delegates to f, 1-arity path delegates to completion-fn (defaults to identity)."
+  ([f]
+   (completing f (fn [result] result)))
+  ([f completion-fn]
+   (fn
+     ([result]
+      (completion-fn result))
+     ([result input]
+      (f result input)))))
+
 (defn transduce
-  "Apply transducer to collection. Simplified version without completion arity."
+  "Apply transducer to collection with completion arity support."
   ([xform rf-fn coll]
    (transduce xform rf-fn [] coll))
   ([xform rf-fn init coll]
-   (let [rf (xform rf-fn)]
-     (reduce (fn [acc input]
-               (let [r (rf acc input)]
-                 (if (reduced? r)
-                   (unreduced r)
-                   r)))
-             init
-             coll))))
+   (let [rf (xform (completing rf-fn))]
+     (rf
+      (reduce (fn [acc input]
+                (let [r (rf acc input)]
+                  (if (reduced? r)
+                    (unreduced r)
+                    r)))
+              init
+              coll)))))
 
 (defn into
   "Build collection using transducer."

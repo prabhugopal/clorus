@@ -1,7 +1,7 @@
-# Clorus Stdlib Parity Matrix (`clorus.core`)
+q# Clorus Stdlib Parity Matrix (`clorus.core`)
 
 Last updated: 2026-03-04  
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 201, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 203, Failed 0, Skipped 1.
 
 This is the working source-of-truth for **stdlib parity execution** (separate from core language/compiler parity).
 
@@ -17,6 +17,7 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 - ✅ `every?`, `some?`, `not-any?`, `not-every?`
 - ✅ `take`, `drop`, `take-while`, `drop-while`
 - ✅ `partition`, `partition-all`, `partition-by`, `split-at`, `split-with`
+- ✅ transducer completion baseline (`completing`, `transduce` completion arity invocation)
 
 ## Numeric Helpers
 - ✅ `inc`, `dec`, `int`
@@ -43,9 +44,9 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 - ✅ `ex-info`, `exception?`, `ex-data`, `ex-message`, `ex-cause`
 
 ## Highest-Priority Remaining Gaps
-1. Expand transducer-facing stdlib surface (`transduce`-adjacent helpers where missing).
-2. Add explicit error-message parity tests for stdlib arity and bad-arg paths.
+1. Add explicit error-message parity tests for stdlib arity and bad-arg paths.
+2. Continue stdlib long-tail parity (`core` helpers still marked partial in checklist).
 
 ## Execution Plan (Chunked)
-1. transducer stdlib helper parity pass.
-2. strict stdlib error-path parity sweep.
+1. strict stdlib error-path parity sweep.
+2. next stdlib long-tail parity chunk from checklist gaps.

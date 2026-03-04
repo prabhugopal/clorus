@@ -1,0 +1,41 @@
+(ns tests.stdlib.test-transducers-completion)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; completion arity should run after reduction
+    (assert-eq "transduce completion arity is invoked"
+               (transduce
+                (map (fn [x] x))
+                (fn
+                  ([result] (conj result :done))
+                  ([result input] (conj result input)))
+                []
+                [1 2 3])
+               [1 2 3 :done])
+
+    ;; 2-arity reducing fn should still work through default completing wrapper
+    (assert-eq "transduce with 2-arity rf uses identity completion"
+               (transduce
+                (filter (fn [x] (> x 2)))
+                (fn [result input] (conj result input))
+                []
+                [1 2 3 4])
+               [3 4])
+
+    ;; early termination should still compose with completion
+    (assert-eq "take transducer with completion"
+               (transduce
+                (take 2)
+                (fn
+                  ([result] (conj result :done))
+                  ([result input] (conj result input)))
+                []
+                [10 20 30 40])
+               [10 20 :done])
+
+    "PASS"))
