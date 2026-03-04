@@ -1,0 +1,74 @@
+# Clorus Clojure Parity Checklist
+
+Last updated: 2026-03-04
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 167, Failed 0, Skipped 1.
+
+## How to use this checklist
+- `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
+- `🟡 Partial`: implemented but with known semantic or coverage gaps.
+- `❌ Missing`: not implemented (or intentionally out of scope for now).
+
+## Core Language
+- ✅ Numbers, strings, keywords, symbols, bool, nil
+- ✅ `def`, `fn`, `defn`, multi-arity fns, closures
+- ✅ `let`, `loop/recur`
+- ✅ Collections: vector, map, set basics
+- ✅ Metadata primitives (`meta`, `with-meta`, `vary-meta`) + def/defn metadata forms
+- ✅ Exceptions: `throw`, `try/catch` (typed + catch-all)
+- ✅ Protocol/multimethod baseline (`defprotocol`, `defmulti`, `defmethod`, dispatch)
+- ✅ Hierarchy + introspection (`derive`, `isa?`, `parents`, `ancestors`, `descendants`, `methods`, `get-method`, `prefers`, `satisfies?`, `extends?`, `implements?`)
+
+## Runtime / Execution
+- ✅ `run` and `repl` support JIT path and parity-tested against legacy path
+- ✅ Semantics suite executes both engines (`CLORUS_TEST_ENGINES="jit legacy"`)
+- 🟡 AOT path exists but needs production hardening checklist (separate track)
+
+## Clojure-Parity Gaps (No Java Interop)
+- 🟡 Reader parity (reader-discard `#_` implemented, including trailing-discard edge cases; remaining reader forms and edge cases)
+- 🟡 Macro tooling parity (`&env`/`&form` + auto-gensym hygiene baseline implemented; deeper hygiene edge cases remain)
+- 🟡 Namespace ergonomics parity (baseline `:refer`/`:rename` implemented; alias edge cases remain)
+- 🟡 Dynamic vars parity (`binding` + `set!` baseline covered; deeper semantics still open)
+- 🟡 Data/collection API parity long tail (`get-in`, `assoc-in`, `update-in`, etc. parity + edge tests)
+- 🟡 Exception data APIs parity (`ex-info`, `ex-data`) deep behavior checks
+
+## Explicitly Out of Scope for this parity target
+- ❌ JVM/Java interop
+
+## Next Milestone Checklist (Recommended order)
+- [x] Freeze this file as source-of-truth for parity status updates.
+- [x] Add missing parity tests first (before new runtime/compiler work) for:
+  - [x] reader discard + trailing-discard edges
+  - [x] macroexpand/gensym behavior
+  - [x] namespace options (`:refer`, `:rename`)
+  - [x] dynamic var semantics edge cases (`binding`, nested restore, `set!` in dynamic frame)
+- [x] Implement only failing parity cases revealed by those tests.
+- [x] Keep `jit` and `legacy` both green for every parity PR.
+- [ ] When legacy path is retired, keep one semantic matrix runner that compares modes where still relevant.
+
+## Active Execution Queue (Feature-by-Feature)
+- [ ] Reader parity: add remaining non-`#_` reader forms and close failures
+- [x] Macro tooling parity: add `&env` tests
+- [x] Macro tooling parity: add `&form` tests
+- [x] Macro hygiene edge cases: test + baseline fix (auto-gensym in syntax-quote)
+- [x] Namespace ergonomics: alias/refer/rename edge-case matrix
+  - [x] local shadowing vs `:refer`/`:rename` (alias and full-qualified access remain available)
+  - [x] alias/import collision detection with deterministic compiler errors
+  - [x] remaining alias/refer/rename collision and error-path cases
+- [x] Dynamic vars: finish `set!` semantics and edge coverage
+- [x] Dynamic vars: nested restoration and function-boundary behavior
+- [x] Collections parity: `get-in` deep edge matrix
+- [x] Collections parity: `assoc-in` deep edge matrix
+- [x] Collections parity: `update-in` deep edge matrix
+- [x] Exception data parity: `ex-info` behavior matrix
+- [x] Exception data parity: `ex-data` propagation/rethrow baseline
+- [x] Re-run full `jit+legacy` suite and refresh baseline counts
+
+## Step 1 Closure (Language Parity Stabilization)
+- Status: 🔄 Reopened (strict closure requested).
+- Strict exit criteria:
+  - `jit` + `legacy` both green on full suite.
+  - Reader parity matrix complete (not only `#_` cases).
+  - Dynamic-var semantics matrix complete (nested/function/throw + edge behavior).
+  - Exception data matrix complete (`ex-info`/`ex-data` propagation + rethrow paths).
+  - Namespace resolution/error-path matrix complete (`:require`, `:refer`, `:rename`, alias collisions).
+- Only after these are closed do we mark Step 1 as complete.

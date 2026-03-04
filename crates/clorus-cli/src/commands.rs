@@ -154,11 +154,24 @@ fn namespace_to_path(namespace: &str, base_path: &Path) -> Result<PathBuf, Strin
     // Check if this is a clorus.* namespace (stdlib)
     if parts[0] == "clorus" {
         // Clojure-style mapping: clorus.set -> stdlib/clorus/set.clr
-        // Search CLORUS_HOME/stdlib first, then ~/.clorus/stdlib.
-        let stdlib_paths = vec![
+        // Search order:
+        // 1) CLORUS_HOME/stdlib
+        // 2) ~/.clorus/stdlib
+        // 3) cwd/stdlib (repo/project local)
+        // 4) paths relative to current executable (installed/repo layouts)
+        let mut stdlib_paths = vec![
             std::env::var("CLORUS_HOME").ok().map(|home| PathBuf::from(home).join("stdlib")),
             std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".clorus/stdlib")),
+            Some(base_path.join("stdlib")),
         ];
+
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                stdlib_paths.push(Some(exe_dir.join("../stdlib"))); // installed layout
+                stdlib_paths.push(Some(exe_dir.join("../../stdlib"))); // repo target/{debug,release}
+                stdlib_paths.push(Some(exe_dir.join("../../../stdlib"))); // extra fallback
+            }
+        }
 
         // Convert clorus.string.utils -> clorus/string/utils.clr
         let mut ns_path = PathBuf::new();
@@ -1070,25 +1083,33 @@ fn load_and_compile_modules<'ctx>(
         // We preserve hyphens in the file path (e.g., text-field.core -> text-field/core.clrs)
         let module_path = module_name.replace('.', "/");
 
-        // Try each source directory in order, checking both .clrs and .clr extensions
-        let mut module_file = None;
-        for src_dir in source_dirs {
-            // Try .clrs first (source files)
-            let candidate_clrs = project_root
-                .join(src_dir)
-                .join(format!("{}.clrs", module_path));
-            if candidate_clrs.exists() {
-                module_file = Some(candidate_clrs);
-                break;
-            }
+        // Try resolving clorus.* stdlib namespaces first.
+        let mut module_file = if module_name.starts_with("clorus.") {
+            namespace_to_path(module_name, project_root).ok()
+        } else {
+            None
+        };
 
-            // Fall back to .clr (library/stdlib files)
-            let candidate_clr = project_root
-                .join(src_dir)
-                .join(format!("{}.clr", module_path));
-            if candidate_clr.exists() {
-                module_file = Some(candidate_clr);
-                break;
+        // For project namespaces, try each source directory in order.
+        if module_file.is_none() {
+            for src_dir in source_dirs {
+                // Try .clrs first (source files)
+                let candidate_clrs = project_root
+                    .join(src_dir)
+                    .join(format!("{}.clrs", module_path));
+                if candidate_clrs.exists() {
+                    module_file = Some(candidate_clrs);
+                    break;
+                }
+
+                // Fall back to .clr (library/stdlib files)
+                let candidate_clr = project_root
+                    .join(src_dir)
+                    .join(format!("{}.clr", module_path));
+                if candidate_clr.exists() {
+                    module_file = Some(candidate_clr);
+                    break;
+                }
             }
         }
 
