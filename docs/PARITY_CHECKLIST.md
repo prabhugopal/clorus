@@ -28,7 +28,7 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - 🟡 Macro tooling parity (`&env`/`&form` + auto-gensym hygiene baseline implemented; deeper hygiene edge cases remain)
 - 🟡 Namespace ergonomics parity (baseline `:refer`/`:rename` implemented; alias edge cases remain)
 - 🟡 Dynamic vars parity (`binding` + `set!` baseline covered; deeper semantics still open)
-- 🟡 Data/collection API parity long tail (core edge/error paths mostly closed; remaining deep semantics focus on sort/comparator behavior and selected long-tail contracts)
+- 🟡 Data/collection API parity long tail (core edge/error paths mostly closed; remaining deep semantics focus on mixed-domain ordering behavior and selected long-tail contracts)
 - 🟡 Exception data APIs parity (`ex-info`, `ex-data`) deep behavior checks
 
 ## Stdlib Parity Tracking

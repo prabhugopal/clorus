@@ -38,7 +38,7 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 
 ## Sequence Construction Helpers
 - ✅ `range`, `repeat`, `repeatedly`, `cycle`, `iterate`
-- ✅ `sort`, `sort-by` stable baseline (numeric path + comparator arities + duplicate-key stability checks)
+- ✅ `sort`, `sort-by` stable baseline (numeric path + comparator arities + duplicate-key stability checks + boolean/compare-style comparator returns)
 - ✅ `zipmap`, `frequencies`, `group-by`, `remove` (bad-arg checks covered)
 
 ## Exception Helpers
@@ -49,8 +49,8 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 - ✅ regex API baseline: `re-find`, `re-matches`, `re-seq`, `re-replace`, `re-replace-first`
 
 ## Residual Gaps (Narrow, Explicit)
-1. `sort`/`sort-by` now support comparator arities with stable tie behavior.
-   - Missing: full Clojure comparator contract parity (boolean + compare-style numeric-return comparators across mixed domains).
+1. `sort`/`sort-by` now support comparator arities with stable tie behavior and boolean/compare-style numeric comparator returns.
+   - Missing: full Clojure ordering parity across mixed/non-numeric domains.
 2. Regex support is baseline complete for core APIs and capture-group behavior.
    - Missing: deeper Clojure compatibility details (compiled-pattern object identity, full invalid-pattern exception parity).
 3. Stdlib long-tail is now mostly covered for core bad-arg/arity paths.
@@ -66,5 +66,5 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 - Gated runtime call-site diagnostics behind `CLORUS_LOG_CALL_ERRORS` to keep normal test/runtime output parity-clean.
 
 ## Execution Plan (Chunked)
-1. Expand `sort`/`sort-by` semantics matrix beyond numeric baseline.
+1. Expand `sort`/`sort-by` semantics matrix for mixed-domain ordering behavior.
 2. Expand regex compatibility from baseline API parity to full Clojure edge semantics.
