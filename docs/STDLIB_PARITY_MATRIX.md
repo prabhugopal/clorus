@@ -1,7 +1,7 @@
-q# Clorus Stdlib Parity Matrix (`clorus.core`)
+# Clorus Stdlib Parity Matrix (`clorus.core`)
 
 Last updated: 2026-03-04  
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 203, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 205, Failed 0, Skipped 1.
 
 This is the working source-of-truth for **stdlib parity execution** (separate from core language/compiler parity).
 
@@ -44,7 +44,7 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 - ✅ `ex-info`, `exception?`, `ex-data`, `ex-message`, `ex-cause`
 
 ## Highest-Priority Remaining Gaps
-1. Add explicit error-message parity tests for stdlib arity and bad-arg paths.
+1. Add broader explicit error-path parity tests for stdlib arity and bad-arg paths (baseline compile-arity coverage added for `update`).
 2. Continue stdlib long-tail parity (`core` helpers still marked partial in checklist).
 
 ## Execution Plan (Chunked)

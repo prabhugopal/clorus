@@ -1,7 +1,7 @@
 # Clorus Clojure Parity Checklist
 
 Last updated: 2026-03-04
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 203, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 205, Failed 0, Skipped 1.
 
 ## How to use this checklist
 - `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
@@ -67,6 +67,7 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - [x] Exception data parity: `ex-data` propagation/rethrow baseline
 - [x] Exception data parity: nested cause chain (`ex-cause`) preservation on rethrow
 - [x] Transducer parity: `completing` + `transduce` completion-arity behavior
+- [x] Stdlib compile-arity error baseline (`update` wrong-arity compile path)
 - [x] Re-run full `jit+legacy` suite and refresh baseline counts
 
 ## Step 1 Closure (Language Parity Stabilization)
@@ -77,4 +78,4 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
   - Dynamic-var semantics matrix completed (nested/function/throw + edge behavior).
   - Exception data matrix completed (`ex-info`/`ex-data` propagation + rethrow paths).
   - Namespace resolution/error-path matrix completed (`:require`, `:refer`, `:rename`, alias/import collisions).
-  - Latest suite baseline after closure work: `Passed 203, Failed 0, Skipped 1`.
+  - Latest suite baseline after closure work: `Passed 205, Failed 0, Skipped 1`.

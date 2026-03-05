@@ -2302,6 +2302,13 @@ impl<'ctx> CodeGen<'ctx> {
         best.map(|(_, name)| name)
     }
 
+    fn has_any_arity_variants(&self, function_base_name: &str) -> bool {
+        let prefix = format!("{}_arity_", function_base_name);
+        self.function_signatures
+            .keys()
+            .any(|name| name.starts_with(&prefix))
+    }
+
     /// Helper: Compile a quoted expression (returns data, not evaluated)
     fn compile_quoted(&mut self, expr: &Expr) -> Result<PointerValue<'ctx>, String> {
         match expr {
@@ -9023,6 +9030,20 @@ impl<'ctx> CodeGen<'ctx> {
                             ));
                         }
                     } else {
+                        // If there are generated arity variants for this symbol, do not fall
+                        // back to a base-name function body when no matching arity exists.
+                        // That fallback can select an incompatible function signature.
+                        if self.has_any_arity_variants(&function_to_lookup)
+                            || (function_to_lookup != *func
+                                && self.has_any_arity_variants(func))
+                        {
+                            return Err(format!(
+                                "Arity mismatch: function '{}' has no {}-arity variant",
+                                func,
+                                arg_values.len()
+                            ));
+                        }
+
                         // Try regular function lookup
                         let func = self
                             .functions
@@ -9068,6 +9089,13 @@ impl<'ctx> CodeGen<'ctx> {
                             arg_values.push(arg);
                         }
                         arg_values.push(rest_vec);
+                    } else if arg_values.len() != fixed_params {
+                        return Err(format!(
+                            "Arity mismatch: function '{}' expects {}, got {}",
+                            function_name,
+                            fixed_params,
+                            arg_values.len()
+                        ));
                     }
                 }
 
