@@ -1,4 +1,4 @@
-; EXPECT_COMPILE_ERROR: expects at least 6 argument(s), got 1
+; EXPECT_COMPILE_ERROR: Arity mismatch: function 'update' has no 1-arity variant
 (ns tests.stdlib.test-core-update-compile-arity-error)
 
 (defn -main [& _args]
