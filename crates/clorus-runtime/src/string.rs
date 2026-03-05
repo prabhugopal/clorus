@@ -150,6 +150,28 @@ unsafe fn get_string_value(val: *mut Value) -> Option<String> {
     }
 }
 
+unsafe fn captures_to_value(caps: &regex_lite::Captures<'_>) -> *mut Value {
+    if caps.len() <= 1 {
+        return match caps.get(0) {
+            Some(full) => rust_string_to_value(full.as_str().to_string()),
+            None => Value::nil(),
+        };
+    }
+
+    let mut out = crate::vector::clorus_vector_empty();
+    for idx in 0..caps.len() {
+        let capture_val = match caps.get(idx) {
+            Some(m) => rust_string_to_value(m.as_str().to_string()),
+            None => Value::nil(),
+        };
+        let next = crate::vector::clorus_vector_conj(out, capture_val);
+        crate::value::clorus_release(out);
+        crate::value::clorus_release(capture_val);
+        out = next;
+    }
+    out
+}
+
 // ============================================================================
 // Core String Operations
 // ============================================================================
@@ -488,8 +510,8 @@ pub extern "C" fn clorus_re_find(pattern: *mut Value, s: *mut Value) -> *mut Val
             Err(_) => return Value::nil(),
         };
 
-        match re.find(&input) {
-            Some(m) => rust_string_to_value(m.as_str().to_string()),
+        match re.captures(&input) {
+            Some(caps) => captures_to_value(&caps),
             None => Value::nil(),
         }
     }
@@ -519,7 +541,7 @@ pub extern "C" fn clorus_re_matches(pattern: *mut Value, s: *mut Value) -> *mut 
         if let Some(caps) = re.captures(&input) {
             if let Some(full) = caps.get(0) {
                 if full.start() == 0 && full.end() == input.len() {
-                    return rust_string_to_value(full.as_str().to_string());
+                    return captures_to_value(&caps);
                 }
             }
         }
@@ -546,8 +568,8 @@ pub extern "C" fn clorus_re_seq(pattern: *mut Value, s: *mut Value) -> *mut Valu
         };
 
         let mut result = crate::vector::clorus_vector_empty();
-        for m in re.find_iter(&input) {
-            let mv = rust_string_to_value(m.as_str().to_string());
+        for caps in re.captures_iter(&input) {
+            let mv = captures_to_value(&caps);
             let next = crate::vector::clorus_vector_conj(result, mv);
             crate::value::clorus_release(result);
             crate::value::clorus_release(mv);
@@ -569,14 +591,31 @@ pub extern "C" fn clorus_re_replace(s: *mut Value, pattern: *mut Value, replacem
             Some(p) => p,
             None => return rust_string_to_value(input),
         };
-        let replacement = match get_string_value(replacement) {
-            Some(r) => r,
-            None => String::new(),
-        };
-
         let re = match Regex::new(&pattern) {
             Ok(re) => re,
             Err(_) => return rust_string_to_value(input),
+        };
+
+        if crate::value::clorus_is_fn(replacement) {
+            let replaced = re.replace_all(&input, |caps: &regex_lite::Captures<'_>| unsafe {
+                let match_val = captures_to_value(caps);
+                let args = [match_val];
+                let ret = crate::function::clorus_function_call(replacement, args.as_ptr(), 1);
+                crate::value::clorus_release(match_val);
+
+                let out = match get_string_value(ret) {
+                    Some(s) => s,
+                    None => value_to_pr_string(ret),
+                };
+                crate::value::clorus_release(ret);
+                out
+            });
+            return rust_string_to_value(replaced.to_string());
+        }
+
+        let replacement = match get_string_value(replacement) {
+            Some(r) => r,
+            None => String::new(),
         };
         rust_string_to_value(re.replace_all(&input, replacement.as_str()).to_string())
     }
@@ -598,14 +637,31 @@ pub extern "C" fn clorus_re_replace_first(
             Some(p) => p,
             None => return rust_string_to_value(input),
         };
-        let replacement = match get_string_value(replacement) {
-            Some(r) => r,
-            None => String::new(),
-        };
-
         let re = match Regex::new(&pattern) {
             Ok(re) => re,
             Err(_) => return rust_string_to_value(input),
+        };
+
+        if crate::value::clorus_is_fn(replacement) {
+            let replaced = re.replace(&input, |caps: &regex_lite::Captures<'_>| unsafe {
+                let match_val = captures_to_value(caps);
+                let args = [match_val];
+                let ret = crate::function::clorus_function_call(replacement, args.as_ptr(), 1);
+                crate::value::clorus_release(match_val);
+
+                let out = match get_string_value(ret) {
+                    Some(s) => s,
+                    None => value_to_pr_string(ret),
+                };
+                crate::value::clorus_release(ret);
+                out
+            });
+            return rust_string_to_value(replaced.to_string());
+        }
+
+        let replacement = match get_string_value(replacement) {
+            Some(r) => r,
+            None => String::new(),
         };
         rust_string_to_value(re.replace(&input, replacement.as_str()).to_string())
     }

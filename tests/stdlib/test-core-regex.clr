@@ -9,9 +9,24 @@
   (do
     (assert-eq "re-find hit" (re-find #"[0-9]+" "abc123def") "123")
     (assert-eq "re-find miss" (re-find #"[0-9]+" "abcdef") nil)
+    (assert-eq "re-find groups" (re-find #"([a-z]+)([0-9]+)" "abc123def") ["abc123" "abc" "123"])
     (assert-eq "re-matches full" (re-matches #"[0-9]+" "12345") "12345")
     (assert-eq "re-matches partial miss" (re-matches #"[0-9]+" "a12345") nil)
+    (assert-eq "re-matches groups" (re-matches #"([a-z]+)([0-9]+)" "abc123") ["abc123" "abc" "123"])
     (assert-eq "re-seq matches" (re-seq #"[0-9]+" "a1b22c333") ["1" "22" "333"])
+    (assert-eq "re-seq groups" (re-seq #"([a-z])([0-9])" "a1b2") [["a1" "a" "1"] ["b2" "b" "2"]])
     (assert-eq "re-replace all" (re-replace "a1b22c333" #"[0-9]+" "X") "aXbXcX")
     (assert-eq "re-replace-first only first" (re-replace-first "a1b22c333" #"[0-9]+" "X") "aXb22c333")
+    (assert-eq
+      "re-replace fn replacement"
+      (re-replace "a1b22c333" #"[0-9]+" (fn [m] (str "<" m ">")))
+      "a<1>b<22>c<333>")
+    (assert-eq
+      "re-replace fn groups"
+      (re-replace "x12y34" #"([a-z])([0-9]+)" (fn [m] (str "[" (nth m 2) ":" (nth m 1) "]")))
+      "[12:x][34:y]")
+    (assert-eq
+      "re-replace-first fn replacement"
+      (re-replace-first "a1b22c333" #"[0-9]+" (fn [m] (str "<" m ">")))
+      "a<1>b22c333")
     "PASS"))
