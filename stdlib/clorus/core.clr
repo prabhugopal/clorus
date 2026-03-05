@@ -502,6 +502,14 @@
           (concat [r] (merge-sorted-numeric left (rest right))))))))
 
 ;; stable merge helper for comparator-based sort
+(defn sort-comp-before? [comp a b]
+  (let [v (comp a b)]
+    (if (boolean? v)
+      v
+      (if (number? v)
+        (< v 0)
+        (throw "sort comparator must return boolean or number")))))
+
 (defn merge-sorted-with [comp left right]
   (if (empty? left)
     right
@@ -511,9 +519,9 @@
             r (first right)]
         ;; Stable tie-break: if neither element is strictly before the other,
         ;; keep left first.
-        (if (comp l r)
+        (if (sort-comp-before? comp l r)
           (concat [l] (merge-sorted-with comp (rest left) right))
-          (if (comp r l)
+          (if (sort-comp-before? comp r l)
             (concat [r] (merge-sorted-with comp left (rest right)))
             (concat [l] (merge-sorted-with comp (rest left) right))))))))
 
@@ -565,12 +573,19 @@
             r (first right)
             lk (keyfn l)
             rk (keyfn r)]
+        (let [before? (fn [a b]
+                        (let [v (comp a b)]
+                          (if (boolean? v)
+                            v
+                            (if (number? v)
+                              (< v 0)
+                              (throw "sort-by comparator must return boolean or number")))))]
         ;; Stable tie-break for equal keys.
-        (if (comp lk rk)
-          (concat [l] (merge-sorted-by-key-with keyfn comp (rest left) right))
-          (if (comp rk lk)
-            (concat [r] (merge-sorted-by-key-with keyfn comp left (rest right)))
-            (concat [l] (merge-sorted-by-key-with keyfn comp (rest left) right))))))))
+          (if (before? lk rk)
+            (concat [l] (merge-sorted-by-key-with keyfn comp (rest left) right))
+            (if (before? rk lk)
+              (concat [r] (merge-sorted-by-key-with keyfn comp left (rest right)))
+              (concat [l] (merge-sorted-by-key-with keyfn comp (rest left) right)))))))))
 
 (defn sort-by
   ([keyfn coll]
