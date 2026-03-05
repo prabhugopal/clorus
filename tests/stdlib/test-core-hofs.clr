@@ -17,6 +17,15 @@
 
 (defn -main [& _args]
   (do
+    (assert-vec "map preserves order"
+                (map inc [1 2 3])
+                [2 3 4])
+    (assert-vec "map with variadic closure values"
+                (map (constantly 9) [1 2 3])
+                [9 9 9])
+    (assert-vec "filter preserves order"
+                (filter odd? [1 2 3 4 5])
+                [1 3 5])
     (assert-vec "keep non-nil"
                 (keep (fn [x] (if (odd? x) x nil)) [1 2 3 4])
                 [1 3])

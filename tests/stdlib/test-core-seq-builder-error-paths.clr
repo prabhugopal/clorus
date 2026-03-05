@@ -1,0 +1,26 @@
+(ns tests.stdlib.test-core-seq-builder-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "repeat non-number throws" (throws? (fn [] (repeat "x" 1))) true)
+    (assert-eq "repeatedly non-number throws" (throws? (fn [] (repeatedly "x" (fn [] 1)))) true)
+    (assert-eq "repeatedly non-fn throws" (throws? (fn [] (repeatedly 2 1))) true)
+    (assert-eq "cycle non-number throws" (throws? (fn [] (cycle "x" [1 2]))) true)
+    (assert-eq "cycle non-coll throws" (throws? (fn [] (cycle 2 1))) true)
+    (assert-eq "iterate non-number throws" (throws? (fn [] (iterate "x" inc 0))) true)
+    (assert-eq "iterate non-fn throws" (throws? (fn [] (iterate 2 1 0))) true)
+    (assert-eq "remove non-fn throws" (throws? (fn [] (remove 1 [1 2 3]))) true)
+    "PASS"))

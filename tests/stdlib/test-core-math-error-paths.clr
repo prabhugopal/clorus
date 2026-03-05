@@ -1,0 +1,28 @@
+(ns tests.stdlib.test-core-math-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "abs non-number throws" (throws? (fn [] (abs :x))) true)
+    (assert-eq "min non-number throws" (throws? (fn [] (min 1 :x))) true)
+    (assert-eq "max non-number throws" (throws? (fn [] (max :x 1))) true)
+    (assert-eq "sum non-coll throws" (throws? (fn [] (sum 1))) true)
+    (assert-eq "product non-coll throws" (throws? (fn [] (product 1))) true)
+    (assert-eq "quot non-number throws" (throws? (fn [] (quot :x 2))) true)
+    (assert-eq "rem non-number throws" (throws? (fn [] (rem 1 :x))) true)
+    (assert-eq "floor non-number throws" (throws? (fn [] (floor :x))) true)
+    (assert-eq "ceil non-number throws" (throws? (fn [] (ceil :x))) true)
+    (assert-eq "round non-number throws" (throws? (fn [] (round :x))) true)
+    "PASS"))

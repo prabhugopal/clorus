@@ -1,0 +1,37 @@
+(ns tests.stdlib.test-core-long-tail-3)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn assert-vec [label actual expected]
+  (do
+    (assert-eq (str label " count") (count actual) (count expected))
+    (loop [i 0]
+      (if (< i (count expected))
+        (do
+          (assert-eq (str label " idx=" i) (nth actual i) (nth expected i))
+          (recur (+ i 1)))
+        true))))
+
+(defn -main [& _args]
+  (do
+    ;; ordering and empty-edge behavior
+    (assert-vec "map order" (map inc [1 2 3]) [2 3 4])
+    (assert-vec "filter order" (filter odd? [1 2 3 4 5]) [1 3 5])
+    (assert-vec "take edge n=0" (take 0 [1 2 3]) [])
+    (assert-vec "drop edge n=0" (drop 0 [1 2 3]) [1 2 3])
+    (assert-vec "range empty" (range 0) [])
+    (assert-vec "range equal bounds" (range 3 3) [])
+    (assert-vec "repeat 0" (repeat 0 :x) [])
+    (assert-vec "repeatedly 0" (repeatedly 0 (fn [] 7)) [])
+    (assert-vec "cycle 0" (cycle 0 [1 2]) [])
+    (assert-vec "iterate 0" (iterate 0 inc 5) [])
+
+    ;; sort/sort-by stable behavior checks for simple inputs
+    (assert-vec "sort duplicates" (sort [3 1 2 1]) [1 1 2 3])
+    (assert-vec "sort-by duplicates"
+                (sort-by (fn [x] (nth x 0)) [[2 "b"] [1 "a"] [1 "x"]])
+                [[1 "a"] [1 "x"] [2 "b"]])
+    "PASS"))

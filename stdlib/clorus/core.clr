@@ -53,7 +53,7 @@
 (defn take [n coll]
   (if (or (<= n 0) (empty? coll))
     []
-    (conj (take (dec n) (rest coll)) (first coll))))
+    (concat [(first coll)] (take (dec n) (rest coll)))))
 
 ;; drop - Drop first n elements
 ;; Example: (drop 2 [1 2 3 4 5]) ; => [3 4 5]
@@ -67,7 +67,7 @@
 (defn map [f coll]
   (if (empty? coll)
     []
-    (conj (map f (rest coll)) (f (first coll)))))
+    (concat [(f (first coll))] (map f (rest coll)))))
 
 ;; filter - Keep only elements that satisfy predicate
 ;; Example: (filter odd? [1 2 3 4]) ; => [1 3]
@@ -75,7 +75,7 @@
   (if (empty? coll)
     []
     (if (pred (first coll))
-      (conj (filter pred (rest coll)) (first coll))
+      (concat [(first coll)] (filter pred (rest coll)))
       (filter pred (rest coll)))))
 
 ;; keep - Apply f to items and keep non-nil results
@@ -204,6 +204,22 @@
 ;; Collection Utilities
 ;; ============================================================================
 
+;; Validation helpers used by stdlib collection/math functions.
+(defn ensure-number [fname n]
+  (if (number? n)
+    n
+    (throw (str fname " expects number"))))
+
+(defn ensure-fn [fname f]
+  (if (fn? f)
+    f
+    (throw (str fname " expects function"))))
+
+(defn ensure-coll [fname coll]
+  (if (coll? coll)
+    coll
+    (throw (str fname " expects collection"))))
+
 ;; conj - Add element to collection (at end for vectors)
 ;; Simple implementation that works with vectors
 ;; Example: (conj [1 2 3] 4) ; => [1 2 3 4]
@@ -213,101 +229,127 @@
 ;; zipmap - Create map from keys and values vectors
 ;; Example: (zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
 (defn zipmap [keys vals]
-  (loop [m {}
-         ks keys
-         vs vals]
-    (if (or (empty? ks) (empty? vs))
-      m
-      (recur (assoc m (first ks) (first vs))
-             (rest ks)
-             (rest vs)))))
+  (let [keys (ensure-coll "zipmap" keys)
+        vals (ensure-coll "zipmap" vals)]
+    (loop [m {}
+           ks keys
+           vs vals]
+      (if (or (empty? ks) (empty? vs))
+        m
+        (recur (assoc m (first ks) (first vs))
+               (rest ks)
+               (rest vs)))))
+  )
 
 ;; frequencies - Count occurrences of each element
 ;; Example: (frequencies [1 2 1 3 2 1]) ; => {1 3, 2 2, 3 1}
 (defn frequencies [coll]
-  (reduce (fn [m x]
-            (assoc m x (inc (get m x 0))))
-          {}
-          coll))
+  (let [coll (ensure-coll "frequencies" coll)]
+    (reduce (fn [m x]
+              (assoc m x (inc (get m x 0))))
+            {}
+            coll)))
 
 ;; group-by - Group elements by a key function
 ;; Example: (group-by even? [1 2 3 4 5 6]) ; => {false [1 3 5], true [2 4 6]}
 (defn group-by [f coll]
-  (reduce (fn [m x]
-            (let [k (f x)]
-              (assoc m k (conj (get m k []) x))))
-          {}
-          coll))
+  (let [f (ensure-fn "group-by" f)
+        coll (ensure-coll "group-by" coll)]
+    (reduce (fn [m x]
+              (let [k (f x)]
+                (assoc m k (conj (get m k []) x))))
+            {}
+            coll)))
 
 ;; partition - Partition collection into chunks of size n
 ;; Example: (partition 2 [1 2 3 4 5 6]) ; => [[1 2] [3 4] [5 6]]
 (defn partition [n coll]
-  (if (< (count coll) n)
-    []
-    (let [chunk (take n coll)
-          remaining (drop n coll)]
-      (conj (partition n remaining) chunk))))
+  (let [n (ensure-number "partition" n)
+        coll (ensure-coll "partition" coll)]
+    (if (<= n 0)
+      (throw "partition expects positive n")
+      (if (< (count coll) n)
+        []
+        (let [chunk (take n coll)
+              remaining (drop n coll)]
+          (conj (partition n remaining) chunk))))))
 
 ;; partition-all - Like partition but includes incomplete final chunk
 ;; Example: (partition-all 2 [1 2 3 4 5]) ; => [[1 2] [3 4] [5]]
 (defn partition-all [n coll]
-  (if (empty? coll)
-    []
-    (let [chunk (take n coll)
-          remaining (drop n coll)]
-      (conj (partition-all n remaining) chunk))))
+  (let [n (ensure-number "partition-all" n)
+        coll (ensure-coll "partition-all" coll)]
+    (if (<= n 0)
+      (throw "partition-all expects positive n")
+      (if (empty? coll)
+        []
+        (let [chunk (take n coll)
+              remaining (drop n coll)]
+          (conj (partition-all n remaining) chunk))))))
 
 ;; partition-by - Partition collection by consecutive runs of (f item)
 ;; Example: (partition-by odd? [1 3 2 4 5]) ; => [[1 3] [2 4] [5]]
 (defn partition-by [f coll]
-  (if (empty? coll)
-    []
-    (loop [remaining (rest coll)
-           current-key (f (first coll))
-           current-group [(first coll)]
-           result []]
-      (if (empty? remaining)
-        (conj result current-group)
-        (let [x (first remaining)
-              k (f x)]
-          (if (= k current-key)
-            (recur (rest remaining)
-                   current-key
-                   (conj current-group x)
-                   result)
-            (recur (rest remaining)
-                   k
-                   [x]
-                   (conj result current-group))))))))
+  (let [f (ensure-fn "partition-by" f)
+        coll (ensure-coll "partition-by" coll)]
+    (if (empty? coll)
+      []
+      (loop [remaining (rest coll)
+             current-key (f (first coll))
+             current-group [(first coll)]
+             result []]
+        (if (empty? remaining)
+          (conj result current-group)
+          (let [x (first remaining)
+                k (f x)]
+            (if (= k current-key)
+              (recur (rest remaining)
+                     current-key
+                     (conj current-group x)
+                     result)
+              (recur (rest remaining)
+                     k
+                     [x]
+                     (conj result current-group)))))))))
 
 ;; take-while - Take elements while predicate is true
 ;; Example: (take-while (partial > 5) [1 2 3 6 7 1]) ; => [1 2 3]
 (defn take-while [pred coll]
-  (if (empty? coll)
-    []
-    (let [x (first coll)]
-      (if (pred x)
-        (conj (take-while pred (rest coll)) x)
-        []))))
+  (let [pred (ensure-fn "take-while" pred)
+        coll (ensure-coll "take-while" coll)]
+    (if (empty? coll)
+      []
+      (let [x (first coll)]
+        (if (pred x)
+          (conj (take-while pred (rest coll)) x)
+          [])))))
 
 ;; drop-while - Drop elements while predicate is true
 ;; Example: (drop-while (partial > 5) [1 2 3 6 7 1]) ; => [6 7 1]
 (defn drop-while [pred coll]
-  (if (empty? coll)
-    []
-    (if (pred (first coll))
-      (drop-while pred (rest coll))
-      coll)))
+  (let [pred (ensure-fn "drop-while" pred)
+        coll (ensure-coll "drop-while" coll)]
+    (if (empty? coll)
+      []
+      (if (pred (first coll))
+        (drop-while pred (rest coll))
+        coll))))
 
 ;; split-at - Split collection at index n
 ;; Example: (split-at 3 [1 2 3 4 5]) ; => [[1 2 3] [4 5]]
 (defn split-at [n coll]
-  [(take n coll) (drop n coll)])
+  (if (number? n)
+    (if (coll? coll)
+      [(take n coll) (drop n coll)]
+      (throw "split-at expects collection"))
+    (throw "split-at expects number")))
 
 ;; split-with - Split collection where predicate changes from true to false
 ;; Example: (split-with (partial > 5) [1 2 3 6 7 1]) ; => [[1 2 3] [6 7 1]]
 (defn split-with [pred coll]
-  [(take-while pred coll) (drop-while pred coll)])
+  (let [pred (ensure-fn "split-with" pred)
+        coll (ensure-coll "split-with" coll)]
+    [(take-while pred coll) (drop-while pred coll)]))
 
 ;; ============================================================================
 ;; Math Utilities
@@ -315,33 +357,48 @@
 
 ;; abs - Absolute value
 (defn abs [x]
-  (if (neg? x)
-    (- x)
-    x))
+  (let [x (ensure-number "abs" x)]
+    (if (neg? x)
+      (- x)
+      x)))
 
 ;; min - Return minimum of arguments
 (defn min [& args]
   (if (empty? args)
     nil
-    (reduce (fn [a b] (if (< a b) a b)) (first args) (rest args))))
+    (reduce (fn [a b]
+              (let [a (ensure-number "min" a)
+                    b (ensure-number "min" b)]
+                (if (< a b) a b)))
+            (first args)
+            (rest args))))
 
 ;; max - Return maximum of arguments
 (defn max [& args]
   (if (empty? args)
     nil
-    (reduce (fn [a b] (if (> a b) a b)) (first args) (rest args))))
+    (reduce (fn [a b]
+              (let [a (ensure-number "max" a)
+                    b (ensure-number "max" b)]
+                (if (> a b) a b)))
+            (first args)
+            (rest args))))
 
 ;; sum - Sum of collection
 (defn sum [coll]
-  (reduce (fn [a b] (+ a b)) 0 coll))
+  (let [coll (ensure-coll "sum" coll)]
+    (reduce (fn [a b] (+ a b)) 0 coll)))
 
 ;; product - Product of collection
 (defn product [coll]
-  (reduce (fn [a b] (* a b)) 1 coll))
+  (let [coll (ensure-coll "product" coll)]
+    (reduce (fn [a b] (* a b)) 1 coll)))
 
 ;; quot - Integer division quotient
 (defn quot [a b]
-  (let [q (/ a b)]
+  (let [a (ensure-number "quot" a)
+        b (ensure-number "quot" b)
+        q (/ a b)]
     ;; Clojure-style truncation toward zero.
     (let [truncated (- q (mod q 1.0))]
       (if (and (< q 0.0) (not (= q truncated)))
@@ -350,12 +407,15 @@
 
 ;; rem - Integer division remainder
 (defn rem [a b]
-  (mod a b))
+  (let [a (ensure-number "rem" a)
+        b (ensure-number "rem" b)]
+    (mod a b)))
 
 ;; floor - Round down to nearest integer
 ;; Example: (floor 3.7) => 3.0, (floor -3.7) => -4.0
 (defn floor [x]
-  (let [truncated (- x (mod x 1.0))]
+  (let [x (ensure-number "floor" x)
+        truncated (- x (mod x 1.0))]
     (if (and (< x 0.0) (not (= x truncated)))
       (- truncated 1.0)
       truncated)))
@@ -363,7 +423,8 @@
 ;; ceil - Round up to nearest integer
 ;; Example: (ceil 3.2) => 4.0, (ceil -3.2) => -3.0
 (defn ceil [x]
-  (let [truncated (- x (mod x 1.0))]
+  (let [x (ensure-number "ceil" x)
+        truncated (- x (mod x 1.0))]
     (if (and (> x 0.0) (not (= x truncated)))
       (+ truncated 1.0)
       truncated)))
@@ -371,7 +432,8 @@
 ;; round - Round to nearest integer
 ;; Example: (round 3.5) => 4.0, (round 3.4) => 3.0
 (defn round [x]
-  (let [floored (floor x)
+  (let [x (ensure-number "round" x)
+        floored (floor x)
         remainder (- x floored)]
     (if (>= remainder 0.5)
       (+ floored 1.0)
@@ -412,36 +474,140 @@
     []
     (conj (butlast (rest coll)) (first coll))))
 
+(defn all-number? [coll]
+  (if (empty? coll)
+    true
+    (if (number? (first coll))
+      (all-number? (rest coll))
+      false)))
 
-;; sort - Sort collection (simple bubble sort for now)
-(defn sort [coll]
-  (if (< (count coll) 2)
-    coll
-    (let [pivot (first coll)
-          rest-coll (rest coll)
-          less (filter (fn [x] (< x pivot)) rest-coll)
-          greater (filter (fn [x] (>= x pivot)) rest-coll)]
-      (concat (sort less) [pivot] (sort greater)))))
+(defn all-number-keys? [keyfn coll]
+  (if (empty? coll)
+    true
+    (if (number? (keyfn (first coll)))
+      (all-number-keys? keyfn (rest coll))
+      false)))
+
+
+;; stable merge helper for numeric sort
+(defn merge-sorted-numeric [left right]
+  (if (empty? left)
+    right
+    (if (empty? right)
+      left
+      (let [l (first left)
+            r (first right)]
+        (if (<= l r)
+          (concat [l] (merge-sorted-numeric (rest left) right))
+          (concat [r] (merge-sorted-numeric left (rest right))))))))
+
+;; stable merge helper for comparator-based sort
+(defn merge-sorted-with [comp left right]
+  (if (empty? left)
+    right
+    (if (empty? right)
+      left
+      (let [l (first left)
+            r (first right)]
+        ;; Stable tie-break: if neither element is strictly before the other,
+        ;; keep left first.
+        (if (comp l r)
+          (concat [l] (merge-sorted-with comp (rest left) right))
+          (if (comp r l)
+            (concat [r] (merge-sorted-with comp left (rest right)))
+            (concat [l] (merge-sorted-with comp (rest left) right))))))))
+
+;; sort - Stable sort
+;; 1-arity: numeric baseline
+;; 2-arity: comparator function
+(defn sort
+  ([coll]
+   (if (< (count coll) 2)
+     coll
+     (if (all-number? coll)
+       (let [n (count coll)
+             mid (quot n 2)
+             left (sort (take mid coll))
+             right (sort (drop mid coll))]
+         (merge-sorted-numeric left right))
+       (throw "sort currently supports numeric collections only"))))
+  ([comp coll]
+   (let [comp (ensure-fn "sort" comp)
+         coll (ensure-coll "sort" coll)]
+     (if (< (count coll) 2)
+       coll
+       (let [n (count coll)
+             mid (quot n 2)
+             left (sort comp (take mid coll))
+             right (sort comp (drop mid coll))]
+         (merge-sorted-with comp left right))))))
 
 ;; sort-by - Sort by key function
-(defn sort-by [keyfn coll]
-  (if (< (count coll) 2)
-    coll
-    (let [pivot (first coll)
-          pivot-key (keyfn pivot)
-          rest-coll (rest coll)
-          less (filter (fn [x] (< (keyfn x) pivot-key)) rest-coll)
-          greater (filter (fn [x] (>= (keyfn x) pivot-key)) rest-coll)]
-      (concat (sort-by keyfn less) [pivot] (sort-by keyfn greater)))))
+(defn merge-sorted-by-key [keyfn left right]
+  (if (empty? left)
+    right
+    (if (empty? right)
+      left
+      (let [l (first left)
+            r (first right)
+            lk (keyfn l)
+            rk (keyfn r)]
+        (if (<= lk rk)
+          (concat [l] (merge-sorted-by-key keyfn (rest left) right))
+          (concat [r] (merge-sorted-by-key keyfn left (rest right))))))))
+
+(defn merge-sorted-by-key-with [keyfn comp left right]
+  (if (empty? left)
+    right
+    (if (empty? right)
+      left
+      (let [l (first left)
+            r (first right)
+            lk (keyfn l)
+            rk (keyfn r)]
+        ;; Stable tie-break for equal keys.
+        (if (comp lk rk)
+          (concat [l] (merge-sorted-by-key-with keyfn comp (rest left) right))
+          (if (comp rk lk)
+            (concat [r] (merge-sorted-by-key-with keyfn comp left (rest right)))
+            (concat [l] (merge-sorted-by-key-with keyfn comp (rest left) right))))))))
+
+(defn sort-by
+  ([keyfn coll]
+   (if (< (count coll) 2)
+     coll
+     (let [keyfn (ensure-fn "sort-by" keyfn)]
+       (if (all-number-keys? keyfn coll)
+         (let [n (count coll)
+               mid (quot n 2)
+               left (sort-by keyfn (take mid coll))
+               right (sort-by keyfn (drop mid coll))]
+           (merge-sorted-by-key keyfn left right))
+         (throw "sort-by currently supports numeric keys only")))))
+  ([keyfn comp coll]
+   (let [keyfn (ensure-fn "sort-by" keyfn)
+         comp (ensure-fn "sort-by" comp)
+         coll (ensure-coll "sort-by" coll)]
+     (if (< (count coll) 2)
+       coll
+       (let [n (count coll)
+             mid (quot n 2)
+             left (sort-by keyfn comp (take mid coll))
+             right (sort-by keyfn comp (drop mid coll))]
+         (merge-sorted-by-key-with keyfn comp left right))))))
 
 ;; range - Generate range of numbers
 ;; (range 5) => [0 1 2 3 4]
 ;; (range 2 5) => [2 3 4]
 ;; (range 0 10 2) => [0 2 4 6 8]
 (defn range-helper [start end step acc]
-  (if (>= start end)
-    acc
-    (range-helper (+ start step) end step (concat acc [start]))))
+  (if (> step 0)
+    (if (>= start end)
+      acc
+      (range-helper (+ start step) end step (concat acc [start])))
+    (if (<= start end)
+      acc
+      (range-helper (+ start step) end step (concat acc [start])))))
 
 (defn range
   ([end]
@@ -449,25 +615,32 @@
   ([start end]
    (range-helper start end 1 []))
   ([start end step]
-   (range-helper start end step [])))
+   (if (= step 0)
+     (throw "range step cannot be 0")
+     (range-helper start end step []))))
 
 ;; repeat - Repeat value n times
 (defn repeat [n x]
-  (if (<= n 0)
-    []
-    (conj (repeat (dec n) x) x)))
+  (let [n (ensure-number "repeat" n)]
+    (if (<= n 0)
+      []
+      (conj (repeat (dec n) x) x))))
 
 ;; repeatedly - Call function n times
 (defn repeatedly [n f]
-  (if (<= n 0)
-    []
-    (conj (repeatedly (dec n) f) (f))))
+  (let [n (ensure-number "repeatedly" n)
+        f (ensure-fn "repeatedly" f)]
+    (if (<= n 0)
+      []
+      (conj (repeatedly (dec n) f) (f)))))
 
 ;; cycle - Cycle through collection infinitely (returns first n cycles)
 (defn cycle [n coll]
-  (if (<= n 0)
-    []
-    (concat coll (cycle (dec n) coll))))
+  (let [n (ensure-number "cycle" n)
+        coll (ensure-coll "cycle" coll)]
+    (if (<= n 0)
+      []
+      (concat coll (cycle (dec n) coll)))))
 
 ;; iterate - Generate sequence by repeatedly applying function
 ;; (iterate 5 inc 0) => [0 1 2 3 4]
@@ -477,7 +650,9 @@
     (iterate-helper (dec n) f (f x) (conj acc x))))
 
 (defn iterate [n f x]
-  (iterate-helper n f x []))
+  (let [n (ensure-number "iterate" n)
+        f (ensure-fn "iterate" f)]
+    (iterate-helper n f x [])))
 
 ;; ============================================================================
 ;; Map Utilities
@@ -488,29 +663,55 @@
 ;; ============================================================================
 ;; Note: get, assoc, dissoc, contains? are built-in functions (implemented in compiler)
 
+(defn ensure-map [fname m]
+  (if (map? m)
+    m
+    (throw (str fname " expects map"))))
+
+(defn ensure-map-or-nil [fname m]
+  (if (or (nil? m) (map? m))
+    m
+    (throw (str fname " expects map or nil"))))
+
 ;; update - Update value in map using function
 ;; Example: (update {:count 5} :count inc) ; => {:count 6}
 (defn update
   ([m k f]
-   (assoc m k (f (get m k))))
+   (let [m (ensure-map "update" m)
+         f (ensure-fn "update" f)]
+     (assoc m k (f (get m k)))))
   ([m k f x]
-   (assoc m k (f (get m k) x)))
+   (let [m (ensure-map "update" m)
+         f (ensure-fn "update" f)]
+     (assoc m k (f (get m k) x))))
   ([m k f x y]
-   (assoc m k (f (get m k) x y)))
+   (let [m (ensure-map "update" m)
+         f (ensure-fn "update" f)]
+     (assoc m k (f (get m k) x y))))
   ([m k f x y z]
-   (assoc m k (f (get m k) x y z)))
+   (let [m (ensure-map "update" m)
+         f (ensure-fn "update" f)]
+     (assoc m k (f (get m k) x y z))))
   ([m k f x y z & more]
-   (assoc m k (apply f (get m k) x y z more))))
+   (let [m (ensure-map "update" m)
+         f (ensure-fn "update" f)]
+     (assoc m k (apply f (get m k) x y z more)))))
 
 ;; merge-with - Merge maps, combining collisions with function
 ;; Example: (merge-with + {:a 1 :b 2} {:a 10 :c 3}) ; => {:a 11 :b 2 :c 3}
 (defn merge-with
   ([f]
-   {})
+   (let [f (ensure-fn "merge-with" f)]
+     {}))
   ([f m]
-   (if m m {}))
+   (let [f (ensure-fn "merge-with" f)
+         m (ensure-map-or-nil "merge-with" m)]
+     (if m m {})))
   ([f m1 m2]
-   (let [left (if m1 m1 {})
+   (let [f (ensure-fn "merge-with" f)
+         m1 (ensure-map-or-nil "merge-with" m1)
+         m2 (ensure-map-or-nil "merge-with" m2)
+         left (if m1 m1 {})
          right (if m2 m2 {})]
      (reduce (fn [acc k]
                (if (contains? acc k)
@@ -519,55 +720,62 @@
              left
              (keys right))))
   ([f m1 m2 & ms]
-   (loop [acc (merge-with f m1 m2)
-          remaining ms]
-     (if (empty? remaining)
-       acc
-       (recur (merge-with f acc (first remaining))
-              (rest remaining))))))
+   (let [f (ensure-fn "merge-with" f)]
+     (loop [acc (merge-with f m1 m2)
+            remaining ms]
+       (if (empty? remaining)
+         acc
+         (recur (merge-with f acc (first remaining))
+                (rest remaining)))))))
 
 ;; keys - Get all keys from map
 ;; Example: (keys {:a 1 :b 2}) ; => [:a :b]
 (defn keys [m]
-  (reduce (fn [result [k _v]]
+  (let [m (ensure-map "keys" m)]
+    (reduce (fn [result [k _v]]
             (conj result k))
           []
-          m))
+          m)))
 
 ;; vals - Get all values from map
 ;; Example: (vals {:a 1 :b 2}) ; => [1 2]
 (defn vals [m]
-  (reduce (fn [result [_k v]]
+  (let [m (ensure-map "vals" m)]
+    (reduce (fn [result [_k v]]
             (conj result v))
           []
-          m))
+          m)))
 
 ;; select-keys - Select subset of keys from map
 ;; Example: (select-keys {:a 1 :b 2 :c 3} [:a :c]) ; => {:a 1 :c 3}
 (defn select-keys [m keyseq]
-  (reduce (fn [result k]
+  (let [m (ensure-map "select-keys" m)]
+    (reduce (fn [result k]
             (if (contains? m k)
               (assoc result k (get m k))
               result))
           {}
-          keyseq))
+          keyseq)))
 
 ;; rename-keys - Rename keys in map
 ;; Example: (rename-keys {:a 1 :b 2} {:a :x :b :y}) ; => {:x 1 :y 2}
 (defn rename-keys [m kmap]
-  (reduce (fn [result pair]
+  (let [m (ensure-map "rename-keys" m)
+        kmap (ensure-map "rename-keys" kmap)]
+    (reduce (fn [result pair]
             (let [old-key (first pair)
                   new-key (second pair)]
               (if (contains? m old-key)
                 (assoc result new-key (get m old-key))
                 result)))
           (reduce (fn [acc key] (dissoc acc key)) m (keys kmap))
-          kmap))
+          kmap)))
 
 ;; dissoc-in - Remove nested key path from map and prune empty maps.
 ;; Example: (dissoc-in {:a {:b 1 :c 2}} [:a :b]) ; => {:a {:c 2}}
 (defn dissoc-in [m [k & ks]]
-  (if ks
+  (let [m (ensure-map "dissoc-in" m)]
+    (if ks
     (let [next-map (get m k)]
       (if next-map
         (let [new-map (dissoc-in next-map ks)]
@@ -575,15 +783,18 @@
             (dissoc m k)
             (assoc m k new-map)))
         m))
-    (dissoc m k)))
+    (dissoc m k))))
 
 ;; invert-map - Invert map (swap keys and values)
 ;; Example: (invert-map {:a 1 :b 2}) ; => {1 :a 2 :b}
 (defn invert-map [m]
-  (reduce (fn [result [k v]]
-            (assoc result v k))
+  (let [m (ensure-map "invert-map" m)]
+    (reduce (fn [result entry]
+            (let [k (nth entry 0)
+                  v (nth entry 1)]
+              (assoc result v k)))
           {}
-          m))
+          m)))
 
 ;; ============================================================================
 ;; String Utilities (helpers for string operations)
@@ -683,30 +894,8 @@
 ;; remove - Remove elements that satisfy predicate
 ;; Example: (remove odd? [1 2 3 4]) ; => [2 4]
 (defn remove [pred coll]
-  (filter (comp not pred) coll))
-
-;; ============================================================================
-;; Number Predicates
-;; ============================================================================
-
-;; odd? - Check if number is odd
-;; Example: (odd? 3) ; => true
-(defn odd? [n]
-  (= (mod n 2) 1))
-
-;; even? - Check if number is even
-;; Example: (even? 4) ; => true
-(defn even? [n]
-  (= (mod n 2) 0))
-
-;; zero? - Check if number is zero
-(defn zero? [n]
-  (= n 0))
-
-
-;; neg? - Check if number is negative
-(defn neg? [n]
-  (< n 0))
+  (let [pred (ensure-fn "remove" pred)]
+    (filter (comp not pred) coll)))
 
 ;; ============================================================================
 ;; Exception Helpers (Clojure-style API subset)
@@ -744,3 +933,12 @@
   (if (exception? ex)
     (get ex :cause nil)
     nil))
+
+;; ============================================================================
+;; Regex Reader Baseline
+;; ============================================================================
+;; Parser lowers #"..."
+;; to (re-pattern "..."), so keep this available in core.
+;; Full regex engine parity is tracked separately.
+(defn re-pattern [s]
+  (str s))

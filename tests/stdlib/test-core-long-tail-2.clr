@@ -1,0 +1,36 @@
+(ns tests.stdlib.test-core-long-tail-2)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn assert-vec [label actual expected]
+  (do
+    (assert-eq (str label " count") (count actual) (count expected))
+    (loop [i 0]
+      (if (< i (count expected))
+        (do
+          (assert-eq (str label " idx=" i) (nth actual i) (nth expected i))
+          (recur (+ i 1)))
+        true))))
+
+(defn -main [& _args]
+  (do
+    ;; sequence generators
+    (assert-vec "range/1" (range 5) [0 1 2 3 4])
+    (assert-vec "range/2" (range 2 6) [2 3 4 5])
+    (assert-vec "range/3" (range 0 10 2) [0 2 4 6 8])
+    (assert-vec "repeat" (repeat 3 :x) [:x :x :x])
+    (assert-vec "cycle" (cycle 2 [1 2]) [1 2 1 2])
+    (assert-vec "iterate" (iterate 5 inc 0) [0 1 2 3 4])
+
+    ;; map helpers
+    (assert-vec "keys" (sort (keys {:b 2 :a 1})) [:a :b])
+    (assert-vec "vals" (sort (vals {:b 2 :a 1})) [1 2])
+    (assert-eq "select-keys/a" (get (select-keys {:a 1 :b 2 :c 3} [:a :c]) :a nil) 1)
+    (assert-eq "select-keys/c" (get (select-keys {:a 1 :b 2 :c 3} [:a :c]) :c nil) 3)
+    (assert-eq "rename-keys/x" (get (rename-keys {:a 1 :b 2} {:a :x :b :y}) :x nil) 1)
+    (assert-eq "rename-keys/y" (get (rename-keys {:a 1 :b 2} {:a :x :b :y}) :y nil) 2)
+    (assert-eq "dissoc-in" (get-in (dissoc-in {:a {:b 1 :c 2}} [:a :b]) [:a :c]) 2)
+    "PASS"))

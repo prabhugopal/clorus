@@ -1,7 +1,7 @@
 # Clorus Clojure Parity Checklist
 
-Last updated: 2026-03-04
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh` -> Passed 205, Failed 0, Skipped 1.
+Last updated: 2026-03-05
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" CLORUS_TEST_JOBS=2 tests/run_all_tests.sh` -> Passed 241, Failed 0, Skipped 1.
 
 ## How to use this checklist
 - `✅ Paired`: implemented and covered by tests in both `jit` and `legacy`.
@@ -24,11 +24,11 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - 🟡 AOT path exists but needs production hardening checklist (separate track)
 
 ## Clojure-Parity Gaps (No Java Interop)
-- 🟡 Reader parity (reader-discard `#_` implemented, including trailing-discard edge cases; remaining reader forms and edge cases)
+- 🟡 Reader parity (reader-discard `#_` + regex reader literal `#\"...\"` baseline implemented; remaining reader forms and deeper regex semantics)
 - 🟡 Macro tooling parity (`&env`/`&form` + auto-gensym hygiene baseline implemented; deeper hygiene edge cases remain)
 - 🟡 Namespace ergonomics parity (baseline `:refer`/`:rename` implemented; alias edge cases remain)
 - 🟡 Dynamic vars parity (`binding` + `set!` baseline covered; deeper semantics still open)
-- 🟡 Data/collection API parity long tail (`get-in`, `assoc-in`, `update-in`, `merge-with` variadic baseline + remaining edge APIs)
+- 🟡 Data/collection API parity long tail (core edge/error paths mostly closed; remaining deep semantics focus on sort/comparator behavior and selected long-tail contracts)
 - 🟡 Exception data APIs parity (`ex-info`, `ex-data`) deep behavior checks
 
 ## Stdlib Parity Tracking
@@ -50,6 +50,7 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 
 ## Active Execution Queue (Feature-by-Feature)
 - [x] Reader parity: cover supported non-`#_` reader forms (quote, syntax-quote, unquote, unquote-splicing error paths, deref, var-quote)
+- [x] Reader parity: regex literal lowering baseline (`#\"...\"` -> `re-pattern`)
 - [x] Macro tooling parity: add `&env` tests
 - [x] Macro tooling parity: add `&form` tests
 - [x] Macro hygiene edge cases: test + baseline fix (auto-gensym in syntax-quote)

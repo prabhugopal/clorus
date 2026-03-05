@@ -70,6 +70,17 @@ impl Parser {
                 Ok(Expr::String(string))
             }
 
+            Token::Regex(s, _) => {
+                let pattern = s.clone();
+                self.advance();
+                // Clojure reader parity: #"..." expands to (re-pattern "...").
+                // Route through function-call lowering path.
+                Ok(Expr::Call {
+                    func: "re-pattern".to_string(),
+                    args: vec![Expr::String(pattern)],
+                })
+            }
+
             Token::Symbol(s, _) => {
                 let symbol = s.clone();
                 self.advance();
@@ -3887,6 +3898,35 @@ mod tests {
         let exprs = parse_str("[1 #_ 2]").unwrap();
         assert_eq!(exprs.len(), 1);
         assert_eq!(exprs[0], Expr::Vector(vec![Expr::Long(1)]));
+    }
+
+    #[test]
+    fn test_parse_regex_reader_literal() {
+        let exprs = parse_str(r#"#"\d+\s\w""#).unwrap();
+        assert_eq!(exprs.len(), 1);
+        assert_eq!(
+            exprs[0],
+            Expr::Call {
+                func: "re-pattern".to_string(),
+                args: vec![Expr::String(r#"\d+\s\w"#.to_string())],
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_regex_reader_literal_inside_vector() {
+        let exprs = parse_str(r#"[#"\d+" 1]"#).unwrap();
+        assert_eq!(exprs.len(), 1);
+        assert_eq!(
+            exprs[0],
+            Expr::Vector(vec![
+                Expr::Call {
+                    func: "re-pattern".to_string(),
+                    args: vec![Expr::String(r#"\d+"#.to_string())],
+                },
+                Expr::Long(1),
+            ])
+        );
     }
 
     #[test]

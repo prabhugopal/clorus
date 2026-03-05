@@ -160,6 +160,10 @@ runtime code, REPL/CLI code, and first-party test/debug scripts.
 |---|---|---|---|
 | `CLORUS_BIN` | Script-specific | `tests/run_all_tests.sh`, `tests/generate_metrics.sh`, `scripts/test/run-all.sh`, `trace_double_free.sh` | Path to `clorus` binary used by scripts. |
 | `CLORUS_TEST_ENGINES` | `jit legacy` | `tests/run_all_tests.sh` | Engine matrix for semantics runs. Values: `jit`, `legacy`. |
+| `CLORUS_TEST_JOBS` | `2` | `tests/run_all_tests.sh` | Per-test engine parallelism (`1` = sequential, `2` = parallel `jit`+`legacy`). |
+| `CLORUS_TEST_TIMEOUT_SECONDS` | `20` | `tests/run_all_tests.sh` | Per-test timeout used via `timeout`/`gtimeout` when available. |
+| `CLORUS_TEST_ISOLATE` | `1` | `tests/run_all_tests.sh` | Isolate per-engine test artifacts (`CARGO_TARGET_DIR`, `TMPDIR`) to avoid parallel engine collisions. |
+| `CLORUS_TEST_ISOLATION_ROOT` | `/tmp/clorus-test-isolation` | `tests/run_all_tests.sh` | Root directory for isolated per-engine test artifacts. |
 | `CLORUS_APP_DIR` | `~/Workspace/github/coral/coral-examples/gallery` | `trace_double_free.sh` | Working directory for gallery-based double-free tracing. |
 
 ### Notes

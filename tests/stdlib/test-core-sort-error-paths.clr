@@ -1,0 +1,43 @@
+(ns tests.stdlib.test-core-sort-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn assert-vec [label actual expected]
+  (do
+    (assert-eq (str label " count") (count actual) (count expected))
+    (loop [i 0]
+      (if (< i (count expected))
+        (do
+          (assert-eq (str label " idx=" i) (nth actual i) (nth expected i))
+          (recur (+ i 1)))
+        true))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-vec "sort numeric baseline" (sort [3 1 2 1]) [1 1 2 3])
+    (assert-vec "sort-by numeric key baseline"
+                (sort-by (fn [x] (nth x 0)) [[2 "b"] [1 "a"] [1 "x"]])
+                [[1 "a"] [1 "x"] [2 "b"]])
+
+    (assert-eq "sort mixed types throws" (throws? (fn [] (sort [1 "x"]))) true)
+    (assert-eq "sort non-numeric keyword throws" (throws? (fn [] (sort [:b :a]))) true)
+    (assert-eq "sort comparator non-fn throws" (throws? (fn [] (sort 1 [1 2 3]))) true)
+    (assert-eq "sort comparator non-coll throws" (throws? (fn [] (sort < 1))) true)
+    (assert-eq "sort-by non-fn throws" (throws? (fn [] (sort-by 1 [1 2 3]))) true)
+    (assert-eq "sort-by comparator non-fn throws" (throws? (fn [] (sort-by identity 1 [1 2 3]))) true)
+    (assert-eq "sort-by comparator non-coll throws" (throws? (fn [] (sort-by identity < 1))) true)
+    (assert-eq "sort-by mixed key types throws"
+               (throws? (fn [] (sort-by (fn [x] x) [1 "x"])))
+               true)
+    "PASS"))

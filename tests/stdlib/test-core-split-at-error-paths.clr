@@ -1,0 +1,20 @@
+(ns tests.stdlib.test-core-split-at-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "split-at non-number throws" (throws? (fn [] (split-at "x" [1 2 3]))) true)
+    (assert-eq "split-at non-coll throws" (throws? (fn [] (split-at 2 1))) true)
+    "PASS"))

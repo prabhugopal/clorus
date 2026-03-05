@@ -1,0 +1,14 @@
+(ns tests.language.test-reader-regex-literal)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; #"..." reader literal lowers to (re-pattern "...")
+    (assert-eq "reader literal simple" #"abc" "abc")
+    (assert-eq "reader literal escapes" #"a\\sb" "a\\sb")
+    (assert-eq "re-pattern call" (re-pattern "x+y") "x+y")
+    "PASS"))

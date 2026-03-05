@@ -1,0 +1,37 @@
+(ns tests.stdlib.test-core-collection-utils-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "zipmap keys non-coll throws" (throws? (fn [] (zipmap 1 [1]))) true)
+    (assert-eq "zipmap vals non-coll throws" (throws? (fn [] (zipmap [:a] 1))) true)
+    (assert-eq "frequencies non-coll throws" (throws? (fn [] (frequencies 1))) true)
+    (assert-eq "group-by non-fn throws" (throws? (fn [] (group-by 1 [1 2]))) true)
+    (assert-eq "group-by non-coll throws" (throws? (fn [] (group-by inc 1))) true)
+    (assert-eq "partition non-number n throws" (throws? (fn [] (partition "x" [1 2]))) true)
+    (assert-eq "partition non-coll throws" (throws? (fn [] (partition 2 1))) true)
+    (assert-eq "partition n<=0 throws" (throws? (fn [] (partition 0 [1 2]))) true)
+    (assert-eq "partition-all non-number n throws" (throws? (fn [] (partition-all "x" [1 2]))) true)
+    (assert-eq "partition-all non-coll throws" (throws? (fn [] (partition-all 2 1))) true)
+    (assert-eq "partition-all n<=0 throws" (throws? (fn [] (partition-all 0 [1 2]))) true)
+    (assert-eq "partition-by non-fn throws" (throws? (fn [] (partition-by 1 [1 2]))) true)
+    (assert-eq "partition-by non-coll throws" (throws? (fn [] (partition-by odd? 1))) true)
+    (assert-eq "take-while non-fn throws" (throws? (fn [] (take-while 1 [1 2]))) true)
+    (assert-eq "take-while non-coll throws" (throws? (fn [] (take-while odd? 1))) true)
+    (assert-eq "drop-while non-fn throws" (throws? (fn [] (drop-while 1 [1 2]))) true)
+    (assert-eq "drop-while non-coll throws" (throws? (fn [] (drop-while odd? 1))) true)
+    (assert-eq "split-with non-fn throws" (throws? (fn [] (split-with 1 [1 2]))) true)
+    (assert-eq "split-with non-coll throws" (throws? (fn [] (split-with odd? 1))) true)
+    "PASS"))

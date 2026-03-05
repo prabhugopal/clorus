@@ -25,7 +25,9 @@ export CLORUS_HOME="${CLORUS_HOME:-$(pwd)}"
 # Engines for semantics parity checks. Values: "jit", "legacy"
 CLORUS_TEST_ENGINES="${CLORUS_TEST_ENGINES:-jit legacy}"
 CLORUS_TEST_TIMEOUT_SECONDS="${CLORUS_TEST_TIMEOUT_SECONDS:-20}"
-CLORUS_TEST_JOBS="${CLORUS_TEST_JOBS:-1}"
+CLORUS_TEST_JOBS="${CLORUS_TEST_JOBS:-2}"
+CLORUS_TEST_ISOLATE="${CLORUS_TEST_ISOLATE:-1}"
+CLORUS_TEST_ISOLATION_ROOT="${CLORUS_TEST_ISOLATION_ROOT:-/tmp/clorus-test-isolation}"
 
 # Check if clorus binary exists
 if [ ! -f "$CLORUS_BIN" ]; then
@@ -50,6 +52,7 @@ echo "  CLORUS COMPREHENSIVE TEST SUITE"
 echo "================================================"
 echo "  Engines: $CLORUS_TEST_ENGINES"
 echo "  Parallel jobs: $CLORUS_TEST_JOBS"
+echo "  Isolated artifacts: $CLORUS_TEST_ISOLATE"
 if [ -n "$TIMEOUT_CMD" ]; then
     echo "  Timeout: ${CLORUS_TEST_TIMEOUT_SECONDS}s per test"
 else
@@ -60,27 +63,39 @@ echo ""
 run_one() {
     local mode=$1
     local test_file=$2
+    local run_flag=""
 
     if [ "$mode" = "legacy" ]; then
-        if [ -n "$TIMEOUT_CMD" ]; then
-            CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run --legacy-run > /dev/null 2>&1
-        else
-            CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run --legacy-run > /dev/null 2>&1
-        fi
-        return $?
+        run_flag="--legacy-run"
+    elif [ "$mode" != "jit" ]; then
+        return 99
     fi
 
-    # Default mode: JIT execution path (`clorus run`).
-    if [ "$mode" = "jit" ]; then
-        if [ -n "$TIMEOUT_CMD" ]; then
-            CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run > /dev/null 2>&1
-        else
-            CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run > /dev/null 2>&1
-        fi
-        return $?
+    local cargo_target_dir=""
+    local tmp_dir=""
+    if [ "$CLORUS_TEST_ISOLATE" = "1" ]; then
+        cargo_target_dir="${CLORUS_TEST_ISOLATION_ROOT}/${mode}/cargo-target"
+        tmp_dir="${CLORUS_TEST_ISOLATION_ROOT}/${mode}/tmp"
+        mkdir -p "$cargo_target_dir" "$tmp_dir"
     fi
 
-    return 99
+    if [ -n "$TIMEOUT_CMD" ]; then
+        if [ "$CLORUS_TEST_ISOLATE" = "1" ]; then
+            CLORUS_ENTRY_FILE="$test_file" CARGO_TARGET_DIR="$cargo_target_dir" TMPDIR="$tmp_dir" \
+                $TIMEOUT_CMD "$CLORUS_BIN" run $run_flag > /dev/null 2>&1
+        else
+            CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run $run_flag > /dev/null 2>&1
+        fi
+    else
+        if [ "$CLORUS_TEST_ISOLATE" = "1" ]; then
+            CLORUS_ENTRY_FILE="$test_file" CARGO_TARGET_DIR="$cargo_target_dir" TMPDIR="$tmp_dir" \
+                "$CLORUS_BIN" run $run_flag > /dev/null 2>&1
+        else
+            CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run $run_flag > /dev/null 2>&1
+        fi
+    fi
+
+    return $?
 }
 
 expected_compile_error() {
@@ -99,23 +114,38 @@ run_test_mode() {
     output_file=$(mktemp "/tmp/clorus-test-output.XXXXXX")
 
     if [ -n "$expected_error" ]; then
+        local run_flag=""
         if [ "$mode" = "legacy" ]; then
-            if [ -n "$TIMEOUT_CMD" ]; then
-                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run --legacy-run >"$output_file" 2>&1 || exit_code=$?
-            else
-                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run --legacy-run >"$output_file" 2>&1 || exit_code=$?
-            fi
-        elif [ "$mode" = "jit" ]; then
-            if [ -n "$TIMEOUT_CMD" ]; then
-                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run >"$output_file" 2>&1 || exit_code=$?
-            else
-                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run >"$output_file" 2>&1 || exit_code=$?
-            fi
-        else
+            run_flag="--legacy-run"
+        elif [ "$mode" != "jit" ]; then
             echo "SKIP" > "$result_file"
             echo "  File: $test_file (mode=$mode, reason=unknown-engine)" > "${result_file}.details"
             rm -f "$output_file"
             return 0
+        fi
+
+        local cargo_target_dir=""
+        local tmp_dir=""
+        if [ "$CLORUS_TEST_ISOLATE" = "1" ]; then
+            cargo_target_dir="${CLORUS_TEST_ISOLATION_ROOT}/${mode}/cargo-target"
+            tmp_dir="${CLORUS_TEST_ISOLATION_ROOT}/${mode}/tmp"
+            mkdir -p "$cargo_target_dir" "$tmp_dir"
+        fi
+
+        if [ -n "$TIMEOUT_CMD" ]; then
+            if [ "$CLORUS_TEST_ISOLATE" = "1" ]; then
+                CLORUS_ENTRY_FILE="$test_file" CARGO_TARGET_DIR="$cargo_target_dir" TMPDIR="$tmp_dir" \
+                    $TIMEOUT_CMD "$CLORUS_BIN" run $run_flag >"$output_file" 2>&1 || exit_code=$?
+            else
+                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run $run_flag >"$output_file" 2>&1 || exit_code=$?
+            fi
+        else
+            if [ "$CLORUS_TEST_ISOLATE" = "1" ]; then
+                CLORUS_ENTRY_FILE="$test_file" CARGO_TARGET_DIR="$cargo_target_dir" TMPDIR="$tmp_dir" \
+                    "$CLORUS_BIN" run $run_flag >"$output_file" 2>&1 || exit_code=$?
+            else
+                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run $run_flag >"$output_file" 2>&1 || exit_code=$?
+            fi
         fi
 
         if [ "$exit_code" -ne 0 ] && rg -q --fixed-strings "$expected_error" "$output_file"; then
@@ -269,6 +299,8 @@ run_repl_regressions() {
     local repl_output_file="/tmp/clorus_repl_regression.log"
     local clorus_bin_abs
     clorus_bin_abs="$(cd "$(dirname "$CLORUS_BIN")" && pwd)/$(basename "$CLORUS_BIN")"
+    local clorus_home_for_tests
+    clorus_home_for_tests="$(cd "$(dirname "$clorus_bin_abs")/../.." && pwd)"
     local mode
 
     for mode in $CLORUS_TEST_ENGINES; do
@@ -286,10 +318,14 @@ run_repl_regressions() {
         # - macro expansion has usable env form
         # - core map is callable
         if (
-            cd /tmp && cat <<'EOF' | CLORUS_REPL_NO_AUTO_LOAD=1 CLORUS_REPL_LOAD_STDLIB=1 "$clorus_bin_abs" repl > "$repl_output_file" 2>&1
+            cd /tmp && cat <<'EOF' | CLORUS_HOME="$clorus_home_for_tests" CLORUS_REPL_NO_AUTO_LOAD=1 CLORUS_REPL_LOAD_STDLIB=1 "$clorus_bin_abs" repl > "$repl_output_file" 2>&1
 (defmacro show-env [] &env)
 (show-env)
 (map #(* % 2) [1 2 3 4])
+(map (constantly 9) [1 2 3])
+(filter odd? [1 2 3 4 5])
+(take 3 [10 20 30 40])
+(drop 2 [10 20 30 40])
 :q
 EOF
         )
@@ -303,7 +339,11 @@ EOF
         fi
 
         if grep -qE "#'.+/show-env" "$repl_output_file" \
-            && grep -q "\[8 6 4 2\]" "$repl_output_file" \
+            && grep -q "\[2 4 6 8\]" "$repl_output_file" \
+            && grep -q "\[9 9 9\]" "$repl_output_file" \
+            && grep -q "\[1 3 5\]" "$repl_output_file" \
+            && grep -q "\[10 20 30\]" "$repl_output_file" \
+            && grep -q "\[30 40\]" "$repl_output_file" \
             && ! grep -q "Undefined function: map" "$repl_output_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED+=1))
@@ -312,6 +352,53 @@ EOF
             ((FAILED+=1))
             echo "  File: repl/core-map-defmacro (mode=$mode)" >> test_failures.log
             echo "  Output: $repl_output_file" >> test_failures.log
+        fi
+    done
+}
+
+run_runtime_noise_regressions() {
+    echo -e "\n${BLUE}6. RUNTIME NOISE REGRESSION TESTS${NC}"
+
+    local mode
+    local output_file
+    local noise_pattern="Attempted to call non-function|Attempted to call null as function|Attempted to call unresolved var as function|Arity mismatch:|Attempted to deref invalid value pointer"
+    local test_file="tests/stdlib/test-core-seq-builder-error-paths.clr"
+
+    for mode in $CLORUS_TEST_ENGINES; do
+        printf "%-50s" "Testing runtime/no-call-noise [$mode]..."
+        output_file=$(mktemp "/tmp/clorus-runtime-noise.XXXXXX")
+
+        if [ "$mode" = "legacy" ]; then
+            if [ -n "$TIMEOUT_CMD" ]; then
+                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run --legacy-run >"$output_file" 2>&1
+            else
+                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run --legacy-run >"$output_file" 2>&1
+            fi
+        elif [ "$mode" = "jit" ]; then
+            if [ -n "$TIMEOUT_CMD" ]; then
+                CLORUS_ENTRY_FILE="$test_file" $TIMEOUT_CMD "$CLORUS_BIN" run >"$output_file" 2>&1
+            else
+                CLORUS_ENTRY_FILE="$test_file" "$CLORUS_BIN" run >"$output_file" 2>&1
+            fi
+        else
+            echo -e "${YELLOW}⚠ SKIP${NC}"
+            ((SKIPPED+=1))
+            rm -f "$output_file"
+            continue
+        fi
+
+        if rg -q "$noise_pattern" "$output_file"; then
+            echo -e "${RED}✗ FAIL${NC}"
+            ((FAILED+=1))
+            {
+                echo "  File: runtime/no-call-noise (mode=$mode)"
+                echo "  Output: $output_file"
+            } >> test_failures.log
+            return 1
+        else
+            echo -e "${GREEN}✓ PASS${NC}"
+            ((PASSED+=1))
+            rm -f "$output_file"
         fi
     done
 }
@@ -333,6 +420,7 @@ echo -e "\n${BLUE}4. INTEGRATION TESTS${NC}"
 run_category "integration"
 
 run_repl_regressions
+run_runtime_noise_regressions
 
 # Summary
 echo ""

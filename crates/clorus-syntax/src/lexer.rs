@@ -45,6 +45,7 @@ pub enum Token {
     Long(i64, Span),
     Double(f64, Span),
     String(String, Span),
+    Regex(String, Span),      // #"pattern"
     Symbol(String, Span),
     Keyword(String, Span),
     Bool(bool, Span),
@@ -63,7 +64,7 @@ impl Token {
             | Token::SyntaxQuote(s) | Token::Unquote(s) | Token::UnquoteSplicing(s)
             | Token::Deref(s) | Token::Nil(s) | Token::Eof(s) => *s,
             Token::Long(_, s) | Token::Double(_, s) | Token::String(_, s)
-            | Token::Symbol(_, s) | Token::Keyword(_, s) | Token::Bool(_, s) => *s,
+            | Token::Regex(_, s) | Token::Symbol(_, s) | Token::Keyword(_, s) | Token::Bool(_, s) => *s,
         }
     }
 }
@@ -180,6 +181,43 @@ impl Lexer {
         }
 
         Err("Unterminated string".to_string())
+    }
+
+    fn read_regex_literal(&mut self) -> Result<(String, Span), String> {
+        let start_pos = self.position;
+        let start_line = self.line;
+        let start_col = self.column;
+
+        // We are positioned at '#', and caller has verified next is '"'.
+        self.advance(); // skip '#'
+        self.advance(); // skip opening '"'
+
+        let mut result = String::new();
+        while let Some(ch) = self.current_char() {
+            if ch == '"' {
+                self.advance(); // skip closing '"'
+                let span = self.make_span(start_pos, start_line, start_col);
+                return Ok((result, span));
+            }
+
+            if ch == '\\' {
+                // Preserve regex escapes verbatim (except advancing over escaped char).
+                result.push('\\');
+                self.advance();
+                if let Some(next) = self.current_char() {
+                    result.push(next);
+                    self.advance();
+                } else {
+                    return Err("Unterminated regex literal".to_string());
+                }
+                continue;
+            }
+
+            result.push(ch);
+            self.advance();
+        }
+
+        Err("Unterminated regex literal".to_string())
     }
 
     fn read_number(&mut self) -> Token {
@@ -388,6 +426,10 @@ impl Lexer {
                     self.advance(); // skip '
                     let span = self.make_span(start_pos, start_line, start_col);
                     Ok(Token::VarQuote(span))
+                } else if self.peek_char(1) == Some('"') {
+                    // Regex literal: #"pattern"
+                    let (pattern, span) = self.read_regex_literal()?;
+                    Ok(Token::Regex(pattern, span))
                 } else {
                     // Other # forms not yet supported
                     return Err(format!("Unsupported reader macro: #{:?}", self.peek_char(1)));
@@ -548,5 +590,12 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         assert!(matches!(tokens[0], Token::ReaderDiscard(_)));
         assert!(matches!(tokens[1], Token::Long(42, _)));
+    }
+
+    #[test]
+    fn test_regex_literal_token() {
+        let mut lexer = Lexer::new(r#"#"\d+\s\w""#);
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(&tokens[0], Token::Regex(s, _) if s == r#"\d+\s\w"#));
     }
 }

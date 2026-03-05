@@ -1,0 +1,32 @@
+(ns tests.stdlib.test-core-range-edge)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn assert-vec [label actual expected]
+  (do
+    (assert-eq (str label " count") (count actual) (count expected))
+    (loop [i 0]
+      (if (< i (count expected))
+        (do
+          (assert-eq (str label " idx=" i) (nth actual i) (nth expected i))
+          (recur (+ i 1)))
+        true))))
+
+(defn step-zero-throws? []
+  (try
+    (do
+      (range 0 10 0)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-vec "descending range" (range 5 0 -1) [5 4 3 2 1])
+    (assert-vec "descending step two" (range 10 0 -2) [10 8 6 4 2])
+    (assert-vec "ascending with negative step is empty" (range 0 5 -1) [])
+    (assert-eq "step zero throws" (step-zero-throws?) true)
+    "PASS"))

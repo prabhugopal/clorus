@@ -1,0 +1,25 @@
+(ns tests.stdlib.test-core-map-utils-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "keys non-map throws" (throws? (fn [] (keys 1))) true)
+    (assert-eq "vals non-map throws" (throws? (fn [] (vals 1))) true)
+    (assert-eq "select-keys non-map throws" (throws? (fn [] (select-keys 1 [:a]))) true)
+    (assert-eq "rename-keys non-map throws" (throws? (fn [] (rename-keys 1 {:a :b}))) true)
+    (assert-eq "rename-keys kmap non-map throws" (throws? (fn [] (rename-keys {:a 1} 2))) true)
+    (assert-eq "invert-map non-map throws" (throws? (fn [] (invert-map 1))) true)
+    (assert-eq "dissoc-in non-map throws" (throws? (fn [] (dissoc-in 1 [:a]))) true)
+    "PASS"))

@@ -1,0 +1,33 @@
+(ns tests.stdlib.test-core-merge-with-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "merge-with non-fn throws (0-arity)"
+               (throws? (fn [] (merge-with 1)))
+               true)
+    (assert-eq "merge-with non-fn throws (2-map path)"
+               (throws? (fn [] (merge-with 1 {:a 1} {:a 2})))
+               true)
+    (assert-eq "merge-with m1 non-map throws"
+               (throws? (fn [] (merge-with + 1 {:a 2})))
+               true)
+    (assert-eq "merge-with m2 non-map throws"
+               (throws? (fn [] (merge-with + {:a 1} 2)))
+               true)
+    (assert-eq "merge-with variadic non-map throws"
+               (throws? (fn [] (merge-with + {:a 1} {:a 2} 3)))
+               true)
+    "PASS"))

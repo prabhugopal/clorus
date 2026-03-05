@@ -1,0 +1,30 @@
+(ns tests.stdlib.test-core-update-error-paths)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e
+      true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "update non-map throws"
+               (throws? (fn [] (update 1 :a inc)))
+               true)
+    (assert-eq "update non-fn throws"
+               (throws? (fn [] (update {:a 1} :a 1)))
+               true)
+    (assert-eq "update variadic non-map throws"
+               (throws? (fn [] (update 1 :a + 1 2 3 4)))
+               true)
+    (assert-eq "update variadic non-fn throws"
+               (throws? (fn [] (update {:a 1} :a 1 1 2 3 4)))
+               true)
+    "PASS"))
