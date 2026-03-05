@@ -5,6 +5,14 @@
 
 use crate::value::Value;
 
+#[inline]
+fn call_error_logging_enabled() -> bool {
+    std::env::var("CLORUS_LOG_CALL_ERRORS")
+        .ok()
+        .map(|v| v != "0")
+        .unwrap_or(false)
+}
+
 /// Function data structure
 /// Contains function pointer and captured environment
 #[repr(C)]
@@ -141,7 +149,9 @@ unsafe fn call_non_variadic_function(
             f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), *args.offset(5), env_ptr)
         }
         _ => {
-            eprintln!("Function call with {} arguments not yet supported", arg_count);
+            if call_error_logging_enabled() {
+                eprintln!("Function call with {} arguments not yet supported", arg_count);
+            }
             Value::nil()
         }
     }
@@ -155,10 +165,12 @@ unsafe fn call_variadic_function(
     env_ptr: *mut i8,
 ) -> *mut Value {
     if arg_count < fixed_count {
-        eprintln!(
-            "Arity mismatch: variadic function expected at least {}, got {}",
-            fixed_count, arg_count
-        );
+        if call_error_logging_enabled() {
+            eprintln!(
+                "Arity mismatch: variadic function expected at least {}, got {}",
+                fixed_count, arg_count
+            );
+        }
         return Value::nil();
     }
 
@@ -189,10 +201,12 @@ unsafe fn call_variadic_function(
             f(*args.offset(0), *args.offset(1), *args.offset(2), *args.offset(3), *args.offset(4), rest_vec, env_ptr)
         }
         _ => {
-            eprintln!(
-                "Variadic function with {} fixed arguments is not yet supported",
-                fixed_count
-            );
+            if call_error_logging_enabled() {
+                eprintln!(
+                    "Variadic function with {} fixed arguments is not yet supported",
+                    fixed_count
+                );
+            }
             Value::nil()
         }
     }
@@ -207,7 +221,9 @@ pub extern "C" fn clorus_function_call(
 ) -> *mut Value {
     unsafe {
         if func_val.is_null() {
-            eprintln!("Attempted to call null as function");
+            if call_error_logging_enabled() {
+                eprintln!("Attempted to call null as function");
+            }
             return Value::nil();
         }
 
@@ -217,7 +233,9 @@ pub extern "C" fn clorus_function_call(
         if (*target).tag() == crate::value::ValueTag::Var {
             let deref = crate::var::clorus_var_get((*target).as_var());
             if deref.is_null() {
-                eprintln!("Attempted to call unresolved var as function");
+                if call_error_logging_enabled() {
+                    eprintln!("Attempted to call unresolved var as function");
+                }
                 return Value::nil();
             }
             target = deref;
@@ -227,7 +245,9 @@ pub extern "C" fn clorus_function_call(
         if target_tag != crate::value::ValueTag::Function
             && target_tag != crate::value::ValueTag::MultiArityFunction
         {
-            eprintln!("Attempted to call non-function value with tag {:?}", target_tag);
+            if call_error_logging_enabled() {
+                eprintln!("Attempted to call non-function value tag {:?}", target_tag);
+            }
             return Value::nil();
         }
 
@@ -245,7 +265,9 @@ pub extern "C" fn clorus_function_call(
         // Variadic: arity < 0 encodes fixed prefix as (-arity - 1).
         let encoded_arity = (*func_data).arity;
         if encoded_arity >= 0 && encoded_arity != arg_count {
-            eprintln!("Arity mismatch: expected {}, got {}", (*func_data).arity, arg_count);
+            if call_error_logging_enabled() {
+                eprintln!("Arity mismatch: expected {}, got {}", (*func_data).arity, arg_count);
+            }
             return Value::nil();
         }
 
@@ -405,11 +427,13 @@ pub extern "C" fn clorus_multi_arity_function_call(
         }
 
         if matched_variant.is_null() {
-            eprintln!("Multi-arity function: No matching arity for {} arguments", arg_count);
-            eprintln!("Available arities: ");
-            for i in 0..(*multi_func_data).arity_count {
-                let variant = &*variants.offset(i as isize);
-                eprintln!("  - {}", variant.arity);
+            if call_error_logging_enabled() {
+                eprintln!("Multi-arity function: No matching arity for {} arguments", arg_count);
+                eprintln!("Available arities: ");
+                for i in 0..(*multi_func_data).arity_count {
+                    let variant = &*variants.offset(i as isize);
+                    eprintln!("  - {}", variant.arity);
+                }
             }
             return Value::nil();
         }

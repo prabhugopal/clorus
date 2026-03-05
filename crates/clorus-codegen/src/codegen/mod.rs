@@ -1,13 +1,10 @@
 /// LLVM Code Generation for Clorus
 mod closures;
 mod arithmetic;
-mod async_calls;
 mod calls;
 mod ffi_calls;
-mod fs_calls;
 mod functions;
 mod core_calls;
-mod egui_calls;
 mod quotes;
 
 use clorus_syntax::{Expr, MapPatternKey, Pattern};
@@ -61,6 +58,13 @@ struct LoopContext<'ctx> {
     phi_nodes: Vec<PhiValue<'ctx>>,
 }
 
+#[derive(Clone)]
+struct RecurFnContext {
+    name: String,
+    fixed_param_count: usize,
+    has_rest_param: bool,
+}
+
 #[derive(Debug, Clone)]
 struct MultimethodMethod<'ctx> {
     dispatch_value: Expr,
@@ -89,6 +93,8 @@ pub struct CodeGen<'ctx> {
     lambda_counter: usize,
     /// Current loop context (for loop/recur)
     loop_context: Option<LoopContext<'ctx>>,
+    /// Current named function context for recur fallback outside loop.
+    current_recur_fn: Option<RecurFnContext>,
     /// Forward declared functions (from declare form) - allows mutual recursion
     forward_declarations: HashSet<String>,
     /// Namespaces provided by .clip packages (Phase 4)
@@ -477,6 +483,7 @@ impl<'ctx> CodeGen<'ctx> {
             namespace: NamespaceContext::default_namespace(),
             lambda_counter: 0,
             loop_context: None,
+            current_recur_fn: None,
             forward_declarations: HashSet::new(),
             clip_namespaces: HashSet::new(),
             parameter_context: HashMap::new(),
@@ -1157,162 +1164,6 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_bool_fn("clorus_is_reduced"); // Check if value is reduced
         self.declare_value_fn("clorus_deref_reduced", 1); // Extract value from reduced
         self.declare_value_fn("clorus_ensure_reduced", 1); // Ensure value is reduced
-    }
-
-    /// Declare rust.fs module functions
-    fn declare_fs_functions(&mut self) {
-        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-        let i32_type = self.context.i32_type();
-
-        // clorus_fs_read(path: *const c_char) -> *mut c_char
-        let fs_read_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_read", fs_read_type, None);
-
-        // clorus_fs_write(path: *const c_char, content: *const c_char) -> i32
-        let fs_write_type = i32_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_write", fs_write_type, None);
-
-        // clorus_fs_append(path: *const c_char, content: *const c_char) -> i32
-        let fs_append_type = i32_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_append", fs_append_type, None);
-
-        // clorus_fs_exists(path: *const c_char) -> i32
-        let fs_exists_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_exists", fs_exists_type, None);
-
-        // clorus_fs_is_file(path: *const c_char) -> i32
-        let fs_is_file_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_is_file", fs_is_file_type, None);
-
-        // clorus_fs_is_dir(path: *const c_char) -> i32
-        let fs_is_dir_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_is_dir", fs_is_dir_type, None);
-
-        // clorus_fs_remove(path: *const c_char) -> i32
-        let fs_remove_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_remove", fs_remove_type, None);
-
-        // clorus_fs_copy(src: *const c_char, dst: *const c_char) -> i32
-        let fs_copy_type = i32_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_copy", fs_copy_type, None);
-
-        // clorus_fs_rename(old: *const c_char, new: *const c_char) -> i32
-        let fs_rename_type = i32_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_rename", fs_rename_type, None);
-
-        // clorus_fs_create_dir(path: *const c_char) -> i32
-        let fs_create_dir_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_create_dir", fs_create_dir_type, None);
-
-        // clorus_fs_create_dir_all(path: *const c_char) -> i32
-        let fs_create_dir_all_type = i32_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_create_dir_all", fs_create_dir_all_type, None);
-
-        // clorus_fs_free_string(s: *mut c_char)
-        let fs_free_string_type = self
-            .context
-            .void_type()
-            .fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_fs_free_string", fs_free_string_type, None);
-    }
-
-    /// Declare rust.path module functions (placeholder)
-    fn declare_path_functions(&mut self) {
-        // TODO: Add path functions
-    }
-
-    /// Declare example-rust-lib functions for testing FFI
-    fn declare_rust_example_functions(&mut self) {
-        let f64_type = self.context.f64_type();
-        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-        // clorus_add(x: f64, y: f64) -> f64
-        let add_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
-        self.module.add_function("clorus_add", add_type, None);
-
-        // clorus_multiply(a: f64, b: f64) -> f64
-        let multiply_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
-        self.module
-            .add_function("clorus_multiply", multiply_type, None);
-
-        // clorus_factorial(n: f64) -> f64
-        let factorial_type = f64_type.fn_type(&[f64_type.into()], false);
-        self.module
-            .add_function("clorus_factorial", factorial_type, None);
-
-        // clorus_greet(name: *const c_char) -> *mut c_char
-        let greet_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module.add_function("clorus_greet", greet_type, None);
-
-        // clorus_to_upper(s: *const c_char) -> *mut c_char
-        let to_upper_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_to_upper", to_upper_type, None);
-
-        // clorus_string_length(s: *const c_char) -> f64
-        let string_length_type = f64_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_string_length", string_length_type, None);
-    }
-
-    /// Declare async-demo functions
-    fn declare_async_demo_functions(&mut self) {
-        let f64_type = self.context.f64_type();
-        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-        // clorus_hello_blocking() -> *mut c_char
-        let hello_type = i8_ptr_type.fn_type(&[], false);
-        self.module
-            .add_function("clorus_hello_blocking", hello_type, None);
-
-        // clorus_countdown_blocking(n: f64) -> f64
-        let countdown_type = f64_type.fn_type(&[f64_type.into()], false);
-        self.module
-            .add_function("clorus_countdown_blocking", countdown_type, None);
-    }
-
-    /// Declare async-hello functions (futures-based)
-    fn declare_async_hello_functions(&mut self) {
-        let f64_type = self.context.f64_type();
-        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-        // clorus_greet_blocking(name: *const c_char) -> *mut c_char
-        let greet_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_greet_blocking", greet_type, None);
-
-        // clorus_add_blocking(x: f64, y: f64) -> f64
-        let add_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
-        self.module
-            .add_function("clorus_add_blocking", add_type, None);
-    }
-
-    /// Declare egui-hello module functions
-    fn declare_egui_hello_functions(&mut self) {
-        let f64_type = self.context.f64_type();
-        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-
-        // clorus_show_gui(message: *const c_char) -> f64
-        let show_gui_type = f64_type.fn_type(&[i8_ptr_type.into()], false);
-        self.module
-            .add_function("clorus_show_gui", show_gui_type, None);
-
-        // clorus_get_gui_version() -> *mut c_char
-        let get_version_type = i8_ptr_type.fn_type(&[], false);
-        self.module
-            .add_function("clorus_get_gui_version", get_version_type, None);
     }
 
     /// Declare clorus.core module functions (Clojure-style)
@@ -3006,27 +2857,26 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Save current variable scope
                 let saved_vars = self.variables.clone();
+                let saved_recur_ctx = self.current_recur_fn.clone();
                 let mut local_vars = Vec::new();
 
                 // Step 1: Create function prototypes (declarations)
                 let mut fn_values = Vec::new();
                 for (name, params, rest_param, _body) in bindings {
-                    // Determine arity
-                    let arity = params.len() + if rest_param.is_some() { 1 } else { 0 };
-
-                    // All Clorus functions have signature: Value* fn(Value* closure, Value** args, i64 arg_count)
+                    // Use the same calling convention as defn/fn:
+                    // Value* fn(Value* arg1, ..., Value* rest_vec?, Value* env)
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                    let value_ptr_ptr_type = value_ptr_type.ptr_type(AddressSpace::default());
-                    let i64_type = self.context.i64_type();
+                    let mut param_types: Vec<_> =
+                        params.iter().map(|_| value_ptr_type.into()).collect();
 
-                    let fn_type = value_ptr_type.fn_type(
-                        &[
-                            value_ptr_type.into(),
-                            value_ptr_ptr_type.into(),
-                            i64_type.into(),
-                        ],
-                        false,
-                    );
+                    if rest_param.is_some() {
+                        param_types.push(value_ptr_type.into());
+                    }
+
+                    // Environment parameter (unused for letfn; kept for ABI consistency)
+                    param_types.push(value_ptr_type.into());
+
+                    let fn_type = value_ptr_type.fn_type(&param_types, false);
 
                     // Create function with unique name
                     let fn_name = format!("letfn_{}_{}", name, self.module.get_functions().count());
@@ -3101,53 +2951,34 @@ impl<'ctx> CodeGen<'ctx> {
                         self.variables.insert(letfn_name.clone(), alloca);
                     }
 
-                    // Get function parameters
-                    let _closure_param = function.get_nth_param(0).unwrap().into_pointer_value();
-                    let args_param = function.get_nth_param(1).unwrap().into_pointer_value();
-                    let arg_count_param = function.get_nth_param(2).unwrap().into_int_value();
-
-                    // Extract parameters from args array and bind to pattern names
-                    let mut param_bindings = Vec::new();
-                    for (i, pattern) in params.iter().enumerate() {
-                        // Load args[i]
-                        let value_ptr_type =
-                            self.context.i8_type().ptr_type(AddressSpace::default());
-                        let index = self.context.i64_type().const_int(i as u64, false);
-                        let arg_ptr = unsafe {
-                            self.builder
-                                .build_gep(
-                                    value_ptr_type,
-                                    args_param,
-                                    &[index],
-                                    &format!("arg_{}", i),
-                                )
-                                .unwrap()
-                        };
-                        let arg_val = self
-                            .builder
-                            .build_load(value_ptr_type, arg_ptr, &format!("arg_{}_val", i))
+                    // Bind fixed parameters to allocas with destructuring.
+                    for (param_idx, pattern) in params.iter().enumerate() {
+                        let param_val = function
+                            .get_nth_param(param_idx as u32)
                             .unwrap()
                             .into_pointer_value();
-
-                        // Destructure pattern
-                        let bindings = self.destructure_pattern(pattern, arg_val)?;
-                        param_bindings.extend(bindings);
+                        self.destructure_pattern(pattern, param_val)?;
                     }
 
                     // Handle rest parameter if present
                     if let Some(rest_name) = rest_param {
-                        let rest_vec = self.build_rest_vector_from_arg_array(
-                            args_param,
-                            params.len() as u64,
-                            arg_count_param,
-                        )?;
+                        let rest_vec = function
+                            .get_nth_param(params.len() as u32)
+                            .unwrap()
+                            .into_pointer_value();
                         let alloca = self.create_entry_block_alloca(rest_name);
                         self.builder.build_store(alloca, rest_vec).unwrap();
                         self.variables.insert(rest_name.clone(), alloca);
                     }
 
                     // Compile function body
+                    self.current_recur_fn = Some(RecurFnContext {
+                        name: _fn_name.clone(),
+                        fixed_param_count: params.len(),
+                        has_rest_param: rest_param.is_some(),
+                    });
                     let result = self.compile_expr(fn_body)?;
+                    self.current_recur_fn = saved_recur_ctx.clone();
 
                     // Return the result
                     self.builder.build_return(Some(&result)).unwrap();
@@ -3244,6 +3075,7 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Restore scope
                 self.variables = saved_vars;
+                self.current_recur_fn = saved_recur_ctx;
 
                 Ok(result)
             }
@@ -3534,8 +3366,9 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Unpack captured variables from environment (LAST parameter)
                 if !free_vars.is_empty() {
+                    let env_param_index = params.len() + if rest_param.is_some() { 1 } else { 0 };
                     let env_param = function
-                        .get_nth_param(params.len() as u32)
+                        .get_nth_param(env_param_index as u32)
                         .unwrap()
                         .into_pointer_value();
 
@@ -3571,7 +3404,10 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Compile function body (returns Value*)
+                let saved_recur_ctx = self.current_recur_fn.clone();
+                self.current_recur_fn = None;
                 let result = self.compile_expr(body)?;
+                self.current_recur_fn = saved_recur_ctx;
                 self.builder.build_return(Some(&result)).unwrap();
 
                 // Restore previous state
@@ -3767,8 +3603,10 @@ impl<'ctx> CodeGen<'ctx> {
 
                     // Unpack captured variables from environment (LAST parameter)
                     if !free_vars.is_empty() {
+                        let env_param_index =
+                            arity.params.len() + if arity.rest_param.is_some() { 1 } else { 0 };
                         let env_param = function
-                            .get_nth_param(arity.params.len() as u32)
+                            .get_nth_param(env_param_index as u32)
                             .unwrap()
                             .into_pointer_value();
 
@@ -4212,10 +4050,35 @@ impl<'ctx> CodeGen<'ctx> {
                 // Jump back to the nearest loop with new values
                 // CRITICAL FIX: Add incoming values to phi nodes instead of updating allocas
                 // The phi nodes will carry updated values to the next iteration
-                let loop_ctx = self
-                    .loop_context
-                    .clone()
-                    .ok_or("recur can only be used inside a loop")?;
+                let Some(loop_ctx) = self.loop_context.clone() else {
+                    // Function recur fallback: when inside a named function body and no loop
+                    // context is active, compile recur as a self tail call.
+                    let recur_ctx = self
+                        .current_recur_fn
+                        .clone()
+                        .ok_or("recur can only be used inside a loop")?;
+
+                    if !recur_ctx.has_rest_param && args.len() != recur_ctx.fixed_param_count {
+                        return Err(format!(
+                            "recur argument count mismatch: expected {}, got {}",
+                            recur_ctx.fixed_param_count,
+                            args.len()
+                        ));
+                    }
+                    if recur_ctx.has_rest_param && args.len() < recur_ctx.fixed_param_count {
+                        return Err(format!(
+                            "recur argument count mismatch: expected at least {}, got {}",
+                            recur_ctx.fixed_param_count,
+                            args.len()
+                        ));
+                    }
+
+                    let recur_call = Expr::Call {
+                        func: recur_ctx.name,
+                        args: args.clone(),
+                    };
+                    return self.compile_expr(&recur_call);
+                };
 
                 // Check that arg count matches binding count
                 if args.len() != loop_ctx.binding_names.len() {

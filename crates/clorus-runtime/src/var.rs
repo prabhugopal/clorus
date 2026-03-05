@@ -11,6 +11,14 @@ thread_local! {
     static DYNAMIC_BINDINGS: RefCell<HashMap<usize, Vec<*mut Value>>> = RefCell::new(HashMap::new());
 }
 
+#[inline]
+fn var_error_logging_enabled() -> bool {
+    std::env::var("CLORUS_LOG_CALL_ERRORS")
+        .ok()
+        .map(|v| v != "0")
+        .unwrap_or(false)
+}
+
 /// Var structure
 /// Holds a root binding and optional metadata
 pub struct Var {
@@ -477,9 +485,11 @@ pub extern "C" fn clorus_deref_var_value(value_ptr: *mut Value) -> *mut Value {
         // pointers causes process crashes.
         let addr = value_ptr as usize;
         if addr < 4096 || (addr & (std::mem::align_of::<Value>() - 1)) != 0 {
-            eprintln!(
-                "Attempted to deref invalid value pointer in clorus_deref_var_value: 0x{addr:x}"
-            );
+            if var_error_logging_enabled() {
+                eprintln!(
+                    "Attempted to deref invalid value pointer in clorus_deref_var_value: 0x{addr:x}"
+                );
+            }
             return std::ptr::null_mut();
         }
 

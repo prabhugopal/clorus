@@ -2007,9 +2007,19 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
 
     // Prefer matching profile in development to avoid symbol/version skew.
     #[cfg(debug_assertions)]
-    let local_candidates = [Path::new("target/debug").join(lib_name), Path::new("target/release").join(lib_name)];
+    let local_candidates = [
+        Path::new("target/debug/deps").join(lib_name),
+        Path::new("target/debug").join(lib_name),
+        Path::new("target/release/deps").join(lib_name),
+        Path::new("target/release").join(lib_name),
+    ];
     #[cfg(not(debug_assertions))]
-    let local_candidates = [Path::new("target/release").join(lib_name), Path::new("target/debug").join(lib_name)];
+    let local_candidates = [
+        Path::new("target/release/deps").join(lib_name),
+        Path::new("target/release").join(lib_name),
+        Path::new("target/debug/deps").join(lib_name),
+        Path::new("target/debug").join(lib_name),
+    ];
 
     for candidate in local_candidates {
         if candidate.exists() {
@@ -2048,9 +2058,19 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
         let mut current = env::current_dir().ok();
         while let Some(dir) = current {
             #[cfg(debug_assertions)]
-            let workspace_candidates = [dir.join("target/debug").join(lib_name), dir.join("target/release").join(lib_name)];
+            let workspace_candidates = [
+                dir.join("target/debug/deps").join(lib_name),
+                dir.join("target/debug").join(lib_name),
+                dir.join("target/release/deps").join(lib_name),
+                dir.join("target/release").join(lib_name),
+            ];
             #[cfg(not(debug_assertions))]
-            let workspace_candidates = [dir.join("target/release").join(lib_name), dir.join("target/debug").join(lib_name)];
+            let workspace_candidates = [
+                dir.join("target/release/deps").join(lib_name),
+                dir.join("target/release").join(lib_name),
+                dir.join("target/debug/deps").join(lib_name),
+                dir.join("target/debug").join(lib_name),
+            ];
 
             for candidate in workspace_candidates {
                 if candidate.exists() {
@@ -2069,13 +2089,15 @@ fn load_runtime_library() -> Result<libloading::Library, String> {
         format!(
             "clorus-runtime library not found.
 Searched:
+  - target/release/deps/{}
   - target/release/{}
+  - target/debug/deps/{}
   - target/debug/{}
   - Installed library directory
   - Workspace target directories
 
 To fix: cargo build -p clorus-runtime --release",
-            lib_name, lib_name
+            lib_name, lib_name, lib_name, lib_name
         )
     })?;
 

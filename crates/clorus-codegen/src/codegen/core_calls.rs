@@ -1,6 +1,25 @@
 use super::*;
 
 impl<'ctx> CodeGen<'ctx> {
+    /// Helper: compile string expression to C string pointer.
+    /// Handles both string literals and values that evaluate to strings.
+    pub(super) fn compile_string_to_ptr(
+        &mut self,
+        expr: &Expr,
+    ) -> Result<PointerValue<'ctx>, String> {
+        match expr {
+            Expr::String(s) => {
+                let c_str = self.builder.build_global_string_ptr(s, "str").unwrap();
+                Ok(c_str.as_pointer_value())
+            }
+            Expr::Symbol(_) => {
+                let value_ptr = self.compile_expr(expr)?;
+                Ok(self.extract_cstring_from_value(value_ptr))
+            }
+            _ => Err("Expected string literal or string variable".to_string()),
+        }
+    }
+
     /// Compile clorus.core function calls (Clojure-style convenience functions)
     pub(super) fn compile_core_call(
         &mut self,

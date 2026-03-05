@@ -105,7 +105,14 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Compile function body (returns Value*)
+        let saved_recur_ctx = self.current_recur_fn.clone();
+        self.current_recur_fn = Some(RecurFnContext {
+            name: name.to_string(),
+            fixed_param_count: params.len(),
+            has_rest_param: rest_param.is_some(),
+        });
         let result = self.compile_expr(body)?;
+        self.current_recur_fn = saved_recur_ctx;
         self.builder.build_return(Some(&result)).unwrap();
 
         // Clear parameter context before restoring variables
@@ -441,7 +448,14 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             // Compile body
+            let saved_recur_ctx = self.current_recur_fn.clone();
+            self.current_recur_fn = Some(RecurFnContext {
+                name: name.to_string(),
+                fixed_param_count: arity.params.len(),
+                has_rest_param: arity.rest_param.is_some(),
+            });
             let result = self.compile_expr(&arity.body)?;
+            self.current_recur_fn = saved_recur_ctx;
             self.builder.build_return(Some(&result)).unwrap();
 
             // Restore state

@@ -351,9 +351,6 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         }
     };
 
-    // NOTE: clorus-std and clorus-core .dylib libraries cause hanging when loaded.
-    // This is separate from the GUI threading issue. Need to investigate why
-    // libloading blocks on macOS. For now, stdlib is loaded from source (.clr).
     println!();
 
     let context = Context::create();
@@ -436,16 +433,31 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
     }
 
     let mut _core_lib: Option<libloading::Library> = None;
+    let disable_core_lib = std::env::var("CLORUS_REPL_NO_CORE_LIB")
+        .ok()
+        .map(|v| v != "0")
+        .unwrap_or(false);
+
+    // Always load clorus-core dylib unless explicitly disabled.
+    // REPL JIT stdlib loads function bodies, but runtime externs like clorus_slurp/clorus_spit
+    // still need process-global symbols to resolve at execution time.
+    if !disable_core_lib {
+        match load_core_library() {
+            Ok(lib) => {
+                _core_lib = Some(lib);
+            }
+            Err(e) => {
+                eprintln!("⚠ Failed to load clorus-core dylib: {}", e);
+            }
+        }
+    }
+
     if let Some(core_path) = core_stdlib_path.as_ref() {
         // Default to JIT stdlib in REPL so core functions like `map` are callable.
         let enable_jit_stdlib = std::env::var("CLORUS_REPL_LOAD_STDLIB")
             .ok()
             .map(|v| v != "0")
             .unwrap_or(true);
-        let disable_core_lib = std::env::var("CLORUS_REPL_NO_CORE_LIB")
-            .ok()
-            .map(|v| v != "0")
-            .unwrap_or(false);
 
         // Primary path: JIT-compile stdlib.
         if enable_jit_stdlib {
@@ -465,31 +477,26 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
             }
         }
 
-        // Optional fallback path: dylib symbols-only (disabled by default when JIT is on).
+        // Optional fallback path: symbols-only preload from stdlib source.
+        // This mode exists for environments where JIT stdlib loading is disabled.
         if !core_loaded && !disable_core_lib {
-            match load_core_library() {
-                Ok(lib) => {
-                    _core_lib = Some(lib);
-                    match std::fs::read_to_string(core_path) {
-                        Ok(source) => match repl_engine.load_stdlib_symbols_only(source) {
-                            Ok(count) => {
-                                println!(
-                                    "✓ Loaded clorus.core symbols ({} functions) via clorus-core dylib",
-                                    count
-                                );
-                                core_loaded = true;
-                            }
-                            Err(e) => {
-                                eprintln!("⚠ Error loading stdlib symbols: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            eprintln!("⚠ Could not read stdlib: {}", e);
+            if _core_lib.is_some() {
+                match std::fs::read_to_string(core_path) {
+                    Ok(source) => match repl_engine.load_stdlib_symbols_only(source) {
+                        Ok(count) => {
+                            println!(
+                                "✓ Loaded clorus.core symbols ({} functions) via clorus-core dylib",
+                                count
+                            );
+                            core_loaded = true;
                         }
+                        Err(e) => {
+                            eprintln!("⚠ Error loading stdlib symbols: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("⚠ Could not read stdlib: {}", e);
                     }
-                }
-                Err(e) => {
-                    eprintln!("⚠ Failed to load clorus-core dylib: {}", e);
                 }
             }
         }
