@@ -6583,25 +6583,22 @@ impl<'ctx> CodeGen<'ctx> {
                             .get(namespace_or_alias)
                             .cloned()
                             .or_else(|| {
+                                if namespace_or_alias.starts_with("rust.") {
+                                    self.rust_libraries
+                                        .get(namespace_or_alias.strip_prefix("rust.").unwrap())
+                                        .cloned()
+                                } else {
+                                    None
+                                }
+                            })
+                            .or_else(|| {
                                 // Check if this is an alias for a rust.* module
                                 self.namespace.aliases.get(namespace_or_alias).and_then(
                                     |resolved| {
                                         if resolved.starts_with("rust.") {
-                                            // Try full resolved name with underscores: rust.egui_hello
                                             self.rust_libraries
-                                                .get(resolved)
+                                                .get(resolved.strip_prefix("rust.").unwrap())
                                                 .cloned()
-                                                .or_else(|| {
-                                                    // Try with hyphens for Clojure-style: rust.egui-hello
-                                                    let hyphenated = resolved.replace('_', "-");
-                                                    self.rust_libraries.get(&hyphenated).cloned()
-                                                })
-                                                .or_else(|| {
-                                                    // Try without prefix for backward compatibility
-                                                    let lib_name =
-                                                        resolved.strip_prefix("rust.").unwrap();
-                                                    self.rust_libraries.get(lib_name).cloned()
-                                                })
                                         } else {
                                             None
                                         }
@@ -6612,17 +6609,6 @@ impl<'ctx> CodeGen<'ctx> {
                         if let Some(lib) = rust_lib {
                             return self.compile_rust_library_call(&lib, func_name, args);
                         }
-                    }
-
-                    // Fall back to hardcoded libraries for backwards compatibility
-                    if func.starts_with("fs/") {
-                        return self.compile_fs_call(func, args);
-                    }
-                    if func.starts_with("example/") {
-                        return self.compile_rust_example_call(func, args);
-                    }
-                    if func.starts_with("async-demo/") {
-                        return self.compile_async_demo_call(func, args);
                     }
 
                     // Check if this function is from a .clip package (Phase 4)
@@ -7338,14 +7324,10 @@ impl<'ctx> CodeGen<'ctx> {
                         // Auto-declare all functions from this library
                         self.declare_rust_library_functions(&lib)?;
                     } else {
-                        // Fall back to hardcoded libraries (for backwards compatibility)
-                        match module.as_str() {
-                            "rust.fs" => self.declare_fs_functions(),
-                            "rust.path" => self.declare_path_functions(),
-                            "rust.example" => self.declare_rust_example_functions(),
-                            "rust.async-demo" => self.declare_async_demo_functions(),
-                            _ => return Err(format!("Unknown rust module: {}. Did you add it to rust-dependencies in Clorus.toml?", module)),
-                        }
+                        return Err(format!(
+                            "Unknown rust module: {}. Add it to rust-dependencies in Clorus.toml.",
+                            module
+                        ));
                     }
                 } else if module == "clorus.core" {
                     self.declare_core_functions();
