@@ -1,7 +1,7 @@
 # Clorus Stdlib Parity Matrix (`clorus.core`)
 
 Last updated: 2026-03-05  
-Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" CLORUS_TEST_JOBS=2 tests/run_all_tests.sh` -> Passed 241, Failed 0, Skipped 1.
+Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit legacy" CLORUS_TEST_JOBS=2 tests/run_all_tests.sh` -> Passed 243, Failed 0, Skipped 1.
 
 This is the working source-of-truth for **stdlib parity execution** (separate from core language/compiler parity).
 
@@ -46,12 +46,13 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 
 ## Reader Support Helpers
 - ✅ `re-pattern` baseline for regex reader literal lowering (`#\"...\"`)
+- ✅ regex API baseline: `re-find`, `re-matches`, `re-seq`, `re-replace`, `re-replace-first`
 
 ## Residual Gaps (Narrow, Explicit)
 1. `sort`/`sort-by` now support comparator arities with stable tie behavior.
    - Missing: full Clojure comparator contract parity (boolean + compare-style numeric-return comparators across mixed domains).
-2. Reader regex support is baseline only (`#\"...\"` -> `re-pattern` string form).
-   - Missing: full regex API parity (`re-find`, `re-matches`, replacement regex forms).
+2. Regex support is baseline complete for core APIs and capture-group behavior.
+   - Missing: deeper Clojure compatibility details (compiled-pattern object identity, full invalid-pattern exception parity).
 3. Stdlib long-tail is now mostly covered for core bad-arg/arity paths.
    - Remaining work is selective deep-behavior expansion, not broad missing primitives.
 
@@ -66,4 +67,4 @@ This is the working source-of-truth for **stdlib parity execution** (separate fr
 
 ## Execution Plan (Chunked)
 1. Expand `sort`/`sort-by` semantics matrix beyond numeric baseline.
-2. Add regex API parity slice on top of current reader-lowering baseline.
+2. Expand regex compatibility from baseline API parity to full Clojure edge semantics.
