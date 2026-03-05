@@ -1,10 +1,13 @@
 /// LLVM Code Generation for Clorus
 mod closures;
 mod arithmetic;
+mod async_calls;
 mod calls;
-mod external_calls;
 mod ffi_calls;
+mod fs_calls;
 mod functions;
+mod core_calls;
+mod egui_calls;
 mod quotes;
 
 use clorus_syntax::{Expr, MapPatternKey, Pattern};
