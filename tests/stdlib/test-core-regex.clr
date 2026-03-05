@@ -1,0 +1,17 @@
+(ns tests.stdlib.test-core-regex)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "re-find hit" (re-find #"[0-9]+" "abc123def") "123")
+    (assert-eq "re-find miss" (re-find #"[0-9]+" "abcdef") nil)
+    (assert-eq "re-matches full" (re-matches #"[0-9]+" "12345") "12345")
+    (assert-eq "re-matches partial miss" (re-matches #"[0-9]+" "a12345") nil)
+    (assert-eq "re-seq matches" (re-seq #"[0-9]+" "a1b22c333") ["1" "22" "333"])
+    (assert-eq "re-replace all" (re-replace "a1b22c333" #"[0-9]+" "X") "aXbXcX")
+    (assert-eq "re-replace-first only first" (re-replace-first "a1b22c333" #"[0-9]+" "X") "aXb22c333")
+    "PASS"))

@@ -8,8 +8,9 @@
 /// - New strings are created with refcount 1
 /// - Caller owns the returned reference
 
-use crate::value::{Value, ValueTag, Header, ValueData};
+use crate::value::{Value, ValueTag};
 use crate::vector::PersistentVector;
+use regex_lite::Regex;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 
@@ -464,6 +465,149 @@ pub extern "C" fn clorus_replace_first(s: *mut Value, match_str: *mut Value, rep
         };
 
         rust_string_to_value(string.replacen(&match_pattern, &repl, 1))
+    }
+}
+
+/// Regex find: returns first match as string or nil.
+///
+/// (re-find #\"[0-9]+\" \"abc123def\") => \"123\"
+#[no_mangle]
+pub extern "C" fn clorus_re_find(pattern: *mut Value, s: *mut Value) -> *mut Value {
+    unsafe {
+        let pattern = match get_string_value(pattern) {
+            Some(p) => p,
+            None => return Value::nil(),
+        };
+        let input = match get_string_value(s) {
+            Some(v) => v,
+            None => return Value::nil(),
+        };
+
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            Err(_) => return Value::nil(),
+        };
+
+        match re.find(&input) {
+            Some(m) => rust_string_to_value(m.as_str().to_string()),
+            None => Value::nil(),
+        }
+    }
+}
+
+/// Regex matches: returns full match string only when regex matches entire input.
+///
+/// (re-matches #\"[0-9]+\" \"123\") => \"123\"
+/// (re-matches #\"[0-9]+\" \"a123\") => nil
+#[no_mangle]
+pub extern "C" fn clorus_re_matches(pattern: *mut Value, s: *mut Value) -> *mut Value {
+    unsafe {
+        let pattern = match get_string_value(pattern) {
+            Some(p) => p,
+            None => return Value::nil(),
+        };
+        let input = match get_string_value(s) {
+            Some(v) => v,
+            None => return Value::nil(),
+        };
+
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            Err(_) => return Value::nil(),
+        };
+
+        if let Some(caps) = re.captures(&input) {
+            if let Some(full) = caps.get(0) {
+                if full.start() == 0 && full.end() == input.len() {
+                    return rust_string_to_value(full.as_str().to_string());
+                }
+            }
+        }
+        Value::nil()
+    }
+}
+
+/// Regex seq: returns vector of all match strings (or empty vector).
+#[no_mangle]
+pub extern "C" fn clorus_re_seq(pattern: *mut Value, s: *mut Value) -> *mut Value {
+    unsafe {
+        let pattern = match get_string_value(pattern) {
+            Some(p) => p,
+            None => return crate::vector::clorus_vector_empty(),
+        };
+        let input = match get_string_value(s) {
+            Some(v) => v,
+            None => return crate::vector::clorus_vector_empty(),
+        };
+
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            Err(_) => return crate::vector::clorus_vector_empty(),
+        };
+
+        let mut result = crate::vector::clorus_vector_empty();
+        for m in re.find_iter(&input) {
+            let mv = rust_string_to_value(m.as_str().to_string());
+            let next = crate::vector::clorus_vector_conj(result, mv);
+            crate::value::clorus_release(result);
+            crate::value::clorus_release(mv);
+            result = next;
+        }
+        result
+    }
+}
+
+/// Regex replace all.
+#[no_mangle]
+pub extern "C" fn clorus_re_replace(s: *mut Value, pattern: *mut Value, replacement: *mut Value) -> *mut Value {
+    unsafe {
+        let input = match get_string_value(s) {
+            Some(v) => v,
+            None => return rust_string_to_value(String::new()),
+        };
+        let pattern = match get_string_value(pattern) {
+            Some(p) => p,
+            None => return rust_string_to_value(input),
+        };
+        let replacement = match get_string_value(replacement) {
+            Some(r) => r,
+            None => String::new(),
+        };
+
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            Err(_) => return rust_string_to_value(input),
+        };
+        rust_string_to_value(re.replace_all(&input, replacement.as_str()).to_string())
+    }
+}
+
+/// Regex replace first.
+#[no_mangle]
+pub extern "C" fn clorus_re_replace_first(
+    s: *mut Value,
+    pattern: *mut Value,
+    replacement: *mut Value,
+) -> *mut Value {
+    unsafe {
+        let input = match get_string_value(s) {
+            Some(v) => v,
+            None => return rust_string_to_value(String::new()),
+        };
+        let pattern = match get_string_value(pattern) {
+            Some(p) => p,
+            None => return rust_string_to_value(input),
+        };
+        let replacement = match get_string_value(replacement) {
+            Some(r) => r,
+            None => String::new(),
+        };
+
+        let re = match Regex::new(&pattern) {
+            Ok(re) => re,
+            Err(_) => return rust_string_to_value(input),
+        };
+        rust_string_to_value(re.replace(&input, replacement.as_str()).to_string())
     }
 }
 

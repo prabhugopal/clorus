@@ -3057,6 +3057,138 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_pointer_value())
             }
+            "re-find" => {
+                if args.len() != 2 {
+                    return Err("re-find requires 2 arguments: pattern, string".to_string());
+                }
+
+                let pattern = self.compile_expr(&args[0])?;
+                let input = self.compile_expr(&args[1])?;
+
+                let re_find_fn = self
+                    .module
+                    .get_function("clorus_re_find")
+                    .ok_or("clorus_re_find not declared")?;
+                let result = self
+                    .builder
+                    .build_call(re_find_fn, &[pattern.into(), input.into()], "re_find_call")
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+            "re-matches" => {
+                if args.len() != 2 {
+                    return Err("re-matches requires 2 arguments: pattern, string".to_string());
+                }
+
+                let pattern = self.compile_expr(&args[0])?;
+                let input = self.compile_expr(&args[1])?;
+
+                let re_matches_fn = self
+                    .module
+                    .get_function("clorus_re_matches")
+                    .ok_or("clorus_re_matches not declared")?;
+                let result = self
+                    .builder
+                    .build_call(
+                        re_matches_fn,
+                        &[pattern.into(), input.into()],
+                        "re_matches_call",
+                    )
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+            "re-seq" => {
+                if args.len() != 2 {
+                    return Err("re-seq requires 2 arguments: pattern, string".to_string());
+                }
+
+                let pattern = self.compile_expr(&args[0])?;
+                let input = self.compile_expr(&args[1])?;
+
+                let re_seq_fn = self
+                    .module
+                    .get_function("clorus_re_seq")
+                    .ok_or("clorus_re_seq not declared")?;
+                let result = self
+                    .builder
+                    .build_call(re_seq_fn, &[pattern.into(), input.into()], "re_seq_call")
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+            "re-replace" => {
+                if args.len() != 3 {
+                    return Err("re-replace requires 3 arguments: string, pattern, replacement".to_string());
+                }
+
+                let input = self.compile_expr(&args[0])?;
+                let pattern = self.compile_expr(&args[1])?;
+                let replacement = self.compile_expr(&args[2])?;
+
+                let re_replace_fn = self
+                    .module
+                    .get_function("clorus_re_replace")
+                    .ok_or("clorus_re_replace not declared")?;
+                let result = self
+                    .builder
+                    .build_call(
+                        re_replace_fn,
+                        &[input.into(), pattern.into(), replacement.into()],
+                        "re_replace_call",
+                    )
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+            "re-replace-first" => {
+                if args.len() != 3 {
+                    return Err(
+                        "re-replace-first requires 3 arguments: string, pattern, replacement"
+                            .to_string(),
+                    );
+                }
+
+                let input = self.compile_expr(&args[0])?;
+                let pattern = self.compile_expr(&args[1])?;
+                let replacement = self.compile_expr(&args[2])?;
+
+                let re_replace_first_fn = self
+                    .module
+                    .get_function("clorus_re_replace_first")
+                    .ok_or("clorus_re_replace_first not declared")?;
+                let result = self
+                    .builder
+                    .build_call(
+                        re_replace_first_fn,
+                        &[input.into(), pattern.into(), replacement.into()],
+                        "re_replace_first_call",
+                    )
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
 
             // I/O operations
             "print" => {

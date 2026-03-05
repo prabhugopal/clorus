@@ -615,6 +615,11 @@ impl<'ctx> CodeGen<'ctx> {
             "trim-right",
             "replace",
             "replace-first",
+            "re-find",
+            "re-matches",
+            "re-seq",
+            "re-replace",
+            "re-replace-first",
             "gensym",
             "string?",
             "starts-with?",
@@ -1053,6 +1058,11 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_trim_right", 1);
         self.declare_value_fn("clorus_replace", 3);
         self.declare_value_fn("clorus_replace_first", 3);
+        self.declare_value_fn("clorus_re_find", 2);
+        self.declare_value_fn("clorus_re_matches", 2);
+        self.declare_value_fn("clorus_re_seq", 2);
+        self.declare_value_fn("clorus_re_replace", 3);
+        self.declare_value_fn("clorus_re_replace_first", 3);
         self.declare_value_to_bool_fn("clorus_is_string");
         self.declare_value_to_bool_fn("clorus_is_number");
         self.declare_value_to_bool_fn("clorus_is_vector");
