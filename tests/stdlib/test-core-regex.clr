@@ -15,13 +15,14 @@
     (assert-eq "re-matches groups" (re-matches #"([a-z]+)([0-9]+)" "abc123") ["abc123" "abc" "123"])
     (assert-eq "re-find optional group nil" (re-find #"(a)?b" "b") ["b" nil])
     (assert-eq "re-seq matches" (re-seq #"[0-9]+" "a1b22c333") ["1" "22" "333"])
+    (assert-eq "re-seq miss returns nil" (re-seq #"[0-9]+" "abcdef") nil)
     (assert-eq "re-seq groups" (re-seq #"([a-z])([0-9])" "a1b2") [["a1" "a" "1"] ["b2" "b" "2"]])
     (assert-eq "re-replace all" (re-replace "a1b22c333" #"[0-9]+" "X") "aXbXcX")
     (assert-eq "re-replace-first only first" (re-replace-first "a1b22c333" #"[0-9]+" "X") "aXb22c333")
     ;; Invalid regex behavior (current runtime contract): non-throwing fallback.
     (assert-eq "re-find invalid pattern" (re-find "[" "abc") nil)
     (assert-eq "re-matches invalid pattern" (re-matches "[" "abc") nil)
-    (assert-eq "re-seq invalid pattern" (re-seq "[" "abc") [])
+    (assert-eq "re-seq invalid pattern" (re-seq "[" "abc") nil)
     (assert-eq "re-replace invalid pattern" (re-replace "abc" "[" "X") "abc")
     (assert-eq "re-replace-first invalid pattern" (re-replace-first "abc" "[" "X") "abc")
     (assert-eq

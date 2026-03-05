@@ -555,16 +555,16 @@ pub extern "C" fn clorus_re_seq(pattern: *mut Value, s: *mut Value) -> *mut Valu
     unsafe {
         let pattern = match get_string_value(pattern) {
             Some(p) => p,
-            None => return crate::vector::clorus_vector_empty(),
+            None => return Value::nil(),
         };
         let input = match get_string_value(s) {
             Some(v) => v,
-            None => return crate::vector::clorus_vector_empty(),
+            None => return Value::nil(),
         };
 
         let re = match Regex::new(&pattern) {
             Ok(re) => re,
-            Err(_) => return crate::vector::clorus_vector_empty(),
+            Err(_) => return Value::nil(),
         };
 
         let mut result = crate::vector::clorus_vector_empty();
@@ -575,7 +575,12 @@ pub extern "C" fn clorus_re_seq(pattern: *mut Value, s: *mut Value) -> *mut Valu
             crate::value::clorus_release(mv);
             result = next;
         }
-        result
+        if crate::vector::clorus_vector_count(result) == 0 {
+            crate::value::clorus_release(result);
+            Value::nil()
+        } else {
+            result
+        }
     }
 }
 
