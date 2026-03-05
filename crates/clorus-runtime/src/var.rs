@@ -471,6 +471,18 @@ pub extern "C" fn clorus_deref_var_value(value_ptr: *mut Value) -> *mut Value {
             return std::ptr::null_mut();
         }
 
+        // Defensive guard against invalid pointers crossing FFI/JIT boundaries.
+        // We frequently observe tiny sentinel-like addresses (e.g. 0x8/0x10) when a
+        // bad caller passes non-Value data into this helper; dereferencing those
+        // pointers causes process crashes.
+        let addr = value_ptr as usize;
+        if addr < 4096 || (addr & (std::mem::align_of::<Value>() - 1)) != 0 {
+            eprintln!(
+                "Attempted to deref invalid value pointer in clorus_deref_var_value: 0x{addr:x}"
+            );
+            return std::ptr::null_mut();
+        }
+
         let out = if (*value_ptr).tag() == ValueTag::Var {
             let var_ptr = (*value_ptr).as_var();
             clorus_var_get(var_ptr)
