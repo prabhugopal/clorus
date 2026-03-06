@@ -4,6 +4,7 @@
 /// so they can be called from Clorus with zero wrapper code.
 use std::fs;
 use std::path::Path;
+use quote::ToTokens;
 use syn::{parse_file, FnArg, Item, ItemFn, ReturnType, Type};
 
 // Modern type-safe FFI analyzer
@@ -114,9 +115,11 @@ impl FfiGenerator {
                 .map(|seg| seg.ident.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
             Type::Ptr(ptr) => {
-                // Handle pointer types: *mut T or *const T
-                // We represent all pointers as "*mut u8" for FFI
-                "*mut u8".to_string()
+                // Preserve pointer mutability and pointee so unsupported pointer
+                // signatures can be rejected with specific diagnostics upstream.
+                let pointee = ptr.elem.to_token_stream().to_string().replace(' ', "");
+                let ptr_prefix = if ptr.mutability.is_some() { "*mut " } else { "*const " };
+                format!("{}{}", ptr_prefix, pointee)
             }
             _ => "unknown".to_string(),
         }
@@ -193,7 +196,8 @@ impl FfiGenerator {
             "bool" => "bool".to_string(),
             "String" => "*mut c_char".to_string(), // CString::into_raw() returns *mut c_char
             "()" => "()".to_string(),
-            "*mut u8" => "*mut u8".to_string(), // Pointer types pass through as-is
+            "*mut u8" => "*mut u8".to_string(),   // Pointer types pass through as-is
+            "*const u8" => "*mut u8".to_string(), // C carrier for const raw pointer
             _ => "*mut u8".to_string(),         // Generic pointer for complex types
         }
     }
@@ -203,6 +207,7 @@ impl FfiGenerator {
             "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
                 format!("    let {}_rust = {};", name, name)
             }
+            "*const u8" => format!("    let {}_rust = {} as *const u8;", name, name),
             "isize" => format!("    let {}_rust = {} as isize;", name, name),
             "usize" => format!("    let {}_rust = {} as usize;", name, name),
             "String" => format!(
@@ -218,6 +223,7 @@ impl FfiGenerator {
             "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
                 format!("    {}", name)
             }
+            "*const u8" => format!("    {} as *mut u8", name),
             "isize" => format!("    {} as i64", name),
             "usize" => format!("    {} as u64", name),
             "String" => format!(
@@ -365,5 +371,32 @@ mod tests {
         assert_eq!(generator.functions[0].name, "add");
         assert_eq!(generator.functions[0].params.len(), 2);
         assert_eq!(generator.functions[0].return_type, "f64");
+    }
+
+    #[test]
+    fn test_parse_pointer_mutability_and_pointee_types() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_file = format!("/tmp/test_ptr_types_{}.rs", unique);
+        let mut file = std::fs::File::create(&temp_file).unwrap();
+        file.write_all(
+            b"pub fn ptrs(a: *mut u8, b: *const u8, c: *mut i32, d: *const i64) -> *const u8 { b }",
+        )
+        .unwrap();
+
+        let mut generator = FfiGenerator::new();
+        generator.parse_file(Path::new(&temp_file)).unwrap();
+
+        assert_eq!(generator.functions.len(), 1);
+        let params = &generator.functions[0].params;
+        assert_eq!(params[0].type_name, "*mut u8");
+        assert_eq!(params[1].type_name, "*const u8");
+        assert_eq!(params[2].type_name, "*mut i32");
+        assert_eq!(params[3].type_name, "*const i64");
+        assert_eq!(generator.functions[0].return_type, "*const u8");
+
+        let _ = std::fs::remove_file(&temp_file);
     }
 }

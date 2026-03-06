@@ -442,7 +442,23 @@ impl RustFfiProcessor {
 
         let mut generator = FfiGenerator::new();
         generator.parse_file(&lib_src)?;
-        generator.functions = Self::retain_supported_ffi_functions(generator.functions, verbose);
+        let discovered = generator.functions.clone();
+        let unsupported_details = Self::collect_unsupported_signature_details(&discovered);
+        generator.functions = Self::retain_supported_ffi_functions(discovered, verbose);
+
+        if generator.functions.is_empty() && !unsupported_details.is_empty() {
+            let mut error = format!(
+                "has public functions, but none are FFI-compatible after signature filtering."
+            );
+            error.push_str("\nUnsupported signature examples:");
+            for detail in unsupported_details.iter().take(5) {
+                error.push_str(&format!("\n  - {}", detail));
+            }
+            error.push_str(
+                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`.",
+            );
+            return Err(error);
+        }
 
         if generator.functions.is_empty() {
             if verbose {
@@ -2692,17 +2708,8 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
             .iter()
             .find(|f| f.name == "id_const_ptr")
             .expect("id_const_ptr function should exist");
-        assert!(
-            id_const_ptr.params[0].type_name == "*const u8"
-                || id_const_ptr.params[0].type_name == "*mut u8",
-            "unexpected const-pointer param type: {}",
-            id_const_ptr.params[0].type_name
-        );
-        assert!(
-            id_const_ptr.return_type == "*const u8" || id_const_ptr.return_type == "*mut u8",
-            "unexpected const-pointer return type: {}",
-            id_const_ptr.return_type
-        );
+        assert_eq!(id_const_ptr.params[0].type_name, "*const u8");
+        assert_eq!(id_const_ptr.return_type, "*const u8");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -3049,8 +3056,13 @@ auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
         });
         assert!(err.contains("Rust dependency 'auto-parse-bad-ptr-lib':"));
         assert!(
-            err.contains("Wrapper crate build failed"),
-            "expected wrapper build failure, got: {}",
+            err.contains("none are FFI-compatible after signature filtering"),
+            "expected unsupported-signature filtering failure, got: {}",
+            err
+        );
+        assert!(
+            err.contains("unsupported param `p` type `*mut i32`"),
+            "expected concrete unsupported pointer signature detail, got: {}",
             err
         );
         assert!(

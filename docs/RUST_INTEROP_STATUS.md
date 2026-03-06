@@ -122,10 +122,11 @@ The CLI/rust-ffi integration tests now cover:
 - codegen regression covers fully-prefixed namespace form (`rust.<lib>/<fn>`) resolving to the same dependency-scoped Rust FFI symbol
 - codegen regression covers both hyphen and underscore forms of fully-prefixed rust namespace (`rust.<lib>/<fn>`) resolving to the same scoped symbol
 - local path auto-parse with unsupported-signature filtering
+- local path auto-parse preserves raw-pointer mutability/pointee in signature analysis (e.g. `*const u8` vs `*mut i32`)
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
 - local path auto-parse with const-pointer signatures (`*const u8`) is covered and accepted via pointer-carrier mapping
 - local path `interface = false` is covered and behaves like omitted interface (auto-parse path flow)
-- local path auto-parse pointer-mismatch rejection includes explicit hint (`*mut u8` and `*const u8` are the only auto-supported raw pointer carriers)
+- local path auto-parse pointer-mismatch rejection happens during signature filtering (before wrapper build) and includes explicit hint (`*mut u8` and `*const u8` are the only auto-supported raw pointer carriers)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`) with `:rust` symbol override for impl/associated methods
 - local path dependency + explicit `.clri` interface path
