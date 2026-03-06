@@ -2265,6 +2265,63 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_interface_false_uses_auto_parse_flow() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_interface_false_{}", unique));
+        let dep_dir = root.join("iface-false-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "iface-false-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn plus_one(x: i32) -> i32 { x + 1 }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+iface-false-lib = { path = "iface-false-lib", interface = false }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "iface_false_lib_ffi");
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"plus_one"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_parse_rejects_unsupported_pointer_signatures() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
