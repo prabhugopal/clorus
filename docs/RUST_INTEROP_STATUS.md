@@ -122,6 +122,7 @@ The CLI/rust-ffi integration tests now cover:
 - dependency processing errors now include dependency-name context prefixes
 - version+`interface = true` auto-discovery failures include dependency-name context and searched interface paths
 - unsupported explicit interface-extension failures include dependency-name context
+- explicit interface directory-path failures include dependency-name context
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
 - explicit interface path must be a file (directory-path misuse rejected with clear diagnostics)
 - explicit interface type-matrix validation (unsupported param and return types rejected before wrapper compile)
