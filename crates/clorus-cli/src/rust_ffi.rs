@@ -1905,6 +1905,15 @@ impl Foo {
     }
 
     #[test]
+    fn rust_wrapper_export_symbol_normalizes_dependency_and_function_names() {
+        let symbol = RustFfiProcessor::rust_wrapper_export_symbol(
+            "demo.lib-name",
+            "foo-bar?",
+        );
+        assert_eq!(symbol, "clorus_demo_lib_name__foo_bar_");
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_interface_extended_numeric_types() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

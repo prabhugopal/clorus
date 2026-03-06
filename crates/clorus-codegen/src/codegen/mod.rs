@@ -7521,6 +7521,12 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_ffi_symbol_name_normalizes_punctuation() {
+        let symbol = CodeGen::rust_ffi_symbol_name("demo.lib-name", "foo-bar?");
+        assert_eq!(symbol, "clorus_demo_lib_name__foo_bar_");
+    }
+
+    #[test]
     fn test_declare_rust_library_functions_does_not_collide_with_core_add() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
