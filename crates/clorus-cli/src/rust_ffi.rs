@@ -25,6 +25,10 @@ enum RustDepSource {
 }
 
 impl RustFfiProcessor {
+    fn should_build_offline(source: &RustDepSource) -> bool {
+        matches!(source, RustDepSource::Path(_))
+    }
+
     pub fn new() -> Self {
         Self {
             libraries: Vec::new(),
@@ -159,7 +163,12 @@ impl RustFfiProcessor {
         }
 
         // Compile the wrapper crate and return with function info
-        let mut processed = Self::compile_wrapper_crate(&wrapper_dir, &wrapper_name, verbose)?;
+        let mut processed = Self::compile_wrapper_crate(
+            &wrapper_dir,
+            &wrapper_name,
+            verbose,
+            true,
+        )?;
         processed.functions = generator.functions.clone();
 
         if verbose {
@@ -268,16 +277,23 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         wrapper_dir: &Path,
         wrapper_name: &str,
         verbose: bool,
+        offline: bool,
     ) -> Result<ProcessedLibrary, String> {
         if verbose {
-            println!("      Compiling wrapper crate...");
+            if offline {
+                println!("      Compiling wrapper crate (offline)...");
+            } else {
+                println!("      Compiling wrapper crate (network-enabled)...");
+            }
         }
 
-        // Run cargo build --release --offline (use cached dependencies)
-        let output = Command::new("cargo")
-            .arg("build")
-            .arg("--release")
-            .arg("--offline")
+        // Path deps can be built offline; version deps may need registry access.
+        let mut cmd = Command::new("cargo");
+        cmd.arg("build").arg("--release");
+        if offline {
+            cmd.arg("--offline");
+        }
+        let output = cmd
             .current_dir(wrapper_dir)
             .output()
             .map_err(|e| format!("Failed to run cargo build on wrapper: {}", e))?;
@@ -396,7 +412,12 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         }
 
         // Compile and return
-        let mut processed = Self::compile_wrapper_crate(&wrapper_dir, &wrapper_name, verbose)?;
+        let mut processed = Self::compile_wrapper_crate(
+            &wrapper_dir,
+            &wrapper_name,
+            verbose,
+            Self::should_build_offline(source),
+        )?;
         processed.functions = functions;
 
         Ok(processed)
@@ -444,5 +465,11 @@ mod tests {
         assert!(cargo_toml.contains("demo-math = \"0.1.0\""));
 
         let _ = std::fs::remove_dir_all(wrapper_dir);
+    }
+
+    #[test]
+    fn path_sources_build_offline_registry_sources_build_online() {
+        assert!(RustFfiProcessor::should_build_offline(&RustDepSource::Path(PathBuf::from("."))));
+        assert!(!RustFfiProcessor::should_build_offline(&RustDepSource::Version("1.0".to_string())));
     }
 }
