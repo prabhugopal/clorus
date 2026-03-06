@@ -292,6 +292,12 @@ impl RustFfiProcessor {
             }
 
             let source = if let Some(path) = dep.get_path() {
+                if path.trim().is_empty() {
+                    return Err(Self::with_dependency_context(
+                        name,
+                        "path cannot be empty".to_string(),
+                    ));
+                }
                 let lib_path = PathBuf::from(path);
                 if !lib_path.exists() {
                     return Err(Self::with_dependency_context(
@@ -301,6 +307,12 @@ impl RustFfiProcessor {
                 }
                 RustDepSource::Path(lib_path)
             } else if let Some(version) = dep.get_version() {
+                if version.trim().is_empty() {
+                    return Err(Self::with_dependency_context(
+                        name,
+                        "version cannot be empty".to_string(),
+                    ));
+                }
                 RustDepSource::Version(version.to_string())
             } else {
                 return Err(Self::with_dependency_context(
@@ -3268,6 +3280,52 @@ missing-lib = { path = "definitely-not-here-lib" }
         };
         assert!(err.contains("Rust dependency 'missing-lib': path not found"));
         assert!(err.contains("definitely-not-here-lib"));
+    }
+
+    #[test]
+    fn process_dependencies_reports_dependency_name_for_empty_path() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+empty-path-lib = { path = "   " }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected empty dependency path failure"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Rust dependency 'empty-path-lib': path cannot be empty"));
+    }
+
+    #[test]
+    fn process_dependencies_reports_dependency_name_for_empty_version() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+empty-version-lib = ""
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected empty dependency version failure"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Rust dependency 'empty-version-lib': version cannot be empty"));
     }
 
     #[test]
