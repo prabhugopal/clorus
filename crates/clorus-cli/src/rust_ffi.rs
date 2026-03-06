@@ -298,7 +298,8 @@ impl RustFfiProcessor {
             // Check if interface file is specified
             let processed = if let Some(interface_spec) = dep.get_interface() {
                 // Phase 2a: Use interface file
-                let interface_path = Self::resolve_interface_path(name, interface_spec)?;
+                let interface_path = Self::resolve_interface_path(name, interface_spec)
+                    .map_err(|e| format!("Rust dependency '{}': {}", name, e))?;
 
                 if verbose {
                     println!("      Using interface file: {}", interface_path);
@@ -3280,6 +3281,45 @@ dep-with-missing-iface = { path = "dep-with-missing-iface", interface = "interfa
         assert!(err.contains("Rust dependency 'dep-with-missing-iface':"));
         assert!(err.contains("Interface file not found"));
         assert!(err.contains("interfaces/does-not-exist.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_reports_dependency_name_for_version_auto_interface_missing() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_version_auto_interface_missing_{}",
+            unique
+        ));
+        std::fs::create_dir_all(&root).expect("create root");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+libm = { version = "0.2", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected interface auto-discovery failure"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Rust dependency 'libm':"));
+        assert!(err.contains("Interface auto-discovery failed for 'libm'"));
+        assert!(err.contains("interfaces/libm.clri"));
+        assert!(err.contains("interfaces/libm.clorus-ffi"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
