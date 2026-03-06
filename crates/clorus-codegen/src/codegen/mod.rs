@@ -7499,6 +7499,64 @@ mod tests {
     }
 
     #[test]
+    fn test_declare_rust_library_functions_supports_extended_numeric_types() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        let lib = RustLibrary {
+            name: "mathx".to_string(),
+            functions: vec![
+                RustFunction {
+                    name: "f32_id".to_string(),
+                    params: vec![RustParam {
+                        name: "x".to_string(),
+                        type_name: "f32".to_string(),
+                    }],
+                    return_type: "f32".to_string(),
+                },
+                RustFunction {
+                    name: "u32_id".to_string(),
+                    params: vec![RustParam {
+                        name: "x".to_string(),
+                        type_name: "u32".to_string(),
+                    }],
+                    return_type: "u32".to_string(),
+                },
+                RustFunction {
+                    name: "u64_id".to_string(),
+                    params: vec![RustParam {
+                        name: "x".to_string(),
+                        type_name: "u64".to_string(),
+                    }],
+                    return_type: "u64".to_string(),
+                },
+                RustFunction {
+                    name: "isize_id".to_string(),
+                    params: vec![RustParam {
+                        name: "x".to_string(),
+                        type_name: "isize".to_string(),
+                    }],
+                    return_type: "isize".to_string(),
+                },
+                RustFunction {
+                    name: "usize_id".to_string(),
+                    params: vec![RustParam {
+                        name: "x".to_string(),
+                        type_name: "usize".to_string(),
+                    }],
+                    return_type: "usize".to_string(),
+                },
+            ],
+        };
+
+        let result = codegen.declare_rust_library_functions(&lib);
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+        for fn_name in ["f32_id", "u32_id", "u64_id", "isize_id", "usize_id"] {
+            assert!(codegen.module.get_function(&format!("clorus_{}", fn_name)).is_some());
+        }
+    }
+
+    #[test]
     fn test_compile_multiple_fn() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
