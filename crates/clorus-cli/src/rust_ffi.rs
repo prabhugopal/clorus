@@ -963,6 +963,56 @@ mod tests {
     }
 
     #[test]
+    fn retain_supported_ffi_functions_accepts_extended_numeric_types() {
+        let functions = vec![
+            FunctionInfo {
+                name: "ok_f32".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "f32".to_string(),
+                }],
+                return_type: "f32".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_u32".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "u32".to_string(),
+                }],
+                return_type: "u32".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_u64".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "u64".to_string(),
+                }],
+                return_type: "u64".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_usize".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "usize".to_string(),
+                }],
+                return_type: "usize".to_string(),
+            },
+            FunctionInfo {
+                name: "bad_vec".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "Vec<u8>".to_string(),
+                }],
+                return_type: "Vec<u8>".to_string(),
+            },
+        ];
+
+        let filtered = RustFfiProcessor::retain_supported_ffi_functions(functions, false);
+        let names: Vec<String> = filtered.into_iter().map(|f| f.name).collect();
+        assert_eq!(names, vec!["ok_f32", "ok_u32", "ok_u64", "ok_usize"]);
+    }
+
+    #[test]
     fn collect_unsupported_signature_details_reports_reason() {
         let functions = vec![
             FunctionInfo {

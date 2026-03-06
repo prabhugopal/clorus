@@ -40,7 +40,11 @@ Notes:
 - Registry source discovery via `cargo metadata` for `version` deps.
 - Basic function-level interop for FFI-compatible signatures.
 - REPL/run/build can use imported Rust functions when wrappers are generated successfully.
-- Current auto-supported signature primitives: `f64`, `i32`, `i64`, `bool`, `String`, `()`, `*mut u8`.
+- Current auto-supported signature primitives:
+  - floats: `f32`, `f64`
+  - signed ints: `i32`, `i64`, `isize`
+  - unsigned ints: `u32`, `u64`, `usize`
+  - others: `bool`, `String`, `()`, `*mut u8`
 - Unsupported signatures now report concrete examples in build errors.
 
 ## Current Limits
