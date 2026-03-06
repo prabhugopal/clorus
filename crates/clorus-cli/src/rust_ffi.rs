@@ -628,7 +628,8 @@ impl RustFfiProcessor {
             .max_by(|a, b| Self::compare_version_like(&a.version, &b.version))
             .ok_or_else(|| {
                 format!(
-                    "Registry dependency '{}' was not found in cargo metadata package set",
+                    "Registry dependency '{}' was not found in cargo metadata package set. \
+Check the crate name/version in Clorus.toml and ensure cargo metadata can resolve the dependency.",
                     dep_name
                 )
             })?;
@@ -639,7 +640,9 @@ impl RustFfiProcessor {
             .find(|t| t.kind.iter().any(|k| k == "lib"))
             .ok_or_else(|| {
                 format!(
-                    "Registry dependency '{}' (resolved {}) has no lib target",
+                    "Registry dependency '{}' (resolved {}) has no lib target. \
+Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
+an explicit interface for a bridge exposing extern \"C\" functions.",
                     dep_name, package.version
                 )
             })?;
@@ -1326,6 +1329,7 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when only non-registry package exists");
         assert!(err.contains("Registry dependency 'demo-math' was not found"));
+        assert!(err.contains("Check the crate name/version in Clorus.toml"));
     }
 
     #[test]
@@ -1345,6 +1349,8 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when registry package has no lib target");
         assert!(err.contains("Registry dependency 'demo-math' (resolved 0.3.0) has no lib target"));
+        assert!(err.contains("Only library crates can be auto-wrapped"));
+        assert!(err.contains("use a local bridge crate"));
     }
 
     #[test]
