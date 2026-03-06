@@ -405,6 +405,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_interface_reports_location_for_malformed_return_pointer_type() {
+        let source = r#"
+(interface bad
+  (fn ptr-roundtrip [p :u8] :*const))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let err = parse_interface_file(file.path()).expect_err("expected parse failure");
+        assert!(err.contains("Failed to parse interface file"));
+        assert!(err.contains("Expected pointee type after :*const"));
+    }
+
+    #[test]
     fn test_parse_interface_supports_pointer_keywords_without_spaces() {
         let source = r#"
 (interface ptrs
