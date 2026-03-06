@@ -66,6 +66,22 @@ impl RustFfiProcessor {
         chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
     }
 
+    fn is_valid_rust_symbol_path(symbol: &str) -> bool {
+        if symbol.is_empty() || symbol.contains(char::is_whitespace) {
+            return false;
+        }
+        symbol.split("::").all(|segment| {
+            let mut chars = segment.chars();
+            let Some(first) = chars.next() else {
+                return false;
+            };
+            if !(first == '_' || first.is_ascii_alphabetic()) {
+                return false;
+            }
+            chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+        })
+    }
+
     fn compare_version_like(a: &str, b: &str) -> std::cmp::Ordering {
         fn parse_parts(v: &str) -> Vec<u64> {
             v.split('.')
@@ -819,6 +835,12 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                                 f.name, interface_path
                             ));
                         }
+                        if !Self::is_valid_rust_symbol_path(trimmed) {
+                            return Err(format!(
+                                "Invalid :rust override for function '{}': '{}' is not a valid Rust path symbol in {}",
+                                f.name, trimmed, interface_path
+                            ));
+                        }
                         trimmed.to_string()
                     }
                     None => exposed_name.clone(),
@@ -1070,6 +1092,18 @@ mod tests {
         assert!(!RustFfiProcessor::is_valid_export_symbol(""));
         assert!(!RustFfiProcessor::is_valid_export_symbol("2foo"));
         assert!(!RustFfiProcessor::is_valid_export_symbol("foo?"));
+    }
+
+    #[test]
+    fn is_valid_rust_symbol_path_accepts_simple_and_module_paths() {
+        assert!(RustFfiProcessor::is_valid_rust_symbol_path("answer"));
+        assert!(RustFfiProcessor::is_valid_rust_symbol_path("math_core::answer"));
+        assert!(RustFfiProcessor::is_valid_rust_symbol_path("Math::answer"));
+        assert!(!RustFfiProcessor::is_valid_rust_symbol_path(""));
+        assert!(!RustFfiProcessor::is_valid_rust_symbol_path("Math::"));
+        assert!(!RustFfiProcessor::is_valid_rust_symbol_path("::answer"));
+        assert!(!RustFfiProcessor::is_valid_rust_symbol_path("bad symbol"));
+        assert!(!RustFfiProcessor::is_valid_rust_symbol_path("2math::answer"));
     }
 
     #[test]
@@ -2283,6 +2317,76 @@ empty-iface-lib = { path = "empty-iface-lib", interface = "interfaces/empty-ifac
         };
         assert!(err.contains("contains no function definitions"));
         assert!(err.contains("interfaces/empty-iface-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_rejects_invalid_rust_symbol_override_path() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_invalid_rust_symbol_path_{}",
+            unique
+        ));
+        let dep_dir = root.join("invalid-rust-symbol-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "invalid-rust-symbol-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Math;
+impl Math {
+    pub fn answer() -> u64 { 42 }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("invalid-rust-symbol-lib.clri"),
+            r#"(interface invalid-rust-symbol-lib
+  (fn forty-two [] :u64 :rust "Math::")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+invalid-rust-symbol-lib = { path = "invalid-rust-symbol-lib", interface = "interfaces/invalid-rust-symbol-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected invalid rust symbol override path rejection"),
+            Err(e) => e,
+        };
+        assert!(err.contains("is not a valid Rust path symbol"));
+        assert!(err.contains("Math::"));
+        assert!(err.contains("interfaces/invalid-rust-symbol-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
