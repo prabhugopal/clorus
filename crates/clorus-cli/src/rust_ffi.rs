@@ -3068,6 +3068,88 @@ legacy-override-lib = { path = "legacy-override-lib", interface = "interfaces/le
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_legacy_interface_generates_scoped_symbols() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_legacy_iface_scoped_symbols_{}",
+            unique
+        ));
+        let dep_dir = root.join("legacy-scoped-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "legacy-scoped-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn add(a: f64, b: f64) -> f64 { a + b }
+pub fn multiply(a: f64, b: f64) -> f64 { a * b }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("legacy-scoped-lib.clorus-ffi"),
+            r#"(interface legacy-scoped-lib
+  (fn add [a :f64 b :f64] :f64)
+  (fn multiply [a :f64 b :f64] :f64))
+"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+legacy-scoped-lib = { path = "legacy-scoped-lib", interface = "interfaces/legacy-scoped-lib.clorus-ffi" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let _processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("legacy_scoped_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        assert!(
+            wrapper_src.exists(),
+            "wrapper source should exist at {}",
+            wrapper_src.display()
+        );
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("fn clorus_legacy_scoped_lib__add("));
+        assert!(generated.contains("fn clorus_legacy_scoped_lib__multiply("));
+        assert!(!generated.contains("fn clorus_add("));
+        assert!(!generated.contains("fn clorus_multiply("));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_explicit_clri_interface_path() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

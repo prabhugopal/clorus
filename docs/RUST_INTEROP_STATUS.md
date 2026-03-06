@@ -108,6 +108,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path auto-parse E2E regression covers dependency-scoped export generation for collision-prone names (e.g., `add`, `multiply`)
 - explicit interface (`interface = true`) E2E regression covers dependency-scoped export generation for collision-prone names
 - explicit interface + `:rust` override E2E regression also enforces dependency-scoped export generation
+- explicit legacy interface (`.clorus-ffi`) E2E regression enforces dependency-scoped export generation for collision-prone names
 - codegen regression covers coexistence of core intrinsics and same-named Rust exports (e.g., core `clorus_add` and Rust `add`)
 - codegen regression covers namespaced Rust-call compilation path emitting dependency-scoped FFI calls
 - local path auto-parse with unsupported-signature filtering
