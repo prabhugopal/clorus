@@ -792,11 +792,20 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             .iter()
             .map(|f: &InterfaceFunction| {
                 let exposed_name = f.name.replace('-', "_");
-                let rust_symbol = f
-                    .rust_symbol
-                    .clone()
-                    .unwrap_or_else(|| exposed_name.clone());
-                InterfaceBinding {
+                let rust_symbol = match f.rust_symbol.clone() {
+                    Some(symbol) => {
+                        let trimmed = symbol.trim();
+                        if trimmed.is_empty() {
+                            return Err(format!(
+                                "Invalid :rust override for function '{}': symbol cannot be empty in {}",
+                                f.name, interface_path
+                            ));
+                        }
+                        trimmed.to_string()
+                    }
+                    None => exposed_name.clone(),
+                };
+                Ok(InterfaceBinding {
                     exposed_name,
                     rust_symbol,
                     params: f
@@ -808,9 +817,9 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                         })
                         .collect(),
                     return_type: f.return_type.clone(),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>, String>>()?;
 
         let functions: Vec<FunctionInfo> = bindings
             .iter()
@@ -1965,6 +1974,72 @@ explicit-override-lib = { path = "explicit-override-lib", interface = "interface
         assert_eq!(lib.functions.len(), 1);
         assert_eq!(lib.functions[0].name, "forty_two");
         assert_eq!(lib.functions[0].return_type, "u64");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_rejects_empty_rust_symbol_override() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_empty_rust_symbol_{}",
+            unique
+        ));
+        let dep_dir = root.join("invalid-override-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "invalid-override-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn answer() -> u64 { 42 }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("invalid-override-lib.clri"),
+            r#"(interface invalid-override-lib
+  (fn forty-two [] :u64 :rust "   ")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+invalid-override-lib = { path = "invalid-override-lib", interface = "interfaces/invalid-override-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected invalid rust symbol override error"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Invalid :rust override for function 'forty-two'"));
+        assert!(err.contains("interfaces/invalid-override-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
