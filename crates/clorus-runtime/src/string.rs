@@ -672,6 +672,22 @@ pub extern "C" fn clorus_re_replace_first(
     }
 }
 
+/// Regex validity check for stdlib-level re-pattern parity.
+/// Returns 1 when `pattern` is a valid regex string, 0 otherwise.
+#[no_mangle]
+pub extern "C" fn clorus_regex_valid_i32(pattern: *mut Value) -> i32 {
+    unsafe {
+        let Some(pattern) = get_string_value(pattern) else {
+            return 0;
+        };
+        if Regex::new(&pattern).is_ok() {
+            1
+        } else {
+            0
+        }
+    }
+}
+
 // ============================================================================
 // String Predicates
 // ============================================================================

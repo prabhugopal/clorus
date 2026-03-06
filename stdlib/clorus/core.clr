@@ -929,4 +929,7 @@
 ;; to (re-pattern "..."), so keep this available in core.
 ;; Full regex engine parity is tracked separately.
 (defn re-pattern [s]
-  (str s))
+  (let [pattern (str s)]
+    (if (__clorus_regex_valid pattern)
+      pattern
+      (throw (ex-info "Invalid regex pattern" {:pattern pattern})))))

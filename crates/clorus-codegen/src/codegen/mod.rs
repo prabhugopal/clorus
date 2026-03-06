@@ -656,6 +656,7 @@ impl<'ctx> CodeGen<'ctx> {
             "__clorus_is_seq",
             "__clorus_is_coll",
             "__clorus_is_fn",
+            "__clorus_regex_valid",
             // Collection helpers
             "keys",
             "vals",
@@ -1092,6 +1093,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_i32_fn("clorus_is_coll_i32");
         self.declare_value_to_i32_fn("clorus_is_fn_i32");
         self.declare_value_to_i32_fn("clorus_is_var_i32");
+        self.declare_value_to_i32_fn("clorus_regex_valid_i32");
         self.declare_value2_to_i32_fn("clorus_starts_with");
         self.declare_value2_to_i32_fn("clorus_ends_with");
 

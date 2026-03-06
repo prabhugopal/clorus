@@ -71,6 +71,7 @@ impl<'ctx> CodeGen<'ctx> {
             "seq?" | "__clorus_is_seq" => Some("clorus_is_seq_i32"),
             "coll?" | "__clorus_is_coll" => Some("clorus_is_coll_i32"),
             "fn?" | "__clorus_is_fn" => Some("clorus_is_fn_i32"),
+            "__clorus_regex_valid" => Some("clorus_regex_valid_i32"),
             _ => None,
         } {
             return self.compile_unary_predicate_call(func, runtime_predicate, args);

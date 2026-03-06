@@ -10,6 +10,17 @@
     (assert-eq "re-find hit" (re-find #"[0-9]+" "abc123def") "123")
     (assert-eq "re-find miss" (re-find #"[0-9]+" "abcdef") nil)
     (assert-eq "re-find groups" (re-find #"([a-z]+)([0-9]+)" "abc123def") ["abc123" "abc" "123"])
+    (assert-eq "re-pattern valid passthrough" (re-pattern "[0-9]+") "[0-9]+")
+    (assert-eq
+      "re-pattern invalid throws ex-info"
+      (try
+        (do (re-pattern "[")
+            :no-throw)
+        (catch e
+          (if (= (:pattern (ex-data e)) "[")
+            :threw
+            :wrong-data)))
+      :threw)
     (assert-eq "re-matches full" (re-matches #"[0-9]+" "12345") "12345")
     (assert-eq "re-matches partial miss" (re-matches #"[0-9]+" "a12345") nil)
     (assert-eq "re-matches groups" (re-matches #"([a-z]+)([0-9]+)" "abc123") ["abc123" "abc" "123"])
