@@ -83,6 +83,31 @@ impl RustFfiProcessor {
             .collect()
     }
 
+    fn resolve_interface_path(
+        dep_name: &str,
+        interface_spec: crate::manifest::InterfaceSpec,
+    ) -> Result<String, String> {
+        match interface_spec {
+            crate::manifest::InterfaceSpec::Path(path) => Ok(path),
+            crate::manifest::InterfaceSpec::Auto => {
+                let clri_path = format!("interfaces/{}.clri", dep_name);
+                let legacy_path = format!("interfaces/{}.clorus-ffi", dep_name);
+
+                if std::path::Path::new(&clri_path).exists() {
+                    return Ok(clri_path);
+                }
+                if std::path::Path::new(&legacy_path).exists() {
+                    return Ok(legacy_path);
+                }
+
+                Err(format!(
+                    "Interface auto-discovery failed for '{}'. Searched:\n  - {}\n  - {}\nAdd one of these files, or set interface = \"<path>\" explicitly.",
+                    dep_name, clri_path, legacy_path
+                ))
+            }
+        }
+    }
+
     fn retain_supported_ffi_functions(
         functions: Vec<FunctionInfo>,
         verbose: bool,
@@ -158,20 +183,7 @@ impl RustFfiProcessor {
             // Check if interface file is specified
             let processed = if let Some(interface_spec) = dep.get_interface() {
                 // Phase 2a: Use interface file
-                let interface_path = match interface_spec {
-                    crate::manifest::InterfaceSpec::Path(path) => path,
-                    crate::manifest::InterfaceSpec::Auto => {
-                        // Auto-discover: Try .clri first (preferred), fall back to .clorus-ffi (legacy)
-                        let clri_path = format!("interfaces/{}.clri", name);
-                        let legacy_path = format!("interfaces/{}.clorus-ffi", name);
-
-                        if std::path::Path::new(&clri_path).exists() {
-                            clri_path
-                        } else {
-                            legacy_path
-                        }
-                    }
-                };
+                let interface_path = Self::resolve_interface_path(name, interface_spec)?;
 
                 if verbose {
                     println!("      Using interface file: {}", interface_path);
@@ -787,5 +799,56 @@ mod tests {
         assert_eq!(details.len(), 2);
         assert!(details[0].contains("unsupported param"));
         assert!(details[1].contains("unsupported return type"));
+    }
+
+    #[test]
+    fn resolve_interface_path_auto_prefers_clri() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_{}", unique));
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+        std::fs::write(iface_dir.join("libm.clri"), "(interface libm)").expect("write clri");
+
+        let original = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(&root).expect("cd temp root");
+
+        let resolved = RustFfiProcessor::resolve_interface_path(
+            "libm",
+            crate::manifest::InterfaceSpec::Auto,
+        )
+        .expect("auto resolve should find .clri");
+
+        std::env::set_current_dir(original).expect("restore cwd");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(resolved, "interfaces/libm.clri");
+    }
+
+    #[test]
+    fn resolve_interface_path_auto_reports_clear_error_when_missing() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_missing_{}", unique));
+        std::fs::create_dir_all(&root).expect("create temp root");
+
+        let original = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(&root).expect("cd temp root");
+
+        let err = RustFfiProcessor::resolve_interface_path(
+            "missing-lib",
+            crate::manifest::InterfaceSpec::Auto,
+        )
+        .expect_err("auto resolve should fail");
+
+        std::env::set_current_dir(original).expect("restore cwd");
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(err.contains("Interface auto-discovery failed"));
+        assert!(err.contains("interfaces/missing-lib.clri"));
     }
 }
