@@ -54,6 +54,35 @@ struct InterfaceBinding {
 }
 
 impl RustFfiProcessor {
+    fn compare_version_like(a: &str, b: &str) -> std::cmp::Ordering {
+        fn parse_parts(v: &str) -> Vec<u64> {
+            v.split('.')
+                .map(|part| {
+                    part.chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect::<String>()
+                        .parse::<u64>()
+                        .unwrap_or(0)
+                })
+                .collect()
+        }
+
+        let av = parse_parts(a);
+        let bv = parse_parts(b);
+        let max_len = av.len().max(bv.len());
+
+        for i in 0..max_len {
+            let ai = *av.get(i).unwrap_or(&0);
+            let bi = *bv.get(i).unwrap_or(&0);
+            match ai.cmp(&bi) {
+                std::cmp::Ordering::Equal => {}
+                non_eq => return non_eq,
+            }
+        }
+
+        std::cmp::Ordering::Equal
+    }
+
     fn should_build_offline(source: &RustDepSource) -> bool {
         matches!(source, RustDepSource::Path(_))
     }
@@ -440,9 +469,10 @@ impl RustFfiProcessor {
         let package = metadata
             .packages
             .iter()
-            .find(|p| {
+            .filter(|p| {
                 p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+")
             })
+            .max_by(|a, b| Self::compare_version_like(&a.version, &b.version))
             .ok_or_else(|| {
                 format!(
                     "Registry dependency '{}' was not found in cargo metadata package set",
@@ -941,6 +971,53 @@ mod tests {
             RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
         assert_eq!(version, "0.2.0");
         assert_eq!(src, PathBuf::from("/tmp/registry/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_prefers_highest_registry_version() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "0.10.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_10/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "0.9.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_9/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.10.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_10/src/lib.rs"));
+    }
+
+    #[test]
+    fn compare_version_like_handles_patch_width() {
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.10", "1.2.2"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.0", "1.0.0"),
+            std::cmp::Ordering::Equal
+        );
     }
 
     #[test]

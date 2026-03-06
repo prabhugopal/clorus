@@ -31,6 +31,7 @@ libm2 = { version = "0.2", interface = "interfaces/libm.clri" }
 
 Notes:
 - `version` dependencies are resolved from Cargo registry source.
+- When multiple registry versions of the same crate appear in metadata, resolver prefers the highest discovered registry version.
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 
 ## What Works Today
