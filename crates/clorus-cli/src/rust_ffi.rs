@@ -5,6 +5,7 @@ use std::process::Command;
 use std::fs;
 use clorus_ffi_gen::{FfiGenerator, FunctionInfo};
 use crate::manifest::Manifest;
+use serde::Deserialize;
 
 pub struct RustFfiProcessor {
     pub libraries: Vec<ProcessedLibrary>,
@@ -24,9 +25,60 @@ enum RustDepSource {
     Version(String),
 }
 
+#[derive(Debug, Deserialize)]
+struct CargoMetadata {
+    packages: Vec<CargoPackage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoPackage {
+    name: String,
+    version: String,
+    source: Option<String>,
+    targets: Vec<CargoTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoTarget {
+    kind: Vec<String>,
+    src_path: String,
+}
+
 impl RustFfiProcessor {
     fn should_build_offline(source: &RustDepSource) -> bool {
         matches!(source, RustDepSource::Path(_))
+    }
+
+    fn is_supported_ffi_type(type_name: &str) -> bool {
+        matches!(type_name, "f64" | "i32" | "bool" | "String" | "()" | "*mut u8")
+    }
+
+    fn retain_supported_ffi_functions(
+        functions: Vec<FunctionInfo>,
+        verbose: bool,
+    ) -> Vec<FunctionInfo> {
+        let total = functions.len();
+        let filtered: Vec<FunctionInfo> = functions
+            .into_iter()
+            .filter(|f| {
+                f.params
+                    .iter()
+                    .all(|p| Self::is_supported_ffi_type(&p.type_name))
+                    && Self::is_supported_ffi_type(&f.return_type)
+            })
+            .collect();
+
+        if verbose {
+            let skipped = total.saturating_sub(filtered.len());
+            if skipped > 0 {
+                println!(
+                    "      Skipped {} unsupported function(s) (non-FFI-compatible signature)",
+                    skipped
+                );
+            }
+        }
+
+        filtered
     }
 
     pub fn new() -> Self {
@@ -102,10 +154,10 @@ impl RustFfiProcessor {
                         Self::create_and_compile_wrapper(name, lib_path, verbose)?
                     }
                     RustDepSource::Version(version) => {
-                        return Err(format!(
-                            "Rust dependency '{}' uses version '{}' but has no interface. Add interface = \"interfaces/{}.clri\" for registry dependencies.",
-                            name, version, name
-                        ));
+                        if verbose {
+                            println!("      Auto-discovering from registry source");
+                        }
+                        Self::create_and_compile_wrapper_from_registry(name, version, verbose)?
                     }
                 }
             };
@@ -143,6 +195,7 @@ impl RustFfiProcessor {
 
         let mut generator = FfiGenerator::new();
         generator.parse_file(&lib_src)?;
+        generator.functions = Self::retain_supported_ffi_functions(generator.functions, verbose);
 
         if generator.functions.is_empty() {
             if verbose {
@@ -176,6 +229,138 @@ impl RustFfiProcessor {
         }
 
         Ok(processed)
+    }
+
+    fn create_and_compile_wrapper_from_registry(
+        name: &str,
+        version_req: &str,
+        verbose: bool,
+    ) -> Result<ProcessedLibrary, String> {
+        let rust_ffi_dir = PathBuf::from("target/rust-ffi");
+        fs::create_dir_all(&rust_ffi_dir)
+            .map_err(|e| format!("Failed to create target/rust-ffi: {}", e))?;
+
+        let wrapper_name = format!("{}_ffi", name.replace('-', "_"));
+        let wrapper_dir = rust_ffi_dir.join(&wrapper_name);
+
+        if verbose {
+            println!("      Creating wrapper crate: {}", wrapper_dir.display());
+        }
+
+        fs::create_dir_all(wrapper_dir.join("src"))
+            .map_err(|e| format!("Failed to create wrapper crate directory: {}", e))?;
+
+        // Ensure metadata command has a valid source tree.
+        fs::write(wrapper_dir.join("src/lib.rs"), "// metadata probe\n")
+            .map_err(|e| format!("Failed to write metadata probe source: {}", e))?;
+
+        Self::generate_wrapper_cargo_toml_for_source(
+            &wrapper_dir,
+            &wrapper_name,
+            name,
+            &RustDepSource::Version(version_req.to_string()),
+        )?;
+
+        let mut functions = Self::discover_registry_functions(&wrapper_dir, name, verbose)?;
+        functions = Self::retain_supported_ffi_functions(functions, verbose);
+        if functions.is_empty() {
+            return Err(format!(
+                "Rust dependency '{}' resolved from registry but no FFI-compatible functions were discovered in its lib target. Add an interface file (interfaces/{}.clri) or use a local bridge crate.",
+                name, name
+            ));
+        }
+
+        if verbose {
+            println!("      Discovered {} public function(s)", functions.len());
+        }
+
+        let mut generator = FfiGenerator::new();
+        generator.functions = functions.clone();
+        Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
+
+        let mut processed = Self::compile_wrapper_crate(
+            &wrapper_dir,
+            &wrapper_name,
+            verbose,
+            false,
+        )?;
+        processed.functions = functions;
+        Ok(processed)
+    }
+
+    fn discover_registry_functions(
+        wrapper_dir: &Path,
+        dep_name: &str,
+        verbose: bool,
+    ) -> Result<Vec<FunctionInfo>, String> {
+        let output = Command::new("cargo")
+            .arg("metadata")
+            .arg("--format-version")
+            .arg("1")
+            .current_dir(wrapper_dir)
+            .output()
+            .map_err(|e| format!("Failed to run cargo metadata for '{}': {}", dep_name, e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!(
+                "Failed to resolve registry dependency '{}' via cargo metadata:\n{}",
+                dep_name, stderr
+            ));
+        }
+
+        let metadata: CargoMetadata = serde_json::from_slice(&output.stdout)
+            .map_err(|e| format!("Failed to parse cargo metadata JSON: {}", e))?;
+
+        let (src_path, version) = Self::resolve_registry_lib_src(&metadata, dep_name)?;
+        if !src_path.exists() {
+            return Err(format!(
+                "Resolved source path for '{}' does not exist: {}",
+                dep_name,
+                src_path.display()
+            ));
+        }
+
+        if verbose {
+            println!(
+                "      Registry source: {} (v{})",
+                src_path.display(),
+                version
+            );
+        }
+
+        let mut generator = FfiGenerator::new();
+        generator.parse_file(&src_path)?;
+        Ok(generator.functions)
+    }
+
+    fn resolve_registry_lib_src(
+        metadata: &CargoMetadata,
+        dep_name: &str,
+    ) -> Result<(PathBuf, String), String> {
+        let package = metadata
+            .packages
+            .iter()
+            .find(|p| p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+"))
+            .ok_or_else(|| {
+                format!(
+                    "Registry dependency '{}' was not found in cargo metadata package set",
+                    dep_name
+                )
+            })?;
+
+        let lib_target = package
+            .targets
+            .iter()
+            .find(|t| t.kind.iter().any(|k| k == "lib"))
+            .ok_or_else(|| {
+                format!(
+                    "Registry dependency '{}' (resolved {}) has no lib target",
+                    dep_name, package.version
+                )
+            })?;
+
+        Ok((PathBuf::from(&lib_target.src_path), package.version.clone()))
     }
 
     /// Generate Cargo.toml for the wrapper crate
@@ -471,5 +656,62 @@ mod tests {
     fn path_sources_build_offline_registry_sources_build_online() {
         assert!(RustFfiProcessor::should_build_offline(&RustDepSource::Path(PathBuf::from("."))));
         assert!(!RustFfiProcessor::should_build_offline(&RustDepSource::Version("1.0".to_string())));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_prefers_registry_package_with_lib_target() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: Some("path+file:///tmp/demo-math".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/local/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/src/lib.rs"));
+    }
+
+    #[test]
+    fn retain_supported_ffi_functions_filters_unsupported_signatures() {
+        let functions = vec![
+            FunctionInfo {
+                name: "ok_add".to_string(),
+                params: vec![
+                    clorus_ffi_gen::ParamInfo { name: "a".to_string(), type_name: "f64".to_string() },
+                    clorus_ffi_gen::ParamInfo { name: "b".to_string(), type_name: "f64".to_string() },
+                ],
+                return_type: "f64".to_string(),
+            },
+            FunctionInfo {
+                name: "bad_u64".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "n".to_string(),
+                    type_name: "u64".to_string(),
+                }],
+                return_type: "u64".to_string(),
+            },
+        ];
+
+        let filtered = RustFfiProcessor::retain_supported_ffi_functions(functions, false);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "ok_add");
     }
 }
