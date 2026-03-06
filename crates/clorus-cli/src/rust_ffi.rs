@@ -175,7 +175,27 @@ impl RustFfiProcessor {
         interface_spec: crate::manifest::InterfaceSpec,
     ) -> Result<String, String> {
         match interface_spec {
-            crate::manifest::InterfaceSpec::Path(path) => Ok(path),
+            crate::manifest::InterfaceSpec::Path(path) => {
+                let trimmed = path.trim();
+                if trimmed.is_empty() {
+                    return Err(format!(
+                        "Interface path for '{}' cannot be empty. Use a valid .clri or .clorus-ffi file path.",
+                        dep_name
+                    ));
+                }
+                let path_obj = std::path::Path::new(trimmed);
+                let is_supported_ext = matches!(
+                    path_obj.extension().and_then(|s| s.to_str()),
+                    Some("clri") | Some("clorus-ffi")
+                );
+                if !is_supported_ext {
+                    return Err(format!(
+                        "Unsupported interface file extension for '{}': '{}'. Expected a .clri or .clorus-ffi file.",
+                        dep_name, trimmed
+                    ));
+                }
+                Ok(trimmed.to_string())
+            }
             crate::manifest::InterfaceSpec::Auto => {
                 let clri_path = format!("interfaces/{}.clri", dep_name);
                 let legacy_path = format!("interfaces/{}.clorus-ffi", dep_name);
@@ -1338,6 +1358,28 @@ mod tests {
 
         assert!(err.contains("Interface auto-discovery failed"));
         assert!(err.contains("interfaces/missing-lib.clri"));
+    }
+
+    #[test]
+    fn resolve_interface_path_explicit_rejects_unknown_extension() {
+        let err = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.txt".to_string()),
+        )
+        .expect_err("expected unsupported extension error");
+        assert!(err.contains("Unsupported interface file extension"));
+        assert!(err.contains(".clri"));
+        assert!(err.contains(".clorus-ffi"));
+    }
+
+    #[test]
+    fn resolve_interface_path_explicit_rejects_empty_path() {
+        let err = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path("   ".to_string()),
+        )
+        .expect_err("expected empty path error");
+        assert!(err.contains("cannot be empty"));
     }
 
     #[test]
