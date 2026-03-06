@@ -121,7 +121,6 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(out)
     }
 
-
     /// Compile a Rust FFI library function call generically based on metadata
     pub(super) fn compile_rust_library_call(
         &mut self,
@@ -160,6 +159,13 @@ impl<'ctx> CodeGen<'ctx> {
                     // Extract C string from Value*
                     self.extract_cstring_from_value(arg_val).into()
                 }
+                "f32" => {
+                    let f64_val = self.unbox_number(arg_val);
+                    self.builder
+                        .build_float_trunc(f64_val, self.context.f32_type(), "f64_to_f32")
+                        .unwrap()
+                        .into()
+                }
                 "f64" => {
                     // Unbox number from Value*
                     self.unbox_number(arg_val).into()
@@ -169,6 +175,27 @@ impl<'ctx> CodeGen<'ctx> {
                     let f64_val = self.unbox_number(arg_val);
                     self.builder
                         .build_float_to_signed_int(f64_val, self.context.i32_type(), "f64_to_i32")
+                        .unwrap()
+                        .into()
+                }
+                "u32" => {
+                    let f64_val = self.unbox_number(arg_val);
+                    self.builder
+                        .build_float_to_unsigned_int(f64_val, self.context.i32_type(), "f64_to_u32")
+                        .unwrap()
+                        .into()
+                }
+                "i64" | "isize" => {
+                    let f64_val = self.unbox_number(arg_val);
+                    self.builder
+                        .build_float_to_signed_int(f64_val, self.context.i64_type(), "f64_to_i64")
+                        .unwrap()
+                        .into()
+                }
+                "u64" | "usize" => {
+                    let f64_val = self.unbox_number(arg_val);
+                    self.builder
+                        .build_float_to_unsigned_int(f64_val, self.context.i64_type(), "f64_to_u64")
                         .unwrap()
                         .into()
                 }
@@ -220,6 +247,18 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_pointer_value();
                 Ok(self.box_string(str_ptr))
             }
+            "f32" => {
+                let f32_val = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_float_value();
+                let f64_val = self
+                    .builder
+                    .build_float_ext(f32_val, self.context.f64_type(), "f32_to_f64")
+                    .unwrap();
+                Ok(self.box_number(f64_val))
+            }
             "f64" => {
                 let f64_val = call_result
                     .try_as_basic_value()
@@ -237,6 +276,42 @@ impl<'ctx> CodeGen<'ctx> {
                 let f64_val = self
                     .builder
                     .build_signed_int_to_float(i32_val, self.context.f64_type(), "i32_to_f64")
+                    .unwrap();
+                Ok(self.box_number(f64_val))
+            }
+            "u32" => {
+                let u32_val = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let f64_val = self
+                    .builder
+                    .build_unsigned_int_to_float(u32_val, self.context.f64_type(), "u32_to_f64")
+                    .unwrap();
+                Ok(self.box_number(f64_val))
+            }
+            "i64" | "isize" => {
+                let i64_val = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let f64_val = self
+                    .builder
+                    .build_signed_int_to_float(i64_val, self.context.f64_type(), "i64_to_f64")
+                    .unwrap();
+                Ok(self.box_number(f64_val))
+            }
+            "u64" | "usize" => {
+                let u64_val = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let f64_val = self
+                    .builder
+                    .build_unsigned_int_to_float(u64_val, self.context.f64_type(), "u64_to_f64")
                     .unwrap();
                 Ok(self.box_number(f64_val))
             }
@@ -414,5 +489,4 @@ impl<'ctx> CodeGen<'ctx> {
             )),
         }
     }
-
 }

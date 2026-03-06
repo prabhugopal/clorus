@@ -1,10 +1,10 @@
-/// LLVM Code Generation for Clorus
-mod closures;
 mod arithmetic;
 mod calls;
+/// LLVM Code Generation for Clorus
+mod closures;
+mod core_calls;
 mod ffi_calls;
 mod functions;
-mod core_calls;
 mod quotes;
 
 use clorus_syntax::{Expr, MapPatternKey, Pattern};
@@ -132,7 +132,11 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    fn arity_variant_name(base_name: &str, fixed_param_count: usize, has_rest_param: bool) -> String {
+    fn arity_variant_name(
+        base_name: &str,
+        fixed_param_count: usize,
+        has_rest_param: bool,
+    ) -> String {
         if has_rest_param {
             format!("{}_arity_{}_var", base_name, fixed_param_count)
         } else {
@@ -781,7 +785,10 @@ impl<'ctx> CodeGen<'ctx> {
 
     /// Declare all functions from a Rust FFI library based on metadata
     pub fn declare_rust_library_functions(&mut self, lib: &RustLibrary) -> Result<(), String> {
+        let f32_type = self.context.f32_type();
         let f64_type = self.context.f64_type();
+        let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
         let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
 
         for func in &lib.functions {
@@ -790,8 +797,10 @@ impl<'ctx> CodeGen<'ctx> {
             for param in &func.params {
                 let llvm_type = match param.type_name.as_str() {
                     "String" => i8_ptr_type.into(),
+                    "f32" => f32_type.into(),
                     "f64" => f64_type.into(),
-                    "i32" => self.context.i32_type().into(),
+                    "i32" | "u32" => i32_type.into(),
+                    "i64" | "u64" | "isize" | "usize" => i64_type.into(),
                     "bool" => self.context.bool_type().into(),
                     "*mut u8" => i8_ptr_type.into(), // Opaque pointers
                     other => return Err(format!("Unsupported parameter type in FFI: {}", other)),
@@ -802,8 +811,10 @@ impl<'ctx> CodeGen<'ctx> {
             // Convert return type
             let return_type = match func.return_type.as_str() {
                 "String" => i8_ptr_type.fn_type(&param_types, false),
+                "f32" => f32_type.fn_type(&param_types, false),
                 "f64" => f64_type.fn_type(&param_types, false),
-                "i32" => self.context.i32_type().fn_type(&param_types, false),
+                "i32" | "u32" => i32_type.fn_type(&param_types, false),
+                "i64" | "u64" | "isize" | "usize" => i64_type.fn_type(&param_types, false),
                 "bool" => self.context.bool_type().fn_type(&param_types, false),
                 "()" => self.context.void_type().fn_type(&param_types, false),
                 "*mut u8" => i8_ptr_type.fn_type(&param_types, false), // Opaque pointers
@@ -6496,9 +6507,8 @@ impl<'ctx> CodeGen<'ctx> {
                         }
 
                         // Not a Clorus function - try Rust FFI libraries
-                        let rust_lib = self
-                            .resolve_rust_library(namespace_or_alias)
-                            .or_else(|| {
+                        let rust_lib =
+                            self.resolve_rust_library(namespace_or_alias).or_else(|| {
                                 // Check if this is an alias for a rust.* module.
                                 self.namespace
                                     .aliases
@@ -6903,8 +6913,7 @@ impl<'ctx> CodeGen<'ctx> {
                         // back to a base-name function body when no matching arity exists.
                         // That fallback can select an incompatible function signature.
                         if self.has_any_arity_variants(&function_to_lookup)
-                            || (function_to_lookup != *func
-                                && self.has_any_arity_variants(func))
+                            || (function_to_lookup != *func && self.has_any_arity_variants(func))
                         {
                             return Err(format!(
                                 "Arity mismatch: function '{}' has no {}-arity variant",

@@ -2,10 +2,9 @@
 ///
 /// Automatically generates FFI bindings for Rust functions
 /// so they can be called from Clorus with zero wrapper code.
-
 use std::fs;
 use std::path::Path;
-use syn::{Item, ItemFn, FnArg, ReturnType, Type, parse_file};
+use syn::{parse_file, FnArg, Item, ItemFn, ReturnType, Type};
 
 // Modern type-safe FFI analyzer
 pub mod analyzer;
@@ -108,11 +107,12 @@ impl FfiGenerator {
 
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
-            Type::Path(path) => {
-                path.path.segments.last()
-                    .map(|seg| seg.ident.to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            }
+            Type::Path(path) => path
+                .path
+                .segments
+                .last()
+                .map(|seg| seg.ident.to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
             Type::Ptr(ptr) => {
                 // Handle pointer types: *mut T or *const T
                 // We represent all pointers as "*mut u8" for FFI
@@ -142,19 +142,27 @@ impl FfiGenerator {
         let wrapper_name = format!("clorus_{}", func.name);
 
         // Convert parameters to C types
-        let c_params: Vec<String> = func.params.iter().map(|p| {
-            let c_type = self.rust_to_c_type(&p.type_name);
-            format!("{}: {}", p.name, c_type)
-        }).collect();
+        let c_params: Vec<String> = func
+            .params
+            .iter()
+            .map(|p| {
+                let c_type = self.rust_to_c_type(&p.type_name);
+                format!("{}: {}", p.name, c_type)
+            })
+            .collect();
 
         let c_return = self.rust_to_c_type(&func.return_type);
 
         // Generate wrapper body
-        let param_conversions: Vec<String> = func.params.iter().map(|p| {
-            self.c_to_rust_conversion(&p.name, &p.type_name)
-        }).collect();
+        let param_conversions: Vec<String> = func
+            .params
+            .iter()
+            .map(|p| self.c_to_rust_conversion(&p.name, &p.type_name))
+            .collect();
 
-        let call_params: Vec<String> = func.params.iter()
+        let call_params: Vec<String> = func
+            .params
+            .iter()
             .map(|p| format!("{}_rust", p.name))
             .collect();
 
@@ -174,19 +182,29 @@ impl FfiGenerator {
 
     fn rust_to_c_type(&self, rust_type: &str) -> String {
         match rust_type {
+            "f32" => "f32".to_string(),
             "f64" => "f64".to_string(),
             "i32" => "i32".to_string(),
+            "u32" => "u32".to_string(),
+            "i64" => "i64".to_string(),
+            "u64" => "u64".to_string(),
+            "isize" => "i64".to_string(),
+            "usize" => "u64".to_string(),
             "bool" => "bool".to_string(),
-            "String" => "*mut c_char".to_string(),  // CString::into_raw() returns *mut c_char
+            "String" => "*mut c_char".to_string(), // CString::into_raw() returns *mut c_char
             "()" => "()".to_string(),
             "*mut u8" => "*mut u8".to_string(), // Pointer types pass through as-is
-            _ => "*mut u8".to_string(), // Generic pointer for complex types
+            _ => "*mut u8".to_string(),         // Generic pointer for complex types
         }
     }
 
     fn c_to_rust_conversion(&self, name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f64" | "i32" | "bool" | "*mut u8" => format!("    let {}_rust = {};", name, name),
+            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+                format!("    let {}_rust = {};", name, name)
+            }
+            "isize" => format!("    let {}_rust = {} as isize;", name, name),
+            "usize" => format!("    let {}_rust = {} as usize;", name, name),
             "String" => format!(
                 "    let {}_rust = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};",
                 name, name
@@ -197,7 +215,11 @@ impl FfiGenerator {
 
     fn rust_to_c_conversion(&self, name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f64" | "i32" | "bool" | "*mut u8" => format!("    {}", name),
+            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+                format!("    {}", name)
+            }
+            "isize" => format!("    {} as i64", name),
+            "usize" => format!("    {} as u64", name),
             "String" => format!(
                 "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
                 name
@@ -215,7 +237,9 @@ impl FfiGenerator {
         code.push_str("// Add this method to your CodeGen impl:\n\n");
         code.push_str("fn declare_rust_ffi_functions(&mut self) {\n");
         code.push_str("    let f64_type = self.context.f64_type();\n");
-        code.push_str("    let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());\n\n");
+        code.push_str(
+            "    let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());\n\n",
+        );
 
         for func in &self.functions {
             let wrapper_name = format!("clorus_{}", func.name);
@@ -223,19 +247,35 @@ impl FfiGenerator {
             code.push_str(&format!("    // {}\n", func.name));
 
             // Generate parameter types
-            let param_types: Vec<String> = func.params.iter().map(|p| {
-                match p.type_name.as_str() {
-                    "f64" => "f64_type.into()".to_string(),
-                    "i32" => "self.context.i32_type().into()".to_string(),
-                    "String" => "i8_ptr_type.into()".to_string(),
-                    _ => "i8_ptr_type.into()".to_string(), // Generic pointer for complex types
-                }
-            }).collect();
+            let param_types: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| {
+                    match p.type_name.as_str() {
+                        "f32" => "self.context.f32_type().into()".to_string(),
+                        "f64" => "f64_type.into()".to_string(),
+                        "i32" => "self.context.i32_type().into()".to_string(),
+                        "u32" => "self.context.i32_type().into()".to_string(),
+                        "i64" => "self.context.i64_type().into()".to_string(),
+                        "u64" => "self.context.i64_type().into()".to_string(),
+                        "isize" => "self.context.i64_type().into()".to_string(),
+                        "usize" => "self.context.i64_type().into()".to_string(),
+                        "String" => "i8_ptr_type.into()".to_string(),
+                        _ => "i8_ptr_type.into()".to_string(), // Generic pointer for complex types
+                    }
+                })
+                .collect();
 
             // Generate return type
             let return_type = match func.return_type.as_str() {
+                "f32" => "self.context.f32_type()",
                 "f64" => "f64_type",
                 "i32" => "self.context.i32_type()",
+                "u32" => "self.context.i32_type()",
+                "i64" => "self.context.i64_type()",
+                "u64" => "self.context.i64_type()",
+                "isize" => "self.context.i64_type()",
+                "usize" => "self.context.i64_type()",
                 "String" => "i8_ptr_type",
                 "()" => "self.context.void_type()",
                 _ => "i8_ptr_type",
@@ -249,7 +289,9 @@ impl FfiGenerator {
             } else {
                 code.push_str(&format!(
                     "    let {}_type = {}.fn_type(&[{}], false);\n",
-                    wrapper_name, return_type, param_types.join(", ")
+                    wrapper_name,
+                    return_type,
+                    param_types.join(", ")
                 ));
             }
 
@@ -266,15 +308,25 @@ impl FfiGenerator {
     /// Save C wrappers to a file
     pub fn save_c_wrappers(&self, output_path: &Path) -> Result<(), String> {
         let wrappers = self.generate_c_wrappers();
-        fs::write(output_path, wrappers)
-            .map_err(|e| format!("Failed to write wrappers to {}: {}", output_path.display(), e))
+        fs::write(output_path, wrappers).map_err(|e| {
+            format!(
+                "Failed to write wrappers to {}: {}",
+                output_path.display(),
+                e
+            )
+        })
     }
 
     /// Save LLVM declarations to a file
     pub fn save_llvm_declarations(&self, output_path: &Path) -> Result<(), String> {
         let declarations = self.generate_llvm_declarations();
-        fs::write(output_path, declarations)
-            .map_err(|e| format!("Failed to write declarations to {}: {}", output_path.display(), e))
+        fs::write(output_path, declarations).map_err(|e| {
+            format!(
+                "Failed to write declarations to {}: {}",
+                output_path.display(),
+                e
+            )
+        })
     }
 
     /// Generate a complete Rust module file with both original functions and wrappers
@@ -303,7 +355,8 @@ mod tests {
     fn test_parse_simple_function() {
         let temp_file = "/tmp/test_simple.rs";
         let mut file = std::fs::File::create(temp_file).unwrap();
-        file.write_all(b"pub fn add(x: f64, y: f64) -> f64 { x + y }").unwrap();
+        file.write_all(b"pub fn add(x: f64, y: f64) -> f64 { x + y }")
+            .unwrap();
 
         let mut generator = FfiGenerator::new();
         generator.parse_file(Path::new(temp_file)).unwrap();

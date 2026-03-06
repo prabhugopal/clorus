@@ -1,12 +1,12 @@
+use crate::interface::InterfaceFunction;
+use crate::manifest::Manifest;
+use clorus_ffi_gen::{FfiGenerator, FunctionInfo};
+use serde::Deserialize;
+use std::fs;
 /// Automatic Rust FFI processing - Phase 2 Architecture
 /// Generates wrapper crates in target/rust-ffi/ instead of polluting library source
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::fs;
-use clorus_ffi_gen::{FfiGenerator, FunctionInfo};
-use crate::manifest::Manifest;
-use serde::Deserialize;
-use crate::interface::InterfaceFunction;
 
 pub struct RustFfiProcessor {
     pub libraries: Vec<ProcessedLibrary>,
@@ -61,7 +61,18 @@ impl RustFfiProcessor {
     fn is_supported_ffi_type(type_name: &str) -> bool {
         matches!(
             type_name,
-            "f64" | "i32" | "i64" | "bool" | "String" | "()" | "*mut u8"
+            "f32"
+                | "f64"
+                | "i32"
+                | "u32"
+                | "i64"
+                | "u64"
+                | "isize"
+                | "usize"
+                | "bool"
+                | "String"
+                | "()"
+                | "*mut u8"
         )
     }
 
@@ -173,7 +184,10 @@ impl RustFfiProcessor {
         }
 
         if verbose {
-            println!("   Processing {} Rust dependencies...", manifest.rust_dependencies.len());
+            println!(
+                "   Processing {} Rust dependencies...",
+                manifest.rust_dependencies.len()
+            );
         }
 
         for (name, dep) in &manifest.rust_dependencies {
@@ -233,7 +247,11 @@ impl RustFfiProcessor {
     }
 
     /// Create wrapper crate in target/rust-ffi/ and compile it
-    fn create_and_compile_wrapper(name: &str, lib_path: &Path, verbose: bool) -> Result<ProcessedLibrary, String> {
+    fn create_and_compile_wrapper(
+        name: &str,
+        lib_path: &Path,
+        verbose: bool,
+    ) -> Result<ProcessedLibrary, String> {
         // Create target/rust-ffi directory
         let rust_ffi_dir = PathBuf::from("target/rust-ffi");
         fs::create_dir_all(&rust_ffi_dir)
@@ -254,7 +272,10 @@ impl RustFfiProcessor {
         // Parse the original library to get function signatures
         let lib_src = lib_path.join("src/lib.rs");
         if !lib_src.exists() {
-            return Err(format!("Rust library source not found: {}", lib_src.display()));
+            return Err(format!(
+                "Rust library source not found: {}",
+                lib_src.display()
+            ));
         }
 
         let mut generator = FfiGenerator::new();
@@ -285,16 +306,15 @@ impl RustFfiProcessor {
         }
 
         // Compile the wrapper crate and return with function info
-        let mut processed = Self::compile_wrapper_crate(
-            &wrapper_dir,
-            &wrapper_name,
-            verbose,
-            true,
-        )?;
+        let mut processed =
+            Self::compile_wrapper_crate(&wrapper_dir, &wrapper_name, verbose, true)?;
         processed.functions = generator.functions.clone();
 
         if verbose {
-            println!("      Populated with {} function metadata entries", processed.functions.len());
+            println!(
+                "      Populated with {} function metadata entries",
+                processed.functions.len()
+            );
         }
 
         Ok(processed)
@@ -361,12 +381,8 @@ impl RustFfiProcessor {
         generator.functions = functions.clone();
         Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
 
-        let mut processed = Self::compile_wrapper_crate(
-            &wrapper_dir,
-            &wrapper_name,
-            verbose,
-            false,
-        )?;
+        let mut processed =
+            Self::compile_wrapper_crate(&wrapper_dir, &wrapper_name, verbose, false)?;
         processed.functions = functions;
         Ok(processed)
     }
@@ -424,7 +440,9 @@ impl RustFfiProcessor {
         let package = metadata
             .packages
             .iter()
-            .find(|p| p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+"))
+            .find(|p| {
+                p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+")
+            })
             .ok_or_else(|| {
                 format!(
                     "Registry dependency '{}' was not found in cargo metadata package set",
@@ -454,7 +472,8 @@ impl RustFfiProcessor {
         original_path: &Path,
     ) -> Result<(), String> {
         // Convert original path to absolute
-        let original_abs = original_path.canonicalize()
+        let original_abs = original_path
+            .canonicalize()
             .map_err(|e| format!("Failed to canonicalize library path: {}", e))?;
 
         let cargo_toml_content = format!(
@@ -470,7 +489,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 {} = {{ path = "{}" }}
 "#,
             wrapper_name,
-            original_name,  // Keep package name with hyphens
+            original_name, // Keep package name with hyphens
             original_abs.display()
         );
 
@@ -486,7 +505,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
     ) -> Result<(), String> {
         let dependency_spec = match source {
             RustDepSource::Path(original_path) => {
-                let original_abs = original_path.canonicalize()
+                let original_abs = original_path
+                    .canonicalize()
                     .map_err(|e| format!("Failed to canonicalize library path: {}", e))?;
                 format!("{{ path = \"{}\" }}", original_abs.display())
             }
@@ -505,9 +525,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 {} = {}
 "#,
-            wrapper_name,
-            original_name,
-            dependency_spec
+            wrapper_name, original_name, dependency_spec
         );
 
         fs::write(wrapper_dir.join("Cargo.toml"), cargo_toml_content)
@@ -542,9 +560,15 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
     fn rust_to_c_type(rust_type: &str) -> String {
         match rust_type {
+            "f32" => "f32".to_string(),
             "f64" => "f64".to_string(),
             "i32" => "i32".to_string(),
+            "u32" => "u32".to_string(),
             "i64" => "i64".to_string(),
+            "u64" => "u64".to_string(),
+            // Use fixed-width C ABI carrier types for pointer-sized integers.
+            "isize" => "i64".to_string(),
+            "usize" => "u64".to_string(),
             "bool" => "bool".to_string(),
             "String" => "*mut c_char".to_string(),
             "()" => "()".to_string(),
@@ -555,9 +579,11 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
     fn c_to_rust_conversion(name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f64" | "i32" | "i64" | "bool" | "*mut u8" => {
+            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
                 format!("    let {}_rust = {};", name, name)
             }
+            "isize" => format!("    let {}_rust = {} as isize;", name, name),
+            "usize" => format!("    let {}_rust = {} as usize;", name, name),
             "String" => format!(
                 "    let {}_rust = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};",
                 name, name
@@ -568,8 +594,15 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
     fn rust_to_c_conversion(name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f64" | "i32" | "i64" | "bool" | "*mut u8" => format!("    {}", name),
-            "String" => format!("    unsafe {{ CString::new({}).unwrap().into_raw() }}", name),
+            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+                format!("    {}", name)
+            }
+            "isize" => format!("    {} as i64", name),
+            "usize" => format!("    {} as u64", name),
+            "String" => format!(
+                "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
+                name
+            ),
             "()" => "".to_string(),
             _ => format!("    {} as *mut u8", name),
         }
@@ -702,7 +735,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         name: &str,
         source: &RustDepSource,
         interface_path: &str,
-        verbose: bool
+        verbose: bool,
     ) -> Result<ProcessedLibrary, String> {
         // Parse interface file
         let interface_file_path = PathBuf::from(interface_path);
@@ -717,7 +750,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         let interface = parse_interface_file(&interface_file_path)?;
 
         if verbose {
-            println!("      Parsed interface: {} functions", interface.functions.len());
+            println!(
+                "      Parsed interface: {} functions",
+                interface.functions.len()
+            );
         }
 
         // Convert interface functions to wrapper bindings and exposed symbols.
@@ -794,14 +830,16 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
     /// Get paths to all static libraries for linking
     pub fn get_static_lib_paths(&self) -> Vec<PathBuf> {
-        self.libraries.iter()
+        self.libraries
+            .iter()
             .map(|lib| lib.static_lib_path.clone())
             .collect()
     }
 
     /// Get paths to all dynamic libraries for JIT loading
     pub fn get_dynamic_lib_paths(&self) -> Vec<PathBuf> {
-        self.libraries.iter()
+        self.libraries
+            .iter()
             .filter_map(|lib| lib.dynamic_lib_path.clone())
             .collect()
     }
@@ -827,7 +865,11 @@ mod tests {
             "demo-math",
             &RustDepSource::Version("0.1.0".to_string()),
         );
-        assert!(result.is_ok(), "failed to generate cargo toml: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "failed to generate cargo toml: {:?}",
+            result.err()
+        );
 
         let cargo_toml =
             std::fs::read_to_string(wrapper_dir.join("Cargo.toml")).expect("read generated cargo");
@@ -838,8 +880,12 @@ mod tests {
 
     #[test]
     fn path_sources_build_offline_registry_sources_build_online() {
-        assert!(RustFfiProcessor::should_build_offline(&RustDepSource::Path(PathBuf::from("."))));
-        assert!(!RustFfiProcessor::should_build_offline(&RustDepSource::Version("1.0".to_string())));
+        assert!(RustFfiProcessor::should_build_offline(
+            &RustDepSource::Path(PathBuf::from("."))
+        ));
+        assert!(!RustFfiProcessor::should_build_offline(
+            &RustDepSource::Version("1.0".to_string())
+        ));
     }
 
     #[test]
@@ -858,7 +904,9 @@ mod tests {
                 CargoPackage {
                     name: "demo-math".to_string(),
                     version: "0.2.0".to_string(),
-                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
                     targets: vec![CargoTarget {
                         kind: vec!["lib".to_string()],
                         src_path: "/tmp/registry/src/lib.rs".to_string(),
@@ -879,8 +927,14 @@ mod tests {
             FunctionInfo {
                 name: "ok_add".to_string(),
                 params: vec![
-                    clorus_ffi_gen::ParamInfo { name: "a".to_string(), type_name: "f64".to_string() },
-                    clorus_ffi_gen::ParamInfo { name: "b".to_string(), type_name: "f64".to_string() },
+                    clorus_ffi_gen::ParamInfo {
+                        name: "a".to_string(),
+                        type_name: "f64".to_string(),
+                    },
+                    clorus_ffi_gen::ParamInfo {
+                        name: "b".to_string(),
+                        type_name: "f64".to_string(),
+                    },
                 ],
                 return_type: "f64".to_string(),
             },
@@ -893,12 +947,12 @@ mod tests {
                 return_type: "i64".to_string(),
             },
             FunctionInfo {
-                name: "bad_u64".to_string(),
+                name: "bad_vec".to_string(),
                 params: vec![clorus_ffi_gen::ParamInfo {
-                    name: "n".to_string(),
-                    type_name: "u64".to_string(),
+                    name: "items".to_string(),
+                    type_name: "Vec<u8>".to_string(),
                 }],
-                return_type: "u64".to_string(),
+                return_type: "Vec<u8>".to_string(),
             },
         ];
 
@@ -922,7 +976,7 @@ mod tests {
             FunctionInfo {
                 name: "bad_ret".to_string(),
                 params: vec![],
-                return_type: "u64".to_string(),
+                return_type: "Vec<u8>".to_string(),
             },
         ];
 
@@ -946,11 +1000,9 @@ mod tests {
         let original = std::env::current_dir().expect("get cwd");
         std::env::set_current_dir(&root).expect("cd temp root");
 
-        let resolved = RustFfiProcessor::resolve_interface_path(
-            "libm",
-            crate::manifest::InterfaceSpec::Auto,
-        )
-        .expect("auto resolve should find .clri");
+        let resolved =
+            RustFfiProcessor::resolve_interface_path("libm", crate::manifest::InterfaceSpec::Auto)
+                .expect("auto resolve should find .clri");
 
         std::env::set_current_dir(original).expect("restore cwd");
         let _ = std::fs::remove_dir_all(root);
@@ -1021,8 +1073,14 @@ impl Foo {
             exposed_name: "new_point".to_string(),
             rust_symbol: "Point::new".to_string(),
             params: vec![
-                clorus_ffi_gen::ParamInfo { name: "x".to_string(), type_name: "f64".to_string() },
-                clorus_ffi_gen::ParamInfo { name: "y".to_string(), type_name: "f64".to_string() },
+                clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "f64".to_string(),
+                },
+                clorus_ffi_gen::ParamInfo {
+                    name: "y".to_string(),
+                    type_name: "f64".to_string(),
+                },
             ],
             return_type: "()".to_string(),
         }];
