@@ -123,6 +123,7 @@ The CLI/rust-ffi integration tests now cover:
 - dependency processing errors now include dependency-name context prefixes
 - missing dependency path / shape errors now flow through shared dependency-context formatting
 - empty dependency path/version values are rejected early with dependency-name diagnostics
+- empty dependency path/version rejection is covered across plain and interface-enabled manifest forms
 - version+`interface = true` auto-discovery failures include dependency-name context and searched interface paths
 - unsupported explicit interface-extension failures include dependency-name context
 - explicit interface directory-path failures include dependency-name context
