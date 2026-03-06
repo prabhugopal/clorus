@@ -130,6 +130,7 @@ The CLI/rust-ffi integration tests now cover:
 - unsupported explicit interface-extension failures include dependency-name context
 - explicit interface directory-path failures include dependency-name context
 - explicit empty interface-path failures include dependency-name context
+- auto/explicit interface discovery failures are covered with dependency-name context assertions in E2E tests
 - interface semantic validation failures (e.g. invalid `:rust`) include dependency-name context
 - dependency-context prefixing is idempotent (no duplicated `Rust dependency '<name>':` prefixes)
 - dependency-context prefixing preserves existing dependency-labeled diagnostics (no double-labeling)

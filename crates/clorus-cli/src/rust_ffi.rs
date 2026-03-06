@@ -2003,6 +2003,7 @@ missing-iface-lib = { path = "missing-iface-lib", interface = true }
             Err(e) => e,
         });
 
+        assert!(err.contains("Rust dependency 'missing-iface-lib':"));
         assert!(err.contains("Interface auto-discovery failed"));
         assert!(err.contains("interfaces/missing-iface-lib.clri"));
         assert!(err.contains("interfaces/missing-iface-lib.clorus-ffi"));
@@ -2052,6 +2053,7 @@ missing-explicit-iface-lib = { path = "missing-explicit-iface-lib", interface = 
             Err(e) => e,
         });
 
+        assert!(err.contains("Rust dependency 'missing-explicit-iface-lib':"));
         assert!(err.contains("Interface file not found"));
         assert!(err.contains("interfaces/not-there.clri"));
 
@@ -2106,7 +2108,8 @@ dir-iface-lib = { path = "dir-iface-lib", interface = "interfaces/dir-iface-lib.
             Ok(_) => panic!("expected explicit interface directory-path failure"),
             Err(e) => e,
         };
-        assert!(err.contains("Interface path points to a directory"));
+        assert!(err.contains("Rust dependency 'dir-iface-lib':"));
+        assert!(err.contains("points to a directory, not a file"));
         assert!(err.contains("interfaces/dir-iface-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
