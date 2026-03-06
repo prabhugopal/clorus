@@ -1346,4 +1346,56 @@ impl-only-lib = { path = "impl-only-lib", interface = true }
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn process_dependencies_e2e_interface_auto_missing_reports_clear_paths() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_missing_iface_{}", unique));
+        let dep_dir = root.join("missing-iface-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "missing-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 1 }\n")
+            .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+missing-iface-lib = { path = "missing-iface-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("cd root");
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected interface auto-discovery failure"),
+            Err(e) => e,
+        };
+        std::env::set_current_dir(original).expect("restore cwd");
+
+        assert!(err.contains("Interface auto-discovery failed"));
+        assert!(err.contains("interfaces/missing-iface-lib.clri"));
+        assert!(err.contains("interfaces/missing-iface-lib.clorus-ffi"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
