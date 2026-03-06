@@ -55,6 +55,15 @@ struct InterfaceBinding {
 }
 
 impl RustFfiProcessor {
+    fn with_dependency_context(dep_name: &str, err: String) -> String {
+        let prefix = format!("Rust dependency '{}':", dep_name);
+        if err.starts_with(&prefix) {
+            err
+        } else {
+            format!("{} {}", prefix, err)
+        }
+    }
+
     fn is_valid_export_symbol(name: &str) -> bool {
         let mut chars = name.chars();
         let Some(first) = chars.next() else {
@@ -305,13 +314,13 @@ impl RustFfiProcessor {
             let processed = if let Some(interface_spec) = dep.get_interface() {
                 // Phase 2a: Use interface file
                 let interface_path = Self::resolve_interface_path(name, interface_spec)
-                    .map_err(|e| format!("Rust dependency '{}': {}", name, e))?;
+                    .map_err(|e| Self::with_dependency_context(name, e))?;
 
                 if verbose {
                     println!("      Using interface file: {}", interface_path);
                 }
                 Self::create_wrapper_from_interface(name, &source, &interface_path, verbose)
-                    .map_err(|e| format!("Rust dependency '{}': {}", name, e))?
+                    .map_err(|e| Self::with_dependency_context(name, e))?
             } else {
                 match &source {
                     // Phase 1: Auto-parse from source path
@@ -320,14 +329,14 @@ impl RustFfiProcessor {
                             println!("      Auto-parsing from source");
                         }
                         Self::create_and_compile_wrapper(name, lib_path, verbose)
-                            .map_err(|e| format!("Rust dependency '{}': {}", name, e))?
+                            .map_err(|e| Self::with_dependency_context(name, e))?
                     }
                     RustDepSource::Version(version) => {
                         if verbose {
                             println!("      Auto-discovering from registry source");
                         }
                         Self::create_and_compile_wrapper_from_registry(name, version, verbose)
-                            .map_err(|e| format!("Rust dependency '{}': {}", name, e))?
+                            .map_err(|e| Self::with_dependency_context(name, e))?
                     }
                 }
             };
@@ -1482,6 +1491,27 @@ mod tests {
         )
         .expect_err("expected empty path error");
         assert!(err.contains("cannot be empty"));
+    }
+
+    #[test]
+    fn with_dependency_context_adds_prefix_when_missing() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Interface path cannot be empty".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib': Interface path cannot be empty"
+        );
+    }
+
+    #[test]
+    fn with_dependency_context_does_not_duplicate_prefix() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Rust dependency 'demo-lib': already prefixed".to_string(),
+        );
+        assert_eq!(out, "Rust dependency 'demo-lib': already prefixed");
     }
 
     #[test]
