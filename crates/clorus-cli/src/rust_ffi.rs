@@ -4376,6 +4376,33 @@ empty-version-iface-path-lib = { version = "   ", interface = "interfaces/empty-
     }
 
     #[test]
+    fn process_dependencies_reports_dependency_name_for_empty_version_with_interface_false() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+empty-version-false-iface-lib = { version = "   ", interface = false }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected empty dependency version failure"),
+            Err(e) => e,
+        };
+        assert!(
+            err.contains(
+                "Rust dependency 'empty-version-false-iface-lib': version cannot be empty"
+            )
+        );
+    }
+
+    #[test]
     fn process_dependencies_reports_dependency_name_for_empty_path_with_interface() {
         let manifest: Manifest = toml::from_str(
             r#"[package]
