@@ -95,6 +95,7 @@ Today, reliable production path is:
 - Foundation: **implemented**
 - Production for selected APIs: **usable**
 - Full seamless Rust interop: **in progress**
+- Scoped-symbol collision/parity slice: **closed** (wrapper + codegen + namespace-variant regressions in place)
 
 ## Current E2E Coverage
 
