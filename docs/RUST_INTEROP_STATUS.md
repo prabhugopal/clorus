@@ -34,8 +34,9 @@ Notes:
 - When multiple registry versions of the same crate appear in metadata, resolver prefers the highest discovered registry version.
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is currently treated as "no interface specified" (same as omitting `interface`).
-- In `.clri` files, pointer keywords must be written without spaces:
-  `:*mut-u8` / `:*const-u8` (these map to `*mut u8` / `*const u8`).
+- In `.clri` files, pointer keywords support both forms:
+  `:*mut-u8` / `:*const-u8` and `:*mut u8` / `:*const u8`
+  (all map to `*mut u8` / `*const u8`).
 
 ## What Works Today
 

@@ -2222,7 +2222,7 @@ pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
         std::fs::write(
             iface_dir.join("iface-const-ptr-lib.clri"),
             r#"(interface iface-const-ptr-lib
-  (fn id-const-ptr [p :*const-u8] :*const-u8 :rust "id_const_ptr"))
+  (fn id-const-ptr [p :*const u8] :*const u8 :rust "id_const_ptr"))
 "#,
         )
         .expect("write interface");

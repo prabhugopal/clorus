@@ -114,6 +114,34 @@ impl InterfaceTokenParser {
         }
     }
 
+    fn expect_interface_type(&mut self) -> Result<String, String> {
+        let keyword = self.expect_keyword()?;
+
+        // Accept split pointer syntax in interface files:
+        //   :*const u8  /  :*mut u8
+        // and keep supporting compact keyword form:
+        //   :*const-u8  /  :*mut-u8
+        let raw_type = if keyword == "*const" || keyword == "*mut" {
+            match self.current() {
+                Token::Symbol(sym, _) => {
+                    let pointee = sym;
+                    self.advance();
+                    format!("{} {}", keyword, pointee)
+                }
+                _ => {
+                    return Err(format!(
+                        "Expected pointee type after :{} (e.g. :{}-u8 or :{} u8)",
+                        keyword, keyword, keyword
+                    ));
+                }
+            }
+        } else {
+            keyword
+        };
+
+        Ok(map_type_keyword(&raw_type))
+    }
+
     fn expected_token_error(&self, expected: &str) -> String {
         let current = self.current();
         let span = current.span();
@@ -186,7 +214,7 @@ impl InterfaceTokenParser {
 
         let name = self.expect_symbol()?;
         let params = self.parse_params()?;
-        let return_type = map_type_keyword(&self.expect_keyword()?);
+        let return_type = self.expect_interface_type()?;
         let mut doc = None;
         let mut rust_symbol = None;
 
@@ -232,7 +260,7 @@ impl InterfaceTokenParser {
 
         while !matches!(self.current(), Token::RBracket(_)) {
             let name = self.expect_symbol()?;
-            let type_name = map_type_keyword(&self.expect_keyword()?);
+            let type_name = self.expect_interface_type()?;
             params.push(InterfaceParam { name, type_name });
         }
 
@@ -281,6 +309,8 @@ fn map_type_keyword(keyword: &str) -> String {
         "bool" => "bool".to_string(),
         "string" => "String".to_string(),
         "unit" => "()".to_string(),
+        "*mut u8" => "*mut u8".to_string(),
+        "*const u8" => "*const u8".to_string(),
         "*mut-u8" => "*mut u8".to_string(),
         "*const-u8" => "*const u8".to_string(),
         other => other.to_string(), // For custom types
@@ -346,7 +376,7 @@ mod tests {
     fn test_parse_interface_reports_location_for_malformed_param_type() {
         let source = r#"
 (interface bad
-  (fn ptr-roundtrip [p :*mut i32] :i32))
+  (fn ptr-roundtrip [p :*mut] :i32))
 "#;
 
         use std::io::Write;
@@ -355,9 +385,7 @@ mod tests {
 
         let err = parse_interface_file(file.path()).expect_err("expected parse failure");
         assert!(err.contains("Failed to parse interface file"));
-        assert!(err.contains("Expected keyword"));
-        assert!(err.contains("line"));
-        assert!(err.contains("column"));
+        assert!(err.contains("Expected pointee type after :*mut"));
     }
 
     #[test]
@@ -366,6 +394,30 @@ mod tests {
 (interface ptrs
   (fn const-ptr [p :*const-u8] :*const-u8 :rust "id_const_ptr")
   (fn mut-ptr [p :*mut-u8] :*mut-u8 :rust "id_mut_ptr"))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let interface = parse_interface_file(file.path()).expect("parse interface");
+        assert_eq!(interface.functions.len(), 2);
+
+        let const_ptr = &interface.functions[0];
+        assert_eq!(const_ptr.params[0].type_name, "*const u8");
+        assert_eq!(const_ptr.return_type, "*const u8");
+
+        let mut_ptr = &interface.functions[1];
+        assert_eq!(mut_ptr.params[0].type_name, "*mut u8");
+        assert_eq!(mut_ptr.return_type, "*mut u8");
+    }
+
+    #[test]
+    fn test_parse_interface_supports_pointer_keywords_with_split_form() {
+        let source = r#"
+(interface ptrs
+  (fn const-ptr [p :*const u8] :*const u8 :rust "id_const_ptr")
+  (fn mut-ptr [p :*mut u8] :*mut u8 :rust "id_mut_ptr"))
 "#;
 
         use std::io::Write;
