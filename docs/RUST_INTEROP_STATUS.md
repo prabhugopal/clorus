@@ -43,8 +43,8 @@ Notes:
 - REPL/run/build can use imported Rust functions when wrappers are generated successfully.
 - Current auto-supported signature primitives:
   - floats: `f32`, `f64`
-  - signed ints: `i32`, `i64`, `isize`
-  - unsigned ints: `u32`, `u64`, `usize`
+  - signed ints: `i8`, `i16`, `i32`, `i64`, `isize`
+  - unsigned ints: `u8`, `u16`, `u32`, `u64`, `usize`
   - others: `bool`, `String`, `()`, `*mut u8`
 - Unsupported signatures now report concrete examples in build errors.
 
@@ -99,6 +99,7 @@ Today, reliable production path is:
 The CLI/rust-ffi integration tests now cover:
 
 - local path dependency + `.clri` auto interface + extended numeric signatures
+- local path dependency + `.clri` auto interface + narrow integer signatures (`i8/u8/i16/u16`)
 - local path dependency + `.clri` `:rust` override for impl/associated methods
 - local path auto-parse with unsupported-signature filtering
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)

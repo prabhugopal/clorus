@@ -120,6 +120,10 @@ impl RustFfiProcessor {
             type_name,
             "f32"
                 | "f64"
+                | "i8"
+                | "u8"
+                | "i16"
+                | "u16"
                 | "i32"
                 | "u32"
                 | "i64"
@@ -640,6 +644,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         match rust_type {
             "f32" => "f32".to_string(),
             "f64" => "f64".to_string(),
+            "i8" => "i8".to_string(),
+            "u8" => "u8".to_string(),
+            "i16" => "i16".to_string(),
+            "u16" => "u16".to_string(),
             "i32" => "i32".to_string(),
             "u32" => "u32".to_string(),
             "i64" => "i64".to_string(),
@@ -657,7 +665,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
     fn c_to_rust_conversion(name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+            "f32" | "f64" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32" | "i64" | "u64"
+            | "bool" | "*mut u8" => {
                 format!("    let {}_rust = {};", name, name)
             }
             "isize" => format!("    let {}_rust = {} as isize;", name, name),
@@ -672,7 +681,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
     fn rust_to_c_conversion(name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+            "f32" | "f64" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32" | "i64" | "u64"
+            | "bool" | "*mut u8" => {
                 format!("    {}", name)
             }
             "isize" => format!("    {} as i64", name),
@@ -896,14 +906,14 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             for param in &binding.params {
                 if !Self::is_supported_ffi_type(&param.type_name) {
                     return Err(format!(
-                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
+                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
                         interface_path, binding.exposed_name, param.type_name
                     ));
                 }
             }
             if !Self::is_supported_ffi_type(&binding.return_type) {
                 return Err(format!(
-                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
+                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
                     interface_path, binding.exposed_name, binding.return_type
                 ));
             }
@@ -1278,6 +1288,48 @@ mod tests {
     }
 
     #[test]
+    fn retain_supported_ffi_functions_accepts_narrow_integer_types() {
+        let functions = vec![
+            FunctionInfo {
+                name: "ok_i8".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "i8".to_string(),
+                }],
+                return_type: "i8".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_u8".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "u8".to_string(),
+                }],
+                return_type: "u8".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_i16".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "i16".to_string(),
+                }],
+                return_type: "i16".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_u16".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "u16".to_string(),
+                }],
+                return_type: "u16".to_string(),
+            },
+        ];
+
+        let filtered = RustFfiProcessor::retain_supported_ffi_functions(functions, false);
+        let names: Vec<String> = filtered.into_iter().map(|f| f.name).collect();
+        assert_eq!(names, vec!["ok_i8", "ok_u8", "ok_i16", "ok_u16"]);
+    }
+
+    #[test]
     fn retain_supported_ffi_functions_accepts_core_supported_types() {
         let functions = vec![
             FunctionInfo {
@@ -1584,6 +1636,87 @@ demo-math = { path = "demo-math", interface = true }
         assert_eq!(lib.functions[0].return_type, "f32");
         assert_eq!(lib.functions[1].return_type, "u64");
         assert_eq!(lib.functions[2].return_type, "usize");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_interface_narrow_integer_types() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_narrow_{}", unique));
+        let dep_dir = root.join("demo-narrow");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "demo-narrow"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn id_i8(x: i8) -> i8 { x }
+pub fn id_u8(x: u8) -> u8 { x }
+pub fn id_i16(x: i16) -> i16 { x }
+pub fn id_u16(x: u16) -> u16 { x }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("demo-narrow.clri"),
+            r#"(interface demo-narrow
+  (fn id-i8 [x :i8] :i8)
+  (fn id-u8 [x :u8] :u8)
+  (fn id-i16 [x :i16] :i16)
+  (fn id-u16 [x :u16] :u16)
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+demo-narrow = { path = "demo-narrow", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "demo_narrow_ffi");
+        let static_lib = if lib.static_lib_path.is_absolute() {
+            lib.static_lib_path.clone()
+        } else {
+            root.join(&lib.static_lib_path)
+        };
+        assert!(static_lib.exists(), "expected static library at {}", static_lib.display());
+        assert_eq!(lib.functions.len(), 4);
+        assert_eq!(lib.functions[0].return_type, "i8");
+        assert_eq!(lib.functions[1].return_type, "u8");
+        assert_eq!(lib.functions[2].return_type, "i16");
+        assert_eq!(lib.functions[3].return_type, "u16");
 
         let _ = std::fs::remove_dir_all(&root);
     }
