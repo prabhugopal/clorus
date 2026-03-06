@@ -649,4 +649,26 @@ demo-lib = { path = "../demo-lib", interface = false }
             "serialized manifest should preserve explicit interface=false for path dependencies"
         );
     }
+
+    #[test]
+    fn rust_dependency_with_interface_disabled_returns_none_for_get_interface() {
+        let dep = RustDependency::WithInterface {
+            path: "../demo-lib".to_string(),
+            interface: InterfaceSpec::Disabled,
+        };
+
+        assert_eq!(dep.get_path(), Some("../demo-lib"));
+        assert!(dep.get_interface().is_none());
+    }
+
+    #[test]
+    fn rust_dependency_with_version_interface_disabled_returns_none_for_get_interface() {
+        let dep = RustDependency::WithVersionInterface {
+            version: "0.2".to_string(),
+            interface: InterfaceSpec::Disabled,
+        };
+
+        assert_eq!(dep.get_version(), Some("0.2"));
+        assert!(dep.get_interface().is_none());
+    }
 }
