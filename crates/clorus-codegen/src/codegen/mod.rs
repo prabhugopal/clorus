@@ -7455,6 +7455,41 @@ mod tests {
     }
 
     #[test]
+    fn test_use_rust_module_accepts_hyphen_and_underscore_variants() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        codegen.register_rust_library(RustLibrary {
+            name: "coral-gfx".to_string(),
+            functions: vec![],
+        });
+
+        let exprs = parse("(use rust.coral_gfx)").unwrap();
+        let result = codegen.wrap_in_function(&exprs[0], "test_use_rust_coral_gfx_underscore");
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+
+        let exprs = parse("(use rust.coral-gfx)").unwrap();
+        let result = codegen.wrap_in_function(&exprs[0], "test_use_rust_coral_gfx_hyphen");
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_use_rust_module_accepts_prefixed_library_registration() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        codegen.register_rust_library(RustLibrary {
+            name: "rust.coral-gfx".to_string(),
+            functions: vec![],
+        });
+
+        let exprs = parse("(use rust.coral_gfx)").unwrap();
+        let result =
+            codegen.wrap_in_function(&exprs[0], "test_use_rust_coral_gfx_prefixed_library");
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+    }
+
+    #[test]
     fn test_compile_multiple_fn() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
