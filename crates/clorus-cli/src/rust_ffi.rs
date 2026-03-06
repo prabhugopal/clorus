@@ -126,11 +126,13 @@ impl RustFfiProcessor {
         fn parse_parts(v: &str) -> Vec<u64> {
             v.split('.')
                 .map(|part| {
-                    part.chars()
+                    let numeric = part
+                        .trim_start_matches(|c: char| !c.is_ascii_digit())
+                        .chars()
                         .take_while(|c| c.is_ascii_digit())
                         .collect::<String>()
-                        .parse::<u64>()
-                        .unwrap_or(0)
+                        .parse::<u64>();
+                    numeric.unwrap_or(0)
                 })
                 .collect()
         }
@@ -1429,6 +1431,18 @@ mod tests {
         assert_eq!(
             RustFfiProcessor::compare_version_like("1.2.4+build.1", "1.2.3+build.99"),
             std::cmp::Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn compare_version_like_handles_v_prefixed_versions() {
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("v1.2.10", "1.2.9"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("v1.2.3-alpha.1", "1.2.3-alpha.2"),
+            std::cmp::Ordering::Less
         );
     }
 
