@@ -691,14 +691,13 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
             }
         }
 
-        let resolved = metadata
+        let resolved_pkg = metadata
             .packages
             .iter()
             .filter(|p| {
                 p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+")
             })
             .max_by(|a, b| Self::compare_version_like(&a.version, &b.version))
-            .map(|p| p.version.clone())
             .ok_or_else(|| {
                 format!(
                     "Registry dependency '{}' was not found in cargo metadata package set. \
@@ -706,11 +705,19 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
                     dep_name
                 )
             })?;
+        let resolved_kinds = resolved_pkg
+            .targets
+            .iter()
+            .flat_map(|t| t.kind.iter().cloned())
+            .collect::<Vec<String>>();
         Err(format!(
             "Registry dependency '{}' (resolved {}) has no lib target. \
+Available target kinds for resolved package: [{}]. \
 Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
 an explicit interface for a bridge exposing extern \"C\" functions.",
-            dep_name, resolved
+            dep_name,
+            resolved_pkg.version,
+            resolved_kinds.join(", ")
         ))
     }
 
@@ -1484,6 +1491,7 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when registry package has no lib target");
         assert!(err.contains("Registry dependency 'demo-math' (resolved 0.3.0) has no lib target"));
+        assert!(err.contains("Available target kinds for resolved package: [bin]"));
         assert!(err.contains("Only library crates can be auto-wrapped"));
         assert!(err.contains("use a local bridge crate"));
     }
