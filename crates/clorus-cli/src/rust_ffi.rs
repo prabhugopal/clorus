@@ -56,8 +56,9 @@ struct InterfaceBinding {
 
 impl RustFfiProcessor {
     fn with_dependency_context(dep_name: &str, err: String) -> String {
-        let prefix = format!("Rust dependency '{}':", dep_name);
-        if err.starts_with(&prefix) {
+        let dep_label = format!("Rust dependency '{}'", dep_name);
+        let prefix = format!("{}:", dep_label);
+        if err.starts_with(&prefix) || err.starts_with(&dep_label) {
             err
         } else {
             format!("{} {}", prefix, err)
@@ -1523,6 +1524,18 @@ mod tests {
             "Rust dependency 'demo-lib': already prefixed".to_string(),
         );
         assert_eq!(out, "Rust dependency 'demo-lib': already prefixed");
+    }
+
+    #[test]
+    fn with_dependency_context_does_not_duplicate_existing_dependency_label() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Rust dependency 'demo-lib' resolved from registry but no FFI-compatible functions were discovered".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib' resolved from registry but no FFI-compatible functions were discovered"
+        );
     }
 
     #[test]
