@@ -944,6 +944,44 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_errors_when_registry_package_missing() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                name: "demo-math".to_string(),
+                version: "0.1.0".to_string(),
+                source: Some("path+file:///tmp/demo-math".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["lib".to_string()],
+                    src_path: "/tmp/local/src/lib.rs".to_string(),
+                }],
+            }],
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when only non-registry package exists");
+        assert!(err.contains("Registry dependency 'demo-math' was not found"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_registry_package_has_no_lib_target() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                name: "demo-math".to_string(),
+                version: "0.3.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["bin".to_string()],
+                    src_path: "/tmp/registry/src/main.rs".to_string(),
+                }],
+            }],
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when registry package has no lib target");
+        assert!(err.contains("Registry dependency 'demo-math' (resolved 0.3.0) has no lib target"));
+    }
+
+    #[test]
     fn retain_supported_ffi_functions_filters_unsupported_signatures() {
         let functions = vec![
             FunctionInfo {
