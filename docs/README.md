@@ -1,23 +1,16 @@
 # Clorus Documentation
 
-## Structure
+This repo now uses a canonical-doc model with four top-level sources of truth:
 
-- **guides/** - User guides and tutorials
-- **design/** - Design documents and specifications
-- **issues/** - Known issues and limitations
-- **archive/** - Completed session notes (historical)
-- **comparisons/** - Language comparisons and benchmarks
-- **improvements/** - Roadmap and improvement proposals
+- [Language](LANGUAGE.md)
+- [Compiler & Architecture](COMPILER_ARCHITECTURE.md)
+- [Rust Interop](RUST_INTEROP.md)
+- [Coverage](COVERAGE.md)
 
-## Main Documentation
+## Legacy/Deep Docs
 
-- [User Guide](guides/CLIP_USER_GUIDE.md) - How to use Clorus
-- [Improvements Roadmap](improvements/IMPROVEMENTS.md) - Future enhancements
-- [Known Issues](issues/KNOWN_ISSUES.md) - Current limitations
-- [CLIP Specification](guides/CLIP_SPECIFICATION.md) - Package format spec
-- [FFI Migration Guide](guides/FFI_MIGRATION_GUIDE.md) - Rust FFI integration
+Detailed historical, design, and session docs remain in subfolders (`design/`, `guides/`, `sessions/`, etc.) and are useful context, but are not the top-level canonical entrypoints.
 
-## For Contributors
+## Website
 
-See individual files for detailed information about the Clorus language,
-compiler, and ecosystem.
+MkDocs config is defined at `mkdocs.yml`.

@@ -1,0 +1,16 @@
+site_name: Clorus Docs
+site_description: Clorus language, compiler, interop, and test coverage
+repo_name: clorus
+repo_url: https://github.com/yourusername/clorus
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+
+nav:
+  - Home: README.md
+  - Language: LANGUAGE.md
+  - Compiler & Architecture: COMPILER_ARCHITECTURE.md
+  - Rust Interop: RUST_INTEROP.md
+  - Coverage: COVERAGE.md
