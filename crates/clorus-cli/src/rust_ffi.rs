@@ -1545,6 +1545,17 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_explicit_rejects_unknown_extension_after_trimming() {
+        let err = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path("  interfaces/demo-lib.txt  ".to_string()),
+        )
+        .expect_err("expected unsupported extension error");
+        assert!(err.contains("Unsupported interface file extension"));
+        assert!(err.contains("interfaces/demo-lib.txt"));
+    }
+
+    #[test]
     fn resolve_interface_path_explicit_rejects_empty_path() {
         let err = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
@@ -1598,6 +1609,29 @@ mod tests {
             RustFfiProcessor::resolve_interface_path(
                 "demo-lib",
                 crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.clri".to_string()),
+            )
+            .expect_err("expected directory path rejection")
+        });
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(err.contains("Interface path for 'demo-lib' points to a directory"));
+        assert!(err.contains("interfaces/demo-lib.clri"));
+    }
+
+    #[test]
+    fn resolve_interface_path_explicit_rejects_directory_after_trimming() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_dir_trim_{}", unique));
+        let iface_dir = root.join("interfaces").join("demo-lib.clri");
+        std::fs::create_dir_all(&iface_dir).expect("create interface directory");
+
+        let err = with_cwd(&root, || {
+            RustFfiProcessor::resolve_interface_path(
+                "demo-lib",
+                crate::manifest::InterfaceSpec::Path("  interfaces/demo-lib.clri  ".to_string()),
             )
             .expect_err("expected directory path rejection")
         });
