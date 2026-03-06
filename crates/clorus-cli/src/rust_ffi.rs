@@ -4619,6 +4619,15 @@ auto-legacy-lib = { path = "auto-legacy-lib", interface = true }
         assert_eq!(lib.name, "auto_legacy_lib_ffi");
         let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["pong"]);
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("auto_legacy_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("fn clorus_auto_legacy_lib__pong("));
+        assert!(!generated.contains("fn clorus_pong("));
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -4694,6 +4703,15 @@ prefer-clri-lib = { path = "prefer-clri-lib", interface = true }
         assert_eq!(lib.name, "prefer_clri_lib_ffi");
         let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["ping"]);
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("prefer_clri_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("fn clorus_prefer_clri_lib__ping("));
+        assert!(!generated.contains("fn clorus_ping("));
 
         let _ = std::fs::remove_dir_all(&root);
     }
