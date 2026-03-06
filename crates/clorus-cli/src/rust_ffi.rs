@@ -2088,6 +2088,86 @@ auto-parse-lib = { path = "auto-parse-lib" }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_supports_bool_string_and_pointer() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_autoparse_mixed_{}", unique));
+        let dep_dir = root.join("auto-parse-mixed-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-mixed-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn flip_bool(x: bool) -> bool { !x }
+pub fn id_string(s: String) -> String { s }
+pub fn id_ptr(p: *mut u8) -> *mut u8 { p }
+pub fn unsupported_vec(xs: Vec<u8>) -> Vec<u8> { xs }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "auto_parse_mixed_lib_ffi");
+
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"flip_bool"));
+        assert!(names.contains(&"id_string"));
+        assert!(names.contains(&"id_ptr"));
+        assert!(!names.contains(&"unsupported_vec"));
+
+        let id_string = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_string")
+            .expect("id_string function should exist");
+        assert_eq!(id_string.params[0].type_name, "String");
+        assert_eq!(id_string.return_type, "String");
+
+        let id_ptr = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_ptr")
+            .expect("id_ptr function should exist");
+        assert_eq!(id_ptr.params[0].type_name, "*mut u8");
+        assert_eq!(id_ptr.return_type, "*mut u8");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_explicit_legacy_interface_path() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
