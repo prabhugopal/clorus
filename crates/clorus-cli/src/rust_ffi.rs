@@ -1539,6 +1539,18 @@ mod tests {
     }
 
     #[test]
+    fn with_dependency_context_prefixes_when_existing_label_is_for_other_dependency() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Rust dependency 'other-lib': path not found".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib': Rust dependency 'other-lib': path not found"
+        );
+    }
+
+    #[test]
     fn likely_impl_method_only_api_detects_impl_patterns() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

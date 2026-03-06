@@ -130,6 +130,7 @@ The CLI/rust-ffi integration tests now cover:
 - interface semantic validation failures (e.g. invalid `:rust`) include dependency-name context
 - dependency-context prefixing is idempotent (no duplicated `Rust dependency '<name>':` prefixes)
 - dependency-context prefixing preserves existing dependency-labeled diagnostics (no double-labeling)
+- dependency-context prefixing still wraps diagnostics labeled for a different dependency name
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
 - explicit interface path must be a file (directory-path misuse rejected with clear diagnostics)
 - explicit interface type-matrix validation (unsupported param and return types rejected before wrapper compile)
