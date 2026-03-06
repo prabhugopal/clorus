@@ -1398,4 +1398,74 @@ missing-iface-lib = { path = "missing-iface-lib", interface = true }
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_filters_unsupported_signatures() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_autoparse_{}", unique));
+        let dep_dir = root.join("auto-parse-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn id_u64(x: u64) -> u64 { x }
+pub fn id_usize(x: usize) -> usize { x }
+pub fn id_f32(x: f32) -> f32 { x }
+pub fn unsupported_vec(xs: Vec<u8>) -> Vec<u8> { xs }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-lib = { path = "auto-parse-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("cd root");
+        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
+            .expect("process dependencies");
+        std::env::set_current_dir(original).expect("restore cwd");
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "auto_parse_lib_ffi");
+        let static_lib = if lib.static_lib_path.is_absolute() {
+            lib.static_lib_path.clone()
+        } else {
+            root.join(&lib.static_lib_path)
+        };
+        assert!(static_lib.exists(), "expected static library at {}", static_lib.display());
+
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"id_u64"));
+        assert!(names.contains(&"id_usize"));
+        assert!(names.contains(&"id_f32"));
+        assert!(!names.contains(&"unsupported_vec"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
