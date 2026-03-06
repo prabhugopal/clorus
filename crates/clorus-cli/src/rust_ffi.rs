@@ -1827,6 +1827,76 @@ explicit-clri-lib = { path = "explicit-clri-lib", interface = "custom-ifaces/exp
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_clri_with_rust_symbol_override() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_explicit_clri_override_{}", unique));
+        let dep_dir = root.join("explicit-override-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "explicit-override-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Math;
+impl Math {
+    pub fn answer() -> u64 { 42 }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("explicit-override-lib.clri"),
+            r#"(interface explicit-override-lib
+  (fn forty-two [] :u64 :rust "Math::answer")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+explicit-override-lib = { path = "explicit-override-lib", interface = "interfaces/explicit-override-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "explicit_override_lib_ffi");
+        assert_eq!(lib.functions.len(), 1);
+        assert_eq!(lib.functions[0].name, "forty_two");
+        assert_eq!(lib.functions[0].return_type, "u64");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_interface_uses_legacy_when_clri_absent() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
