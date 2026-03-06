@@ -1542,4 +1542,67 @@ legacy-iface-lib = { path = "legacy-iface-lib", interface = "custom-ifaces/legac
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_interface_uses_legacy_when_clri_absent() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_auto_legacy_{}", unique));
+        let dep_dir = root.join("auto-legacy-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-legacy-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn pong() -> i32 { 9 }\n")
+            .expect("write dep lib");
+
+        // Intentionally only legacy interface file present.
+        std::fs::write(
+            iface_dir.join("auto-legacy-lib.clorus-ffi"),
+            r#"(interface auto-legacy-lib
+  (fn pong [] :i32)
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-legacy-lib = { path = "auto-legacy-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("cd root");
+        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
+            .expect("process dependencies");
+        std::env::set_current_dir(original).expect("restore cwd");
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "auto_legacy_lib_ffi");
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["pong"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
