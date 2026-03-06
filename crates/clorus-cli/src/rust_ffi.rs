@@ -2974,7 +2974,9 @@ iface-override-scoped-lib = { path = "iface-override-scoped-lib", interface = tr
         let root =
             std::env::temp_dir().join(format!("clorus_rustffi_e2e_interface_false_{}", unique));
         let dep_dir = root.join("iface-false-lib");
+        let iface_dir = root.join("interfaces");
         std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interface dir");
 
         std::fs::write(
             dep_dir.join("Cargo.toml"),
@@ -2993,6 +2995,16 @@ pub fn plus_one(x: i32) -> i32 { x + 1 }
 "#,
         )
         .expect("write dep lib");
+
+        // If `interface = false` were ignored, this interface would be auto-loaded and wrapper
+        // compilation would fail because `missing_fn` does not exist in the Rust dependency.
+        std::fs::write(
+            iface_dir.join("iface-false-lib.clri"),
+            r#"(interface iface-false-lib
+  (fn missing-fn [x :i32] :i32 :rust "missing_fn")
+)"#,
+        )
+        .expect("write interface file");
 
         let manifest: Manifest = toml::from_str(
             r#"[package]
@@ -3018,6 +3030,7 @@ iface-false-lib = { path = "iface-false-lib", interface = false }
         assert_eq!(lib.name, "iface_false_lib_ffi");
         let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
         assert!(names.contains(&"plus_one"));
+        assert!(!names.contains(&"missing_fn"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
