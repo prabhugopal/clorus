@@ -133,6 +133,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path dependency + explicit `.clri` interface path
 - local path dependency + explicit `.clri` interface path supports both compact and split pointer forms (`:*const-u8` / `:*const u8`, `:*mut-u8` / `:*mut u8`)
 - explicit `.clri` split-pointer E2E coverage validates both const and mut pointer wrappers (`*const u8`, `*mut u8`) and generated export symbols
+- explicit `.clri` compact-pointer E2E coverage validates `:*const-u8` mapping and generated wrapper conversion
 - explicit interface-path values with leading/trailing whitespace are trimmed before resolution
 - local path dependency + explicit `.clri` interface path with `:rust` symbol override for impl/associated methods
 - empty `:rust` symbol override rejection with explicit function+interface-path diagnostics
