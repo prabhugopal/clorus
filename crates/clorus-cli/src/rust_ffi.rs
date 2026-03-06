@@ -6,6 +6,7 @@ use std::fs;
 use clorus_ffi_gen::{FfiGenerator, FunctionInfo};
 use crate::manifest::Manifest;
 use serde::Deserialize;
+use crate::interface::InterfaceFunction;
 
 pub struct RustFfiProcessor {
     pub libraries: Vec<ProcessedLibrary>,
@@ -42,6 +43,14 @@ struct CargoPackage {
 struct CargoTarget {
     kind: Vec<String>,
     src_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct InterfaceBinding {
+    exposed_name: String,
+    rust_symbol: String,
+    params: Vec<clorus_ffi_gen::ParamInfo>,
+    return_type: String,
 }
 
 impl RustFfiProcessor {
@@ -531,6 +540,91 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             .map_err(|e| format!("Failed to write wrapper lib.rs: {}", e))
     }
 
+    fn rust_to_c_type(rust_type: &str) -> String {
+        match rust_type {
+            "f64" => "f64".to_string(),
+            "i32" => "i32".to_string(),
+            "i64" => "i64".to_string(),
+            "bool" => "bool".to_string(),
+            "String" => "*mut c_char".to_string(),
+            "()" => "()".to_string(),
+            "*mut u8" => "*mut u8".to_string(),
+            _ => "*mut u8".to_string(),
+        }
+    }
+
+    fn c_to_rust_conversion(name: &str, rust_type: &str) -> String {
+        match rust_type {
+            "f64" | "i32" | "i64" | "bool" | "*mut u8" => {
+                format!("    let {}_rust = {};", name, name)
+            }
+            "String" => format!(
+                "    let {}_rust = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};",
+                name, name
+            ),
+            _ => format!("    let {}_rust = {};", name, name),
+        }
+    }
+
+    fn rust_to_c_conversion(name: &str, rust_type: &str) -> String {
+        match rust_type {
+            "f64" | "i32" | "i64" | "bool" | "*mut u8" => format!("    {}", name),
+            "String" => format!("    unsafe {{ CString::new({}).unwrap().into_raw() }}", name),
+            "()" => "".to_string(),
+            _ => format!("    {} as *mut u8", name),
+        }
+    }
+
+    fn generate_wrapper_lib_rs_from_interface(
+        wrapper_dir: &Path,
+        original_name: &str,
+        bindings: &[InterfaceBinding],
+    ) -> Result<(), String> {
+        let lib_name = original_name.replace('-', "_");
+        let mut content = format!(
+            "// Auto-generated interface-based FFI wrapper crate for {}\n\
+             use {}::*;\n\
+             use std::ffi::{{CStr, CString}};\n\
+             use std::os::raw::c_char;\n\n",
+            original_name, lib_name
+        );
+
+        for binding in bindings {
+            let wrapper_name = format!("clorus_{}", binding.exposed_name);
+            let c_params: Vec<String> = binding
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", p.name, Self::rust_to_c_type(&p.type_name)))
+                .collect();
+            let c_return = Self::rust_to_c_type(&binding.return_type);
+            let param_conversions: Vec<String> = binding
+                .params
+                .iter()
+                .map(|p| Self::c_to_rust_conversion(&p.name, &p.type_name))
+                .collect();
+            let call_params: Vec<String> = binding
+                .params
+                .iter()
+                .map(|p| format!("{}_rust", p.name))
+                .collect();
+            let return_conversion = Self::rust_to_c_conversion("result", &binding.return_type);
+
+            content.push_str(&format!(
+                "#[no_mangle]\npub extern \"C\" fn {}({}) -> {} {{\n{}\n    let result = {}({});\n{}\n}}\n\n",
+                wrapper_name,
+                c_params.join(", "),
+                c_return,
+                param_conversions.join("\n"),
+                binding.rust_symbol,
+                call_params.join(", "),
+                return_conversion
+            ));
+        }
+
+        fs::write(wrapper_dir.join("src/lib.rs"), content)
+            .map_err(|e| format!("Failed to write interface wrapper lib.rs: {}", e))
+    }
+
     /// Compile the wrapper crate
     fn compile_wrapper_crate(
         wrapper_dir: &Path,
@@ -626,22 +720,40 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             println!("      Parsed interface: {} functions", interface.functions.len());
         }
 
-        // Convert interface functions to FunctionInfo
-        let functions: Vec<FunctionInfo> = interface.functions.iter().map(|f| {
-            // Convert kebab-case to snake_case for Rust compatibility
-            let rust_name = f.name.replace('-', "_");
+        // Convert interface functions to wrapper bindings and exposed symbols.
+        let bindings: Vec<InterfaceBinding> = interface
+            .functions
+            .iter()
+            .map(|f: &InterfaceFunction| {
+                let exposed_name = f.name.replace('-', "_");
+                let rust_symbol = f
+                    .rust_symbol
+                    .clone()
+                    .unwrap_or_else(|| exposed_name.clone());
+                InterfaceBinding {
+                    exposed_name,
+                    rust_symbol,
+                    params: f
+                        .params
+                        .iter()
+                        .map(|p| clorus_ffi_gen::ParamInfo {
+                            name: p.name.clone(),
+                            type_name: p.type_name.clone(),
+                        })
+                        .collect(),
+                    return_type: f.return_type.clone(),
+                }
+            })
+            .collect();
 
-            FunctionInfo {
-                name: rust_name,
-                params: f.params.iter().map(|p| {
-                    clorus_ffi_gen::ParamInfo {
-                        name: p.name.clone(),
-                        type_name: p.type_name.clone(),
-                    }
-                }).collect(),
-                return_type: f.return_type.clone(),
-            }
-        }).collect();
+        let functions: Vec<FunctionInfo> = bindings
+            .iter()
+            .map(|b| FunctionInfo {
+                name: b.exposed_name.clone(),
+                params: b.params.clone(),
+                return_type: b.return_type.clone(),
+            })
+            .collect();
 
         // Create wrapper crate (same as auto-parse, but with interface functions)
         let rust_ffi_dir = PathBuf::from("target/rust-ffi");
@@ -661,10 +773,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         // Generate Cargo.toml
         Self::generate_wrapper_cargo_toml_for_source(&wrapper_dir, &wrapper_name, name, source)?;
 
-        // Generate lib.rs using interface functions
-        let mut generator = FfiGenerator::new();
-        generator.functions = functions.clone();
-        Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
+        // Generate lib.rs using interface functions with optional rust symbol overrides.
+        Self::generate_wrapper_lib_rs_from_interface(&wrapper_dir, name, &bindings)?;
 
         if verbose {
             println!("      Generated wrapper from interface");
@@ -896,5 +1006,35 @@ impl Foo {
         let detected = RustFfiProcessor::likely_impl_method_only_api(&src);
         let _ = std::fs::remove_dir_all(&root);
         assert!(detected);
+    }
+
+    #[test]
+    fn generate_wrapper_lib_rs_from_interface_supports_rust_symbol_override() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_iface_wrap_{}", unique));
+        std::fs::create_dir_all(root.join("src")).expect("create temp src");
+
+        let bindings = vec![InterfaceBinding {
+            exposed_name: "new_point".to_string(),
+            rust_symbol: "Point::new".to_string(),
+            params: vec![
+                clorus_ffi_gen::ParamInfo { name: "x".to_string(), type_name: "f64".to_string() },
+                clorus_ffi_gen::ParamInfo { name: "y".to_string(), type_name: "f64".to_string() },
+            ],
+            return_type: "()".to_string(),
+        }];
+
+        RustFfiProcessor::generate_wrapper_lib_rs_from_interface(&root, "demo-lib", &bindings)
+            .expect("generate wrapper");
+
+        let generated =
+            std::fs::read_to_string(root.join("src/lib.rs")).expect("read generated wrapper");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(generated.contains("clorus_new_point"));
+        assert!(generated.contains("Point::new"));
     }
 }

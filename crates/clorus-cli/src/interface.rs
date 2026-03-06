@@ -19,6 +19,7 @@ pub struct InterfaceFunction {
     pub params: Vec<InterfaceParam>,
     pub return_type: String,
     pub doc: Option<String>,
+    pub rust_symbol: Option<String>,
 }
 
 /// Represents a parameter in a function declaration
@@ -142,15 +143,33 @@ impl InterfaceTokenParser {
         let name = self.expect_symbol()?;
         let params = self.parse_params()?;
         let return_type = map_type_keyword(&self.expect_keyword()?);
+        let mut doc = None;
+        let mut rust_symbol = None;
 
-        let doc = match self.current() {
-            Token::String(s, _) => {
-                let out = s;
-                self.advance();
-                Some(out)
+        while !matches!(self.current(), Token::RParen(_)) {
+            match self.current() {
+                Token::String(s, _) => {
+                    if doc.is_some() {
+                        return Err("Only one doc string is allowed in interface function".to_string());
+                    }
+                    doc = Some(s);
+                    self.advance();
+                }
+                Token::Keyword(ref k, _) if k == "rust" => {
+                    self.advance();
+                    match self.current() {
+                        Token::String(s, _) => {
+                            rust_symbol = Some(s);
+                            self.advance();
+                        }
+                        _ => {
+                            return Err("Expected string after :rust in interface function".to_string());
+                        }
+                    }
+                }
+                _ => return Err("Unexpected token in interface function declaration".to_string()),
             }
-            _ => None,
-        };
+        }
 
         self.expect_rparen()?;
 
@@ -159,6 +178,7 @@ impl InterfaceTokenParser {
             params,
             return_type,
             doc,
+            rust_symbol,
         })
     }
 
@@ -244,5 +264,24 @@ mod tests {
         assert_eq!(add_fn.params[0].type_name, "f64");
         assert_eq!(add_fn.return_type, "f64");
         assert_eq!(add_fn.doc, Some("Add two numbers".to_string()));
+        assert_eq!(add_fn.rust_symbol, None);
+    }
+
+    #[test]
+    fn test_parse_interface_with_rust_symbol_override() {
+        let source = r#"
+(interface demo
+  (fn new-point [x :f64 y :f64] :unit :rust "Point::new"))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let interface = parse_interface_file(file.path()).expect("parse interface");
+        assert_eq!(interface.functions.len(), 1);
+        let f = &interface.functions[0];
+        assert_eq!(f.name, "new-point");
+        assert_eq!(f.rust_symbol.as_deref(), Some("Point::new"));
     }
 }
