@@ -2173,6 +2173,89 @@ demo-text = { path = "demo-text", interface = true }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_interface_supports_const_pointer() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_iface_const_ptr_{}", unique));
+        let dep_dir = root.join("iface-const-ptr-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "iface-const-ptr-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("iface-const-ptr-lib.clri"),
+            r#"(interface iface-const-ptr-lib
+  (fn id-const-ptr [p :*const-u8] :*const-u8 :rust "id_const_ptr"))
+"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+iface-const-ptr-lib = { path = "iface-const-ptr-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "iface_const_ptr_lib_ffi");
+
+        let ptr_fn = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_const_ptr")
+            .expect("id_const_ptr function should exist");
+        assert_eq!(ptr_fn.params[0].type_name, "*const u8");
+        assert_eq!(ptr_fn.return_type, "*const u8");
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("iface_const_ptr_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("fn clorus_iface_const_ptr_lib__id_const_ptr("));
+        assert!(generated.contains("let p_rust = p as *const u8;"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_interface_with_rust_symbol_override() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

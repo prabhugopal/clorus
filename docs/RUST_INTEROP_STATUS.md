@@ -34,6 +34,8 @@ Notes:
 - When multiple registry versions of the same crate appear in metadata, resolver prefers the highest discovered registry version.
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is currently treated as "no interface specified" (same as omitting `interface`).
+- In `.clri` files, pointer keywords must be written without spaces:
+  `:*mut-u8` / `:*const-u8` (these map to `*mut u8` / `*const u8`).
 
 ## What Works Today
 
@@ -123,7 +125,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
 - local path auto-parse with const-pointer signatures (`*const u8`) is covered and accepted via pointer-carrier mapping
 - local path `interface = false` is covered and behaves like omitted interface (auto-parse path flow)
-- local path auto-parse pointer-mismatch rejection includes explicit hint (`*mut u8` is the only auto-supported raw pointer carrier)
+- local path auto-parse pointer-mismatch rejection includes explicit hint (`*mut u8` and `*const u8` are the only auto-supported raw pointer carriers)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`) with `:rust` symbol override for impl/associated methods
 - local path dependency + explicit `.clri` interface path

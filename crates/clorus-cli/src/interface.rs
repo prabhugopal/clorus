@@ -269,9 +269,20 @@ fn map_type_keyword(keyword: &str) -> String {
         "f64" => "f64".to_string(),
         "i32" => "i32".to_string(),
         "i64" => "i64".to_string(),
+        "i8" => "i8".to_string(),
+        "i16" => "i16".to_string(),
+        "u8" => "u8".to_string(),
+        "u16" => "u16".to_string(),
+        "u32" => "u32".to_string(),
+        "u64" => "u64".to_string(),
+        "isize" => "isize".to_string(),
+        "usize" => "usize".to_string(),
+        "f32" => "f32".to_string(),
         "bool" => "bool".to_string(),
         "string" => "String".to_string(),
         "unit" => "()".to_string(),
+        "*mut-u8" => "*mut u8".to_string(),
+        "*const-u8" => "*const u8".to_string(),
         other => other.to_string(), // For custom types
     }
 }
@@ -347,5 +358,29 @@ mod tests {
         assert!(err.contains("Expected keyword"));
         assert!(err.contains("line"));
         assert!(err.contains("column"));
+    }
+
+    #[test]
+    fn test_parse_interface_supports_pointer_keywords_without_spaces() {
+        let source = r#"
+(interface ptrs
+  (fn const-ptr [p :*const-u8] :*const-u8 :rust "id_const_ptr")
+  (fn mut-ptr [p :*mut-u8] :*mut-u8 :rust "id_mut_ptr"))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let interface = parse_interface_file(file.path()).expect("parse interface");
+        assert_eq!(interface.functions.len(), 2);
+
+        let const_ptr = &interface.functions[0];
+        assert_eq!(const_ptr.params[0].type_name, "*const u8");
+        assert_eq!(const_ptr.return_type, "*const u8");
+
+        let mut_ptr = &interface.functions[1];
+        assert_eq!(mut_ptr.params[0].type_name, "*mut u8");
+        assert_eq!(mut_ptr.return_type, "*mut u8");
     }
 }
