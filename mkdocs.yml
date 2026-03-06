@@ -5,8 +5,13 @@ repo_url: https://github.com/yourusername/clorus
 
 markdown_extensions:
   - admonition
+  - pymdownx.superfences
   - toc:
       permalink: true
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - javascripts/mermaid-init.js
 
 nav:
   - Home: README.md

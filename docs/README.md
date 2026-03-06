@@ -7,9 +7,9 @@ This repo now uses a canonical-doc model with four top-level sources of truth:
 - [Rust Interop](RUST_INTEROP.md)
 - [Coverage](COVERAGE.md)
 
-## Legacy/Deep Docs
+## Archived/Deep Docs
 
-Detailed historical, design, and session docs remain in subfolders (`design/`, `guides/`, `sessions/`, etc.) and are useful context, but are not the top-level canonical entrypoints.
+Detailed historical, design, and session docs remain in subfolders (`archive/`, `design/`, `guides/`, `sessions/`, etc.) and are useful context, but are not the top-level canonical entrypoints.
 
 ## Website
 

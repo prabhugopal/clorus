@@ -26,6 +26,22 @@ This is the canonical architecture document for Clorus compiler/runtime design.
 - Unified JIT-first execution path in progress/completed across run/repl flows.
 - Legacy execution path retained for parity validation and confidence testing.
 
+## Pipeline Diagram
+
+```mermaid
+flowchart LR
+  A[.clrs source] --> B[Lexer + Parser]
+  B --> C[AST + macro expansion]
+  C --> D[LLVM IR codegen]
+  D --> E{Execution mode}
+  E -->|jit| F[JIT execute]
+  E -->|legacy| G[AOT build + run]
+  F --> H[Runtime value system]
+  G --> H
+```
+
+Short version: parser is the strict parent, codegen is the ambitious middle child, runtime cleans up everyone’s mess.
+
 ## Open Work (Top Level)
 
 - Large-module decomposition (notably oversized codegen modules)
