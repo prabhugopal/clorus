@@ -2638,6 +2638,88 @@ scoped-symbol-lib = { path = "scoped-symbol-lib" }
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_interface_generates_dependency_scoped_symbols() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_explicit_iface_scoped_symbols_{}",
+            unique
+        ));
+        let dep_dir = root.join("iface-scoped-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "iface-scoped-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn add(a: f64, b: f64) -> f64 { a + b }
+pub fn multiply(a: f64, b: f64) -> f64 { a * b }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("iface-scoped-lib.clri"),
+            r#"(interface iface-scoped-lib
+  (fn add [a :f64 b :f64] :f64)
+  (fn multiply [a :f64 b :f64] :f64))
+"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+iface-scoped-lib = { path = "iface-scoped-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let _processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("iface_scoped_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        assert!(
+            wrapper_src.exists(),
+            "wrapper source should exist at {}",
+            wrapper_src.display()
+        );
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("fn clorus_iface_scoped_lib__add("));
+        assert!(generated.contains("fn clorus_iface_scoped_lib__multiply("));
+        assert!(!generated.contains("fn clorus_add("));
+        assert!(!generated.contains("fn clorus_multiply("));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_interface_false_uses_auto_parse_flow() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
