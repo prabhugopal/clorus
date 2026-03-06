@@ -58,7 +58,7 @@ impl InterfaceTokenParser {
                 self.advance();
                 Ok(())
             }
-            _ => Err("Expected '('".to_string()),
+            _ => Err(self.expected_token_error("'('")),
         }
     }
 
@@ -68,7 +68,7 @@ impl InterfaceTokenParser {
                 self.advance();
                 Ok(())
             }
-            _ => Err("Expected ')'".to_string()),
+            _ => Err(self.expected_token_error("')'")),
         }
     }
 
@@ -78,7 +78,7 @@ impl InterfaceTokenParser {
                 self.advance();
                 Ok(())
             }
-            _ => Err("Expected '['".to_string()),
+            _ => Err(self.expected_token_error("'['")),
         }
     }
 
@@ -88,7 +88,7 @@ impl InterfaceTokenParser {
                 self.advance();
                 Ok(())
             }
-            _ => Err("Expected ']'".to_string()),
+            _ => Err(self.expected_token_error("']'")),
         }
     }
 
@@ -99,7 +99,7 @@ impl InterfaceTokenParser {
                 self.advance();
                 Ok(out)
             }
-            _ => Err("Expected symbol".to_string()),
+            _ => Err(self.expected_token_error("symbol")),
         }
     }
 
@@ -110,7 +110,51 @@ impl InterfaceTokenParser {
                 self.advance();
                 Ok(out)
             }
-            _ => Err("Expected keyword".to_string()),
+            _ => Err(self.expected_token_error("keyword")),
+        }
+    }
+
+    fn expected_token_error(&self, expected: &str) -> String {
+        let current = self.current();
+        let span = current.span();
+        let (line, column) = (span.line, span.column);
+
+        format!(
+            "Expected {} at line {}, column {}, found {}",
+            expected,
+            line,
+            column,
+            Self::token_kind_name(&current)
+        )
+    }
+
+    fn token_kind_name(token: &Token) -> &'static str {
+        match token {
+            Token::LParen(_) => "LParen",
+            Token::RParen(_) => "RParen",
+            Token::LBracket(_) => "LBracket",
+            Token::RBracket(_) => "RBracket",
+            Token::LBrace(_) => "LBrace",
+            Token::RBrace(_) => "RBrace",
+            Token::Symbol(_, _) => "Symbol",
+            Token::Keyword(_, _) => "Keyword",
+            Token::String(_, _) => "String",
+            Token::Long(_, _) => "Long",
+            Token::Double(_, _) => "Double",
+            Token::Bool(_, _) => "Bool",
+            Token::Nil(_) => "Nil",
+            Token::Regex(_, _) => "Regex",
+            Token::ShorthandFnStart(_) => "ShorthandFnStart",
+            Token::HashSetStart(_) => "HashSetStart",
+            Token::ReaderDiscard(_) => "ReaderDiscard",
+            Token::VarQuote(_) => "VarQuote",
+            Token::Meta(_) => "Meta",
+            Token::Quote(_) => "Quote",
+            Token::SyntaxQuote(_) => "SyntaxQuote",
+            Token::Unquote(_) => "Unquote",
+            Token::UnquoteSplicing(_) => "UnquoteSplicing",
+            Token::Deref(_) => "Deref",
+            Token::Eof(_) => "Eof",
         }
     }
 
@@ -211,7 +255,9 @@ pub fn parse_interface_file(path: &Path) -> Result<InterfaceFile, String> {
         .map_err(|e| format!("Failed to tokenize interface file {}: {}", path.display(), e))?;
 
     let mut parser = InterfaceTokenParser::new(tokens);
-    parser.parse_interface()
+    parser
+        .parse_interface()
+        .map_err(|e| format!("Failed to parse interface file {}: {}", path.display(), e))
 }
 
 /// Parse interface from a Call expression
@@ -283,5 +329,23 @@ mod tests {
         let f = &interface.functions[0];
         assert_eq!(f.name, "new-point");
         assert_eq!(f.rust_symbol.as_deref(), Some("Point::new"));
+    }
+
+    #[test]
+    fn test_parse_interface_reports_location_for_malformed_param_type() {
+        let source = r#"
+(interface bad
+  (fn ptr-roundtrip [p :*mut i32] :i32))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let err = parse_interface_file(file.path()).expect_err("expected parse failure");
+        assert!(err.contains("Failed to parse interface file"));
+        assert!(err.contains("Expected keyword"));
+        assert!(err.contains("line"));
+        assert!(err.contains("column"));
     }
 }
