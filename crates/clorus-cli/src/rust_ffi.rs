@@ -303,7 +303,8 @@ impl RustFfiProcessor {
                 if verbose {
                     println!("      Using interface file: {}", interface_path);
                 }
-                Self::create_wrapper_from_interface(name, &source, &interface_path, verbose)?
+                Self::create_wrapper_from_interface(name, &source, &interface_path, verbose)
+                    .map_err(|e| format!("Rust dependency '{}': {}", name, e))?
             } else {
                 match &source {
                     // Phase 1: Auto-parse from source path
@@ -311,13 +312,15 @@ impl RustFfiProcessor {
                         if verbose {
                             println!("      Auto-parsing from source");
                         }
-                        Self::create_and_compile_wrapper(name, lib_path, verbose)?
+                        Self::create_and_compile_wrapper(name, lib_path, verbose)
+                            .map_err(|e| format!("Rust dependency '{}': {}", name, e))?
                     }
                     RustDepSource::Version(version) => {
                         if verbose {
                             println!("      Auto-discovering from registry source");
                         }
-                        Self::create_and_compile_wrapper_from_registry(name, version, verbose)?
+                        Self::create_and_compile_wrapper_from_registry(name, version, verbose)
+                            .map_err(|e| format!("Rust dependency '{}': {}", name, e))?
                     }
                 }
             };
@@ -3228,6 +3231,57 @@ missing-lib = { path = "definitely-not-here-lib" }
         };
         assert!(err.contains("Rust dependency 'missing-lib' path not found"));
         assert!(err.contains("definitely-not-here-lib"));
+    }
+
+    #[test]
+    fn process_dependencies_reports_dependency_name_for_missing_interface_file() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_missing_interface_dep_context_{}",
+            unique
+        ));
+        let dep_dir = root.join("dep-with-missing-iface");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "dep-with-missing-iface"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 1 }\n")
+            .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+dep-with-missing-iface = { path = "dep-with-missing-iface", interface = "interfaces/does-not-exist.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected missing interface failure"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Rust dependency 'dep-with-missing-iface':"));
+        assert!(err.contains("Interface file not found"));
+        assert!(err.contains("interfaces/does-not-exist.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
