@@ -328,6 +328,13 @@ impl RustDependency {
         }
     }
 
+    pub fn get_version(&self) -> Option<&str> {
+        match self {
+            RustDependency::Simple(version) => Some(version),
+            _ => None,
+        }
+    }
+
     pub fn get_interface(&self) -> Option<InterfaceSpec> {
         match self {
             RustDependency::WithInterface { interface, .. } => Some(interface.clone()),
@@ -459,5 +466,51 @@ impl Manifest {
         }
 
         Ok(resolved)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rust_dependency_simple_version_parses() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+smol = "2.0"
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let dep = manifest
+            .rust_dependencies
+            .get("smol")
+            .expect("smol dependency should exist");
+        assert_eq!(dep.get_version(), Some("2.0"));
+        assert_eq!(dep.get_path(), None);
+    }
+
+    #[test]
+    fn rust_dependency_path_with_interface_parses() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+demo-lib = { path = "../demo-lib", interface = "interfaces/demo-lib.clri" }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let dep = manifest
+            .rust_dependencies
+            .get("demo-lib")
+            .expect("demo-lib dependency should exist");
+        assert_eq!(dep.get_path(), Some("../demo-lib"));
+        assert!(matches!(
+            dep.get_interface(),
+            Some(InterfaceSpec::Path(ref p)) if p == "interfaces/demo-lib.clri"
+        ));
     }
 }

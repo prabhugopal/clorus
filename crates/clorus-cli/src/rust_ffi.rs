@@ -18,6 +18,12 @@ pub struct ProcessedLibrary {
     pub functions: Vec<FunctionInfo>,
 }
 
+#[derive(Debug, Clone)]
+enum RustDepSource {
+    Path(PathBuf),
+    Version(String),
+}
+
 impl RustFfiProcessor {
     pub fn new() -> Self {
         Self {
@@ -42,20 +48,23 @@ impl RustFfiProcessor {
                 println!("   → {}", name);
             }
 
-            let lib_path = match dep.get_path() {
-                Some(path) => PathBuf::from(path),
-                None => return Err(format!(
-                    "Rust dependency '{}' must specify a path (e.g., {{ path = \"../{}\" }})",
-                    name, name
-                )),
-            };
-
-            if !lib_path.exists() {
+            let source = if let Some(path) = dep.get_path() {
+                let lib_path = PathBuf::from(path);
+                if !lib_path.exists() {
+                    return Err(format!(
+                        "Rust dependency path not found: {}",
+                        lib_path.display()
+                    ));
+                }
+                RustDepSource::Path(lib_path)
+            } else if let Some(version) = dep.get_version() {
+                RustDepSource::Version(version.to_string())
+            } else {
                 return Err(format!(
-                    "Rust dependency path not found: {}",
-                    lib_path.display()
+                    "Rust dependency '{}' must specify either path or version",
+                    name
                 ));
-            }
+            };
 
             // Check if interface file is specified
             let processed = if let Some(interface_spec) = dep.get_interface() {
@@ -78,13 +87,23 @@ impl RustFfiProcessor {
                 if verbose {
                     println!("      Using interface file: {}", interface_path);
                 }
-                Self::create_wrapper_from_interface(name, &lib_path, &interface_path, verbose)?
+                Self::create_wrapper_from_interface(name, &source, &interface_path, verbose)?
             } else {
-                // Phase 1: Auto-parse from source
-                if verbose {
-                    println!("      Auto-parsing from source");
+                match &source {
+                    // Phase 1: Auto-parse from source path
+                    RustDepSource::Path(lib_path) => {
+                        if verbose {
+                            println!("      Auto-parsing from source");
+                        }
+                        Self::create_and_compile_wrapper(name, lib_path, verbose)?
+                    }
+                    RustDepSource::Version(version) => {
+                        return Err(format!(
+                            "Rust dependency '{}' uses version '{}' but has no interface. Add interface = \"interfaces/{}.clri\" for registry dependencies.",
+                            name, version, name
+                        ));
+                    }
                 }
-                Self::create_and_compile_wrapper(name, &lib_path, verbose)?
             };
 
             processor.libraries.push(processed);
@@ -176,6 +195,42 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             wrapper_name,
             original_name,  // Keep package name with hyphens
             original_abs.display()
+        );
+
+        fs::write(wrapper_dir.join("Cargo.toml"), cargo_toml_content)
+            .map_err(|e| format!("Failed to write wrapper Cargo.toml: {}", e))
+    }
+
+    fn generate_wrapper_cargo_toml_for_source(
+        wrapper_dir: &Path,
+        wrapper_name: &str,
+        original_name: &str,
+        source: &RustDepSource,
+    ) -> Result<(), String> {
+        let dependency_spec = match source {
+            RustDepSource::Path(original_path) => {
+                let original_abs = original_path.canonicalize()
+                    .map_err(|e| format!("Failed to canonicalize library path: {}", e))?;
+                format!("{{ path = \"{}\" }}", original_abs.display())
+            }
+            RustDepSource::Version(version) => format!("\"{}\"", version),
+        };
+
+        let cargo_toml_content = format!(
+            r#"[package]
+name = "{}"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+{} = {}
+"#,
+            wrapper_name,
+            original_name,
+            dependency_spec
         );
 
         fs::write(wrapper_dir.join("Cargo.toml"), cargo_toml_content)
@@ -276,7 +331,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
     /// Create wrapper crate from interface file (Phase 2a)
     fn create_wrapper_from_interface(
         name: &str,
-        lib_path: &Path,
+        source: &RustDepSource,
         interface_path: &str,
         verbose: bool
     ) -> Result<ProcessedLibrary, String> {
@@ -329,7 +384,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             .map_err(|e| format!("Failed to create wrapper crate directory: {}", e))?;
 
         // Generate Cargo.toml
-        Self::generate_wrapper_cargo_toml(&wrapper_dir, &wrapper_name, name, lib_path)?;
+        Self::generate_wrapper_cargo_toml_for_source(&wrapper_dir, &wrapper_name, name, source)?;
 
         // Generate lib.rs using interface functions
         let mut generator = FfiGenerator::new();
@@ -359,5 +414,35 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         self.libraries.iter()
             .filter_map(|lib| lib.dynamic_lib_path.clone())
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn generate_wrapper_cargo_toml_for_version_dependency() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let wrapper_dir = std::env::temp_dir().join(format!("clorus_rustffi_test_{}", unique));
+        std::fs::create_dir_all(&wrapper_dir).expect("create temp wrapper dir");
+
+        let result = RustFfiProcessor::generate_wrapper_cargo_toml_for_source(
+            &wrapper_dir,
+            "demo_math_ffi",
+            "demo-math",
+            &RustDepSource::Version("0.1.0".to_string()),
+        );
+        assert!(result.is_ok(), "failed to generate cargo toml: {:?}", result.err());
+
+        let cargo_toml =
+            std::fs::read_to_string(wrapper_dir.join("Cargo.toml")).expect("read generated cargo");
+        assert!(cargo_toml.contains("demo-math = \"0.1.0\""));
+
+        let _ = std::fs::remove_dir_all(wrapper_dir);
     }
 }
