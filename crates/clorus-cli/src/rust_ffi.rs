@@ -2606,6 +2606,7 @@ invalid-override-lib = { path = "invalid-override-lib", interface = "interfaces/
             Ok(_) => panic!("expected invalid rust symbol override error"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'invalid-override-lib':"));
         assert!(err.contains("Invalid :rust override for function 'forty-two'"));
         assert!(err.contains("interfaces/invalid-override-lib.clri"));
 
