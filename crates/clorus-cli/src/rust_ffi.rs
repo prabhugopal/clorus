@@ -1598,6 +1598,18 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_explicit_accepts_legacy_extension_after_trimming() {
+        let resolved = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path(
+                "  interfaces/demo-lib.clorus-ffi  ".to_string(),
+            ),
+        )
+        .expect("trimmed legacy extension should be accepted");
+        assert_eq!(resolved, "interfaces/demo-lib.clorus-ffi");
+    }
+
+    #[test]
     fn resolve_interface_path_explicit_rejects_directory_with_context() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
