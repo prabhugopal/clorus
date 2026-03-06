@@ -256,6 +256,10 @@ impl RustFfiProcessor {
                     dep_name, clri_path, legacy_path
                 ))
             }
+            crate::manifest::InterfaceSpec::Disabled => Err(format!(
+                "Rust dependency '{}': internal interface resolution error (interface=false should be treated as no interface).",
+                dep_name
+            )),
         }
     }
 

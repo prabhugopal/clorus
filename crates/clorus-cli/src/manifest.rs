@@ -293,6 +293,7 @@ pub enum RustDependency {
 pub enum InterfaceSpec {
     Path(String),
     Auto,
+    Disabled,
 }
 
 impl serde::Serialize for InterfaceSpec {
@@ -303,6 +304,7 @@ impl serde::Serialize for InterfaceSpec {
         match self {
             InterfaceSpec::Path(s) => serializer.serialize_str(s),
             InterfaceSpec::Auto => serializer.serialize_bool(true),
+            InterfaceSpec::Disabled => serializer.serialize_bool(false),
         }
     }
 }
@@ -322,7 +324,7 @@ where
 
     match InterfaceValue::deserialize(deserializer)? {
         InterfaceValue::Bool(true) => Ok(InterfaceSpec::Auto),
-        InterfaceValue::Bool(false) => Err(serde::de::Error::custom("interface = false not supported")),
+        InterfaceValue::Bool(false) => Ok(InterfaceSpec::Disabled),
         InterfaceValue::String(s) => Ok(InterfaceSpec::Path(s)),
     }
 }
@@ -349,8 +351,14 @@ impl RustDependency {
 
     pub fn get_interface(&self) -> Option<InterfaceSpec> {
         match self {
-            RustDependency::WithInterface { interface, .. } => Some(interface.clone()),
-            RustDependency::WithVersionInterface { interface, .. } => Some(interface.clone()),
+            RustDependency::WithInterface { interface, .. } => match interface {
+                InterfaceSpec::Disabled => None,
+                _ => Some(interface.clone()),
+            },
+            RustDependency::WithVersionInterface { interface, .. } => match interface {
+                InterfaceSpec::Disabled => None,
+                _ => Some(interface.clone()),
+            },
             _ => None,
         }
     }
@@ -604,5 +612,23 @@ libm = { version = "0.2", interface = false }
             .expect("libm dependency should exist");
         assert_eq!(dep.get_version(), Some("0.2"));
         assert!(dep.get_interface().is_none());
+    }
+
+    #[test]
+    fn rust_dependency_interface_false_round_trips_as_false() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+libm = { version = "0.2", interface = false }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let serialized = toml::to_string(&manifest).expect("manifest should serialize");
+        assert!(
+            serialized.contains("interface = false"),
+            "serialized manifest should preserve explicit interface=false"
+        );
     }
 }
