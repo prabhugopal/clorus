@@ -2165,6 +2165,60 @@ missing-iface-lib = { path = "missing-iface-lib", interface = true }
     }
 
     #[test]
+    fn process_dependencies_e2e_interface_auto_directory_path_reports_clear_error() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_auto_interface_dir_path_{}",
+            unique
+        ));
+        let dep_dir = root.join("auto-dir-iface-lib");
+        let iface_path_dir = root.join("interfaces").join("auto-dir-iface-lib.clri");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_path_dir).expect("create auto interface directory");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-dir-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 1 }\n")
+            .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-dir-iface-lib = { path = "auto-dir-iface-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected auto interface directory-path rejection"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Rust dependency 'auto-dir-iface-lib':"));
+        assert!(err.contains("points to a directory, not a file"));
+        assert!(err.contains("interfaces/auto-dir-iface-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_explicit_interface_missing_reports_path() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

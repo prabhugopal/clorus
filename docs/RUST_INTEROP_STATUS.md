@@ -136,6 +136,7 @@ The CLI/rust-ffi integration tests now cover:
 - explicit interface directory-path failures include dependency-name context
 - explicit empty interface-path failures include dependency-name context
 - auto/explicit interface discovery failures are covered with dependency-name context assertions in E2E tests
+- auto-interface directory-path misuse (`interfaces/<dep>.clri` as a directory) is E2E-covered with clear diagnostics
 - interface semantic validation failures (e.g. invalid `:rust`) include dependency-name context
 - dependency-context prefixing is idempotent (no duplicated `Rust dependency '<name>':` prefixes)
 - dependency-context prefixing preserves existing dependency-labeled diagnostics (no double-labeling)
