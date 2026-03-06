@@ -1525,6 +1525,54 @@ missing-iface-lib = { path = "missing-iface-lib", interface = true }
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_interface_missing_reports_path() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_missing_explicit_iface_{}", unique));
+        let dep_dir = root.join("missing-explicit-iface-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "missing-explicit-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 1 }\n")
+            .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+missing-explicit-iface-lib = { path = "missing-explicit-iface-lib", interface = "interfaces/not-there.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected explicit interface missing failure"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Interface file not found"));
+        assert!(err.contains("interfaces/not-there.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_parse_filters_unsupported_signatures() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
