@@ -3508,6 +3508,74 @@ explicit-override-lib = { path = "explicit-override-lib", interface = "interface
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_clri_supports_split_pointer_syntax() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_explicit_clri_ptr_{}", unique));
+        let dep_dir = root.join("explicit-ptr-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "explicit-ptr-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("explicit-ptr-lib.clri"),
+            r#"(interface explicit-ptr-lib
+  (fn id-const-ptr [p :*const u8] :*const u8 :rust "id_const_ptr")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+explicit-ptr-lib = { path = "explicit-ptr-lib", interface = "interfaces/explicit-ptr-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false).expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "explicit_ptr_lib_ffi");
+        assert_eq!(lib.functions.len(), 1);
+        assert_eq!(lib.functions[0].name, "id_const_ptr");
+        assert_eq!(lib.functions[0].params[0].type_name, "*const u8");
+        assert_eq!(lib.functions[0].return_type, "*const u8");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_rejects_empty_rust_symbol_override() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
