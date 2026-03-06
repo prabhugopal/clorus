@@ -104,6 +104,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path dependency + `.clri` `:rust` override for impl/associated methods
 - local path auto-parse with unsupported-signature filtering
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
+- local path auto-parse pointer-mismatch rejection includes explicit hint (`*mut u8` is the only auto-supported raw pointer carrier)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`) with `:rust` symbol override for impl/associated methods
 - local path dependency + explicit `.clri` interface path

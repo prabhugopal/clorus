@@ -774,7 +774,18 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Wrapper crate build failed:\n{}", stderr));
+            let pointer_hint = if stderr.contains("expected `*mut")
+                && stderr.contains("found `*mut u8`")
+            {
+                "\nHint: auto-discovery supports raw pointers only as `*mut u8`. \
+Use an explicit `.clri` interface with supported types or a local bridge crate."
+            } else {
+                ""
+            };
+            return Err(format!(
+                "Wrapper crate build failed:\n{}{}",
+                stderr, pointer_hint
+            ));
         }
 
         // Find compiled libraries
@@ -2163,6 +2174,68 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
             .expect("id_ptr function should exist");
         assert_eq!(id_ptr.params[0].type_name, "*mut u8");
         assert_eq!(id_ptr.return_type, "*mut u8");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_rejects_unsupported_pointer_signatures() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_autoparse_bad_ptr_{}", unique));
+        let dep_dir = root.join("auto-parse-bad-ptr-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-bad-ptr-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn only_bad_ptr(p: *mut i32) -> *mut i32 { p }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false)
+        {
+            Ok(_) => panic!("expected unsupported pointer signature rejection"),
+            Err(e) => e,
+        });
+        assert!(
+            err.contains("Wrapper crate build failed"),
+            "expected wrapper build failure, got: {}",
+            err
+        );
+        assert!(
+            err.contains("supports raw pointers only as `*mut u8`"),
+            "expected pointer support hint, got: {}",
+            err
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
