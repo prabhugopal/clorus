@@ -7606,6 +7606,48 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_namespaced_rust_add_underscore_variant_uses_same_scoped_symbol() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        let lib = RustLibrary {
+            name: "example-rust-lib".to_string(),
+            functions: vec![RustFunction {
+                name: "add".to_string(),
+                params: vec![
+                    RustParam {
+                        name: "a".to_string(),
+                        type_name: "f64".to_string(),
+                    },
+                    RustParam {
+                        name: "b".to_string(),
+                        type_name: "f64".to_string(),
+                    },
+                ],
+                return_type: "f64".to_string(),
+            }],
+        };
+
+        codegen.register_rust_library(lib.clone());
+        codegen
+            .declare_rust_library_functions(&lib)
+            .expect("declare rust ffi symbols");
+
+        // Underscore namespace variant should resolve to the same registered rust library.
+        let exprs = parse("(example_rust_lib/add 1 2)").expect("parse expression");
+        codegen
+            .wrap_in_function(&exprs[0], "test_rust_namespaced_add_underscore")
+            .expect("compile rust namespaced call");
+
+        let ir = codegen.module.print_to_string().to_string();
+        assert!(
+            ir.contains("clorus_example_rust_lib__add"),
+            "IR should call dependency-scoped symbol, got:\n{}",
+            ir
+        );
+    }
+
+    #[test]
     fn test_declare_rust_library_functions_supports_extended_numeric_types() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");

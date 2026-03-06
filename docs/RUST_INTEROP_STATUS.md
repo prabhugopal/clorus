@@ -115,6 +115,7 @@ The CLI/rust-ffi integration tests now cover:
 - auto interface-resolution E2E regressions (`legacy fallback` and `prefer .clri`) assert dependency-scoped export generation in wrapper output
 - codegen regression covers coexistence of core intrinsics and same-named Rust exports (e.g., core `clorus_add` and Rust `add`)
 - codegen regression covers namespaced Rust-call compilation path emitting dependency-scoped FFI calls
+- codegen regression covers both hyphen and underscore namespace variants resolving to the same dependency-scoped Rust FFI symbol
 - local path auto-parse with unsupported-signature filtering
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
 - local path `interface = false` is covered and behaves like omitted interface (auto-parse path flow)
