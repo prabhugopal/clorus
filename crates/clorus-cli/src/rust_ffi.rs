@@ -1506,6 +1506,16 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_explicit_trims_whitespace() {
+        let resolved = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path("  interfaces/demo-lib.clri  ".to_string()),
+        )
+        .expect("trimmed interface path should resolve");
+        assert_eq!(resolved, "interfaces/demo-lib.clri");
+    }
+
+    #[test]
     fn with_dependency_context_adds_prefix_when_missing() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
