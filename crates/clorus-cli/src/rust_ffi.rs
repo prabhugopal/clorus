@@ -886,6 +886,22 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
+        for binding in &bindings {
+            for param in &binding.params {
+                if !Self::is_supported_ffi_type(&param.type_name) {
+                    return Err(format!(
+                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
+                        interface_path, binding.exposed_name, param.type_name
+                    ));
+                }
+            }
+            if !Self::is_supported_ffi_type(&binding.return_type) {
+                return Err(format!(
+                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
+                    interface_path, binding.exposed_name, binding.return_type
+                ));
+            }
+        }
         let mut exposed_names = HashSet::new();
         for binding in &bindings {
             if !exposed_names.insert(binding.exposed_name.clone()) {
@@ -2429,6 +2445,72 @@ invalid-rust-symbol-lib = { path = "invalid-rust-symbol-lib", interface = "inter
         assert!(err.contains("is not a valid Rust path symbol"));
         assert!(err.contains("Math::"));
         assert!(err.contains("interfaces/invalid-rust-symbol-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_rejects_unsupported_interface_types() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_unsupported_interface_types_{}",
+            unique
+        ));
+        let dep_dir = root.join("unsupported-types-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "unsupported-types-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn bytes_len(v: Vec<u8>) -> usize { v.len() }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("unsupported-types-lib.clri"),
+            r#"(interface unsupported-types-lib
+  (fn bytes-len [v :Vec<u8>] :usize :rust "bytes_len")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+unsupported-types-lib = { path = "unsupported-types-lib", interface = "interfaces/unsupported-types-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected unsupported interface type rejection"),
+            Err(e) => e,
+        };
+        assert!(err.contains("unsupported param type 'Vec<u8>'"));
+        assert!(err.contains("interfaces/unsupported-types-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
