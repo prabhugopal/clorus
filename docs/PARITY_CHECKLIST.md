@@ -24,15 +24,16 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - 🟡 AOT path exists but needs production hardening checklist (separate track)
 
 ## Clojure-Parity Gaps (No Java Interop)
-- 🟡 Reader parity (reader-discard `#_` + regex reader literal + regex API baseline + invalid-pattern throw path implemented; deeper reader/regex edge semantics remain)
+- ✅ Reader parity target for current milestone (reader-discard `#_`, regex reader literal lowering, regex API + invalid-pattern throw path contracts)
 - 🟡 Macro tooling parity (`&env`/`&form` + auto-gensym hygiene baseline implemented; deeper hygiene edge cases remain)
 - 🟡 Namespace ergonomics parity (baseline `:refer`/`:rename` implemented; alias edge cases remain)
 - 🟡 Dynamic vars parity (`binding` + `set!` baseline covered; deeper semantics still open)
-- 🟡 Data/collection API parity long tail (core edge/error paths mostly closed; remaining deep semantics focus on mixed-domain ordering behavior and selected long-tail contracts)
+- ✅ Data/collection API parity target for current milestone (including mixed-domain compare/sort contracts and long-tail error-path coverage)
 - 🟡 Exception data APIs parity (`ex-info`, `ex-data`) deep behavior checks
 
 ## Stdlib Parity Tracking
-- Source-of-truth matrix: `docs/STDLIB_PARITY_MATRIX.md`
+- ✅ Canonical parity source: this file (`docs/PARITY_CHECKLIST.md`)
+- `docs/STDLIB_PARITY_MATRIX.md` is now a pointer-only doc to avoid duplicate status drift.
 
 ## Explicitly Out of Scope for this parity target
 - ❌ JVM/Java interop
@@ -70,6 +71,9 @@ Validation baseline: `CLORUS_BIN=./target/debug/clorus CLORUS_TEST_ENGINES="jit 
 - [x] Transducer parity: `completing` + `transduce` completion-arity behavior
 - [x] Stdlib compile-arity error baseline (`update` wrong-arity compile path)
 - [x] Re-run full `jit+legacy` suite and refresh baseline counts
+- [x] Close regex deep-semantics target for current milestone contracts (`re-pattern` validation + API edge matrix)
+- [x] Close mixed-domain ordering semantics target (`compare`, `sort`, `sort-by` deterministic behavior matrix)
+- [x] Consolidate parity status to single source of truth
 
 ## Step 1 Closure (Language Parity Stabilization)
 - Status: ✅ Complete (strict closure met).
