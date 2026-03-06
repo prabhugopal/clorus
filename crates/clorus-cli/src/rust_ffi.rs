@@ -3006,6 +3006,7 @@ invalid-rust-symbol-lib = { path = "invalid-rust-symbol-lib", interface = "inter
             Ok(_) => panic!("expected invalid rust symbol override path rejection"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'invalid-rust-symbol-lib':"));
         assert!(err.contains("is not a valid Rust path symbol"));
         assert!(err.contains("Math::"));
         assert!(err.contains("interfaces/invalid-rust-symbol-lib.clri"));
