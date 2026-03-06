@@ -70,9 +70,7 @@ libm = {{ version = "0.2", interface = "interfaces/libm.clri" }}
 (ns main)
 
 (defn -main [& _args]
-  (do
-    (println "Hello from {}!")
-    0))
+  (println "Hello from {}!"))
 "#,
             name, name
         ),
@@ -85,8 +83,7 @@ libm = {{ version = "0.2", interface = "interfaces/libm.clri" }}
   (do
     (println "Rust interop starter")
     (println "sin(0.0) =" (m/sin 0.0))
-    (println "cos(0.0) =" (m/cos 0.0))
-    0))
+    (println "cos(0.0) =" (m/cos 0.0))))
 "#
         .to_string(),
     };
@@ -2619,8 +2616,10 @@ pub fn pack_workspace(output_dir: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{new, new_with_template, NewTemplate};
+    use clorus::parse_and_expand;
     use std::env;
     use std::fs;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
     struct CwdGuard(std::path::PathBuf);
@@ -2631,8 +2630,14 @@ mod tests {
         }
     }
 
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
     #[test]
     fn new_project_generates_modern_main_template() {
+        let _lock = cwd_lock().lock().expect("cwd lock poisoned");
         let tmp = tempdir().expect("failed to create tempdir");
         let original_cwd = env::current_dir().expect("failed to get cwd");
         let _cwd_guard = CwdGuard(original_cwd);
@@ -2652,11 +2657,18 @@ mod tests {
             main_content.contains("(defn -main [& _args]"),
             "generated template should include -main entrypoint"
         );
+        assert!(
+            !main_content.contains("\n    0))"),
+            "generated basic template should not require explicit numeric exit literal"
+        );
+
+        parse_and_expand(&main_content).expect("generated basic template should parse");
 
     }
 
     #[test]
     fn new_project_rust_interop_template_includes_rust_dependency_and_ns_rust_clause() {
+        let _lock = cwd_lock().lock().expect("cwd lock poisoned");
         let tmp = tempdir().expect("failed to create tempdir");
         let original_cwd = env::current_dir().expect("failed to get cwd");
         let _cwd_guard = CwdGuard(original_cwd);
@@ -2686,6 +2698,12 @@ mod tests {
             !main_content.contains("(use rust.libm)"),
             "rust interop template should avoid redundant use rust import"
         );
+        assert!(
+            !main_content.contains("\n    0))"),
+            "rust interop template should not include explicit numeric exit literal"
+        );
+
+        parse_and_expand(&main_content).expect("generated rust interop template should parse");
 
         let interface_path = tmp.path().join(project_name).join("interfaces/libm.clri");
         let interface_content = fs::read_to_string(&interface_path).expect("failed to read generated libm.clri");
