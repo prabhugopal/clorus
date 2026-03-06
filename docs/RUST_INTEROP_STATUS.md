@@ -118,6 +118,7 @@ The CLI/rust-ffi integration tests now cover:
 - malformed interface parse diagnostics with file-path + line/column context surfaced through `process_dependencies`
 - malformed interface tokenize diagnostics include interface-file path context in `process_dependencies`
 - wrapper compile failures from interface-driven generation include interface-file path context
+- parse/tokenize/wrapper-compile interface failures assert dependency-name context end-to-end
 - missing local dependency-path diagnostics include dependency name + path
 - dependency processing errors now include dependency-name context prefixes
 - missing dependency path / shape errors now flow through shared dependency-context formatting

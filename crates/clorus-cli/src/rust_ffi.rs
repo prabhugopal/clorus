@@ -3190,6 +3190,7 @@ bad-rust-symbol-lib = { path = "bad-rust-symbol-lib", interface = "interfaces/ba
             Err(e) => e,
         });
 
+        assert!(err.contains("Rust dependency 'bad-rust-symbol-lib':"));
         assert!(err.contains("Failed while compiling wrapper generated from interface"));
         assert!(err.contains("interfaces/bad-rust-symbol-lib.clri"));
 
@@ -3252,6 +3253,7 @@ bad-token-lib = { path = "bad-token-lib", interface = "interfaces/bad-token-lib.
             Err(e) => e,
         });
 
+        assert!(err.contains("Rust dependency 'bad-token-lib':"));
         assert!(err.contains("Failed to tokenize interface file"));
         assert!(err.contains("interfaces/bad-token-lib.clri"));
 
@@ -3630,6 +3632,7 @@ bad-iface-lib = { path = "bad-iface-lib", interface = "interfaces/bad-iface-lib.
             Err(e) => e,
         });
 
+        assert!(err.contains("Rust dependency 'bad-iface-lib':"));
         assert!(err.contains("Failed to parse interface file"));
         assert!(err.contains("interfaces/bad-iface-lib.clri"));
         assert!(err.contains("Expected keyword"));
