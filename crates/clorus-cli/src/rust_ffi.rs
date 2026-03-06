@@ -50,14 +50,44 @@ impl RustFfiProcessor {
     }
 
     fn is_supported_ffi_type(type_name: &str) -> bool {
-        matches!(type_name, "f64" | "i32" | "bool" | "String" | "()" | "*mut u8")
+        matches!(
+            type_name,
+            "f64" | "i32" | "i64" | "bool" | "String" | "()" | "*mut u8"
+        )
+    }
+
+    fn unsupported_signature_reason(function: &FunctionInfo) -> Option<String> {
+        for param in &function.params {
+            if !Self::is_supported_ffi_type(&param.type_name) {
+                return Some(format!(
+                    "{}: unsupported param `{}` type `{}`",
+                    function.name, param.name, param.type_name
+                ));
+            }
+        }
+
+        if !Self::is_supported_ffi_type(&function.return_type) {
+            return Some(format!(
+                "{}: unsupported return type `{}`",
+                function.name, function.return_type
+            ));
+        }
+
+        None
+    }
+
+    fn collect_unsupported_signature_details(functions: &[FunctionInfo]) -> Vec<String> {
+        functions
+            .iter()
+            .filter_map(Self::unsupported_signature_reason)
+            .collect()
     }
 
     fn retain_supported_ffi_functions(
         functions: Vec<FunctionInfo>,
         verbose: bool,
     ) -> Vec<FunctionInfo> {
-        let total = functions.len();
+        let unsupported_details = Self::collect_unsupported_signature_details(&functions);
         let filtered: Vec<FunctionInfo> = functions
             .into_iter()
             .filter(|f| {
@@ -69,12 +99,15 @@ impl RustFfiProcessor {
             .collect();
 
         if verbose {
-            let skipped = total.saturating_sub(filtered.len());
+            let skipped = unsupported_details.len();
             if skipped > 0 {
                 println!(
                     "      Skipped {} unsupported function(s) (non-FFI-compatible signature)",
                     skipped
                 );
+                for detail in unsupported_details.iter().take(3) {
+                    println!("         - {}", detail);
+                }
             }
         }
 
@@ -261,13 +294,21 @@ impl RustFfiProcessor {
             &RustDepSource::Version(version_req.to_string()),
         )?;
 
-        let mut functions = Self::discover_registry_functions(&wrapper_dir, name, verbose)?;
-        functions = Self::retain_supported_ffi_functions(functions, verbose);
+        let discovered = Self::discover_registry_functions(&wrapper_dir, name, verbose)?;
+        let unsupported_details = Self::collect_unsupported_signature_details(&discovered);
+        let functions = Self::retain_supported_ffi_functions(discovered, verbose);
         if functions.is_empty() {
-            return Err(format!(
+            let mut error = format!(
                 "Rust dependency '{}' resolved from registry but no FFI-compatible functions were discovered in its lib target. Add an interface file (interfaces/{}.clri) or use a local bridge crate.",
                 name, name
-            ));
+            );
+            if !unsupported_details.is_empty() {
+                error.push_str("\nUnsupported signature examples:");
+                for detail in unsupported_details.iter().take(5) {
+                    error.push_str(&format!("\n  - {}", detail));
+                }
+            }
+            return Err(error);
         }
 
         if verbose {
@@ -701,6 +742,14 @@ mod tests {
                 return_type: "f64".to_string(),
             },
             FunctionInfo {
+                name: "ok_i64".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "n".to_string(),
+                    type_name: "i64".to_string(),
+                }],
+                return_type: "i64".to_string(),
+            },
+            FunctionInfo {
                 name: "bad_u64".to_string(),
                 params: vec![clorus_ffi_gen::ParamInfo {
                     name: "n".to_string(),
@@ -711,7 +760,32 @@ mod tests {
         ];
 
         let filtered = RustFfiProcessor::retain_supported_ffi_functions(functions, false);
-        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered.len(), 2);
         assert_eq!(filtered[0].name, "ok_add");
+        assert_eq!(filtered[1].name, "ok_i64");
+    }
+
+    #[test]
+    fn collect_unsupported_signature_details_reports_reason() {
+        let functions = vec![
+            FunctionInfo {
+                name: "bad_param".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "bytes".to_string(),
+                    type_name: "Vec<u8>".to_string(),
+                }],
+                return_type: "()".to_string(),
+            },
+            FunctionInfo {
+                name: "bad_ret".to_string(),
+                params: vec![],
+                return_type: "u64".to_string(),
+            },
+        ];
+
+        let details = RustFfiProcessor::collect_unsupported_signature_details(&functions);
+        assert_eq!(details.len(), 2);
+        assert!(details[0].contains("unsupported param"));
+        assert!(details[1].contains("unsupported return type"));
     }
 }
