@@ -1269,4 +1269,81 @@ demo-math = { path = "demo-math", interface = true }
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_interface_with_rust_symbol_override() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_override_{}", unique));
+        let dep_dir = root.join("impl-only-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "impl-only-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Math;
+impl Math {
+    pub fn forty_two() -> u64 { 42 }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("impl-only-lib.clri"),
+            r#"(interface impl-only-lib
+  (fn forty-two [] :u64 :rust "Math::forty_two")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+impl-only-lib = { path = "impl-only-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("cd root");
+        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
+            .expect("process dependencies");
+        std::env::set_current_dir(original).expect("restore cwd");
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "impl_only_lib_ffi");
+        let static_lib = if lib.static_lib_path.is_absolute() {
+            lib.static_lib_path.clone()
+        } else {
+            root.join(&lib.static_lib_path)
+        };
+        assert!(static_lib.exists(), "expected static library at {}", static_lib.display());
+        assert_eq!(lib.functions.len(), 1);
+        assert_eq!(lib.functions[0].name, "forty_two");
+        assert_eq!(lib.functions[0].return_type, "u64");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
