@@ -2,7 +2,7 @@ use crate::interface::InterfaceFunction;
 use crate::manifest::Manifest;
 use clorus_ffi_gen::{FfiGenerator, FunctionInfo};
 use serde::Deserialize;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 /// Automatic Rust FFI processing - Phase 2 Architecture
 /// Generates wrapper crates in target/rust-ffi/ instead of polluting library source
@@ -310,7 +310,32 @@ impl RustFfiProcessor {
             );
         }
 
-        for (name, dep) in &manifest.rust_dependencies {
+        // Validate that dependency keys map to distinct symbol namespaces.
+        // We scope wrapper exports by normalized dependency name; collisions here would
+        // produce ambiguous function symbols at compile/link time.
+        let mut normalized_dep_names: BTreeMap<String, String> = BTreeMap::new();
+        for name in manifest.rust_dependencies.keys() {
+            let normalized = Self::normalize_symbol_component(name);
+            if let Some(existing) = normalized_dep_names.get(&normalized) {
+                if existing != name {
+                    return Err(format!(
+                        "Rust dependencies '{}' and '{}' normalize to the same symbol namespace '{}'. Rename one dependency key to avoid export collisions.",
+                        existing, name, normalized
+                    ));
+                }
+            } else {
+                normalized_dep_names.insert(normalized, name.clone());
+            }
+        }
+
+        // Process in sorted-key order for deterministic wrapper generation and diagnostics.
+        let mut dep_names: Vec<&String> = manifest.rust_dependencies.keys().collect();
+        dep_names.sort();
+        for name in dep_names {
+            let dep = manifest
+                .rust_dependencies
+                .get(name)
+                .expect("dependency key collected from manifest should exist");
             if verbose {
                 println!("   → {}", name);
             }
@@ -4502,6 +4527,34 @@ dep-empty-interface-path = { path = "dep-empty-interface-path", interface = "" }
         assert!(err.contains(".clorus-ffi"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_rejects_normalized_dependency_name_collisions() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+foo-bar = { path = "foo-bar" }
+foo_bar = { path = "foo_bar" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected dependency-name collision rejection"),
+            Err(e) => e,
+        };
+
+        assert!(err.contains("normalize to the same symbol namespace"));
+        assert!(err.contains("foo-bar"));
+        assert!(err.contains("foo_bar"));
+        assert!(err.contains("Rename one dependency key"));
     }
 
     #[test]
