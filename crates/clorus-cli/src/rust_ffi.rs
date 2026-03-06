@@ -61,7 +61,12 @@ impl RustFfiProcessor {
         if err.starts_with(&prefix) || err.starts_with(&dep_label) {
             err
         } else {
-            format!("{} {}", prefix, err)
+            let normalized = err.trim_start();
+            if normalized.is_empty() {
+                prefix
+            } else {
+                format!("{} {}", prefix, normalized)
+            }
         }
     }
 
@@ -1558,6 +1563,21 @@ mod tests {
             out,
             "Rust dependency 'demo-lib': Rust dependency 'other-lib': path not found"
         );
+    }
+
+    #[test]
+    fn with_dependency_context_trims_leading_error_whitespace() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "   path not found: missing".to_string(),
+        );
+        assert_eq!(out, "Rust dependency 'demo-lib': path not found: missing");
+    }
+
+    #[test]
+    fn with_dependency_context_returns_prefix_when_error_is_blank() {
+        let out = RustFfiProcessor::with_dependency_context("demo-lib", "   ".to_string());
+        assert_eq!(out, "Rust dependency 'demo-lib':");
     }
 
     #[test]
