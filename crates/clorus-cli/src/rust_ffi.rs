@@ -3520,6 +3520,30 @@ missing-path-iface-lib = { path = "definitely-not-here-iface-lib", interface = "
     }
 
     #[test]
+    fn process_dependencies_reports_dependency_name_for_missing_path_with_interface_auto() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+missing-path-auto-iface-lib = { path = "definitely-not-here-auto-iface-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected missing dependency path failure"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Rust dependency 'missing-path-auto-iface-lib': path not found"));
+        assert!(err.contains("definitely-not-here-auto-iface-lib"));
+    }
+
+    #[test]
     fn process_dependencies_reports_dependency_name_for_missing_interface_file() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -128,6 +128,7 @@ The CLI/rust-ffi integration tests now cover:
 - empty dependency path/version values are rejected early with dependency-name diagnostics
 - empty dependency path/version rejection is covered across plain and interface-enabled manifest forms
 - missing dependency path diagnostics are covered for both plain and interface-enabled manifest forms
+- missing dependency path diagnostics include both explicit interface-path and `interface = true` auto-interface forms
 - version+`interface = true` auto-discovery failures include dependency-name context and searched interface paths
 - unsupported explicit interface-extension failures include dependency-name context
 - explicit interface directory-path failures include dependency-name context
