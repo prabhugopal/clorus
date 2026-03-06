@@ -213,7 +213,7 @@ impl<'ctx> CodeGen<'ctx> {
                         .unwrap()
                         .into()
                 }
-                "*mut u8" => {
+                "*mut u8" | "*const u8" => {
                     // Extract pointer from Value*
                     self.extract_pointer_from_value(arg_val).into()
                 }
@@ -331,7 +331,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // Void return - return nil (0.0)
                 Ok(self.box_number(self.context.f64_type().const_float(0.0)))
             }
-            "*mut u8" => {
+            "*mut u8" | "*const u8" => {
                 // Box pointer return value
                 let ptr = call_result
                     .try_as_basic_value()

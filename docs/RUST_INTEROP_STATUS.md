@@ -46,7 +46,7 @@ Notes:
   - floats: `f32`, `f64`
   - signed ints: `i8`, `i16`, `i32`, `i64`, `isize`
   - unsigned ints: `u8`, `u16`, `u32`, `u64`, `usize`
-  - others: `bool`, `String`, `()`, `*mut u8`
+  - others: `bool`, `String`, `()`, `*mut u8`, `*const u8`
 - Unsupported signatures now report concrete examples in build errors.
 - Interface parse errors now include file path + line/column token context.
 
@@ -121,6 +121,7 @@ The CLI/rust-ffi integration tests now cover:
 - codegen regression covers both hyphen and underscore forms of fully-prefixed rust namespace (`rust.<lib>/<fn>`) resolving to the same scoped symbol
 - local path auto-parse with unsupported-signature filtering
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
+- local path auto-parse with const-pointer signatures (`*const u8`) is covered and accepted via pointer-carrier mapping
 - local path `interface = false` is covered and behaves like omitted interface (auto-parse path flow)
 - local path auto-parse pointer-mismatch rejection includes explicit hint (`*mut u8` is the only auto-supported raw pointer carrier)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)

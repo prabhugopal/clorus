@@ -818,7 +818,7 @@ impl<'ctx> CodeGen<'ctx> {
                     "i32" | "u32" => i32_type.into(),
                     "i64" | "u64" | "isize" | "usize" => i64_type.into(),
                     "bool" => self.context.bool_type().into(),
-                    "*mut u8" => i8_ptr_type.into(), // Opaque pointers
+                    "*mut u8" | "*const u8" => i8_ptr_type.into(), // Opaque pointers
                     other => return Err(format!("Unsupported parameter type in FFI: {}", other)),
                 };
                 param_types.push(llvm_type);
@@ -833,7 +833,7 @@ impl<'ctx> CodeGen<'ctx> {
                 "i64" | "u64" | "isize" | "usize" => i64_type.fn_type(&param_types, false),
                 "bool" => self.context.bool_type().fn_type(&param_types, false),
                 "()" => self.context.void_type().fn_type(&param_types, false),
-                "*mut u8" => i8_ptr_type.fn_type(&param_types, false), // Opaque pointers
+                "*mut u8" | "*const u8" => i8_ptr_type.fn_type(&param_types, false), // Opaque pointers
                 other => return Err(format!("Unsupported return type in FFI: {}", other)),
             };
 
@@ -7779,12 +7779,27 @@ mod tests {
                     }],
                     return_type: "usize".to_string(),
                 },
+                RustFunction {
+                    name: "const_ptr_id".to_string(),
+                    params: vec![RustParam {
+                        name: "x".to_string(),
+                        type_name: "*const u8".to_string(),
+                    }],
+                    return_type: "*const u8".to_string(),
+                },
             ],
         };
 
         let result = codegen.declare_rust_library_functions(&lib);
         assert!(result.is_ok(), "unexpected error: {:?}", result.err());
-        for fn_name in ["f32_id", "u32_id", "u64_id", "isize_id", "usize_id"] {
+        for fn_name in [
+            "f32_id",
+            "u32_id",
+            "u64_id",
+            "isize_id",
+            "usize_id",
+            "const_ptr_id",
+        ] {
             assert!(
                 codegen
                     .module

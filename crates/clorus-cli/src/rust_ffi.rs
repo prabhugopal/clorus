@@ -167,6 +167,7 @@ impl RustFfiProcessor {
                 | "String"
                 | "()"
                 | "*mut u8"
+                | "*const u8"
         )
     }
 
@@ -768,6 +769,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             "String" => "*mut c_char".to_string(),
             "()" => "()".to_string(),
             "*mut u8" => "*mut u8".to_string(),
+            "*const u8" => "*mut u8".to_string(),
             _ => "*mut u8".to_string(),
         }
     }
@@ -778,6 +780,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             | "bool" | "*mut u8" => {
                 format!("    let {}_rust = {};", name, name)
             }
+            "*const u8" => format!("    let {}_rust = {} as *const u8;", name, name),
             "isize" => format!("    let {}_rust = {} as isize;", name, name),
             "usize" => format!("    let {}_rust = {} as usize;", name, name),
             "String" => format!(
@@ -791,9 +794,11 @@ crate-type = ["cdylib", "staticlib", "rlib"]
     fn rust_to_c_conversion(name: &str, rust_type: &str) -> String {
         match rust_type {
             "f32" | "f64" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32" | "i64" | "u64"
-            | "bool" | "*mut u8" => {
+            | "bool" => {
                 format!("    {}", name)
             }
+            "*mut u8" => format!("    {} as *mut u8", name),
+            "*const u8" => format!("    {} as *mut u8", name),
             "isize" => format!("    {} as i64", name),
             "usize" => format!("    {} as u64", name),
             "String" => format!(
@@ -886,7 +891,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             let pointer_hint = if stderr.contains("expected `*mut")
                 && stderr.contains("found `*mut u8`")
             {
-                "\nHint: auto-discovery supports raw pointers only as `*mut u8`. \
+                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`. \
 Use an explicit `.clri` interface with supported types or a local bridge crate."
             } else {
                 ""
@@ -1026,14 +1031,14 @@ Use an explicit `.clri` interface with supported types or a local bridge crate."
             for param in &binding.params {
                 if !Self::is_supported_ffi_type(&param.type_name) {
                     return Err(format!(
-                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
+                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8,*const u8",
                         interface_path, binding.exposed_name, param.type_name
                     ));
                 }
             }
             if !Self::is_supported_ffi_type(&binding.return_type) {
                 return Err(format!(
-                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8",
+                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8,*const u8",
                     interface_path, binding.exposed_name, binding.return_type
                 ));
             }
@@ -2547,6 +2552,7 @@ edition = "2021"
 pub fn flip_bool(x: bool) -> bool { !x }
 pub fn id_string(s: String) -> String { s }
 pub fn id_ptr(p: *mut u8) -> *mut u8 { p }
+pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
 pub fn unsupported_vec(xs: Vec<u8>) -> Vec<u8> { xs }
 "#,
         )
@@ -2579,6 +2585,7 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
         assert!(names.contains(&"flip_bool"));
         assert!(names.contains(&"id_string"));
         assert!(names.contains(&"id_ptr"));
+        assert!(names.contains(&"id_const_ptr"));
         assert!(!names.contains(&"unsupported_vec"));
 
         let id_string = lib
@@ -2596,6 +2603,23 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
             .expect("id_ptr function should exist");
         assert_eq!(id_ptr.params[0].type_name, "*mut u8");
         assert_eq!(id_ptr.return_type, "*mut u8");
+
+        let id_const_ptr = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_const_ptr")
+            .expect("id_const_ptr function should exist");
+        assert!(
+            id_const_ptr.params[0].type_name == "*const u8"
+                || id_const_ptr.params[0].type_name == "*mut u8",
+            "unexpected const-pointer param type: {}",
+            id_const_ptr.params[0].type_name
+        );
+        assert!(
+            id_const_ptr.return_type == "*const u8" || id_const_ptr.return_type == "*mut u8",
+            "unexpected const-pointer return type: {}",
+            id_const_ptr.return_type
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -2947,7 +2971,7 @@ auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
             err
         );
         assert!(
-            err.contains("supports raw pointers only as `*mut u8`"),
+            err.contains("supports raw pointers only as `*mut u8` or `*const u8`"),
             "expected pointer support hint, got: {}",
             err
         );
