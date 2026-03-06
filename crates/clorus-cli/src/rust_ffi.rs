@@ -1190,4 +1190,83 @@ impl Foo {
         assert!(generated.contains("let n_rust = n as isize;"));
         assert!(generated.contains("let n_rust = n as usize;"));
     }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_interface_extended_numeric_types() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_{}", unique));
+        let dep_dir = root.join("demo-math");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "demo-math"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn id_f32(x: f32) -> f32 { x }
+pub fn id_u64(x: u64) -> u64 { x }
+pub fn id_usize(x: usize) -> usize { x }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("demo-math.clri"),
+            r#"(interface demo-math
+  (fn id-f32 [x :f32] :f32)
+  (fn id-u64 [x :u64] :u64)
+  (fn id-usize [x :usize] :usize)
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+demo-math = { path = "demo-math", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("cd root");
+        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
+            .expect("process dependencies");
+        std::env::set_current_dir(original).expect("restore cwd");
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "demo_math_ffi");
+        let static_lib = if lib.static_lib_path.is_absolute() {
+            lib.static_lib_path.clone()
+        } else {
+            root.join(&lib.static_lib_path)
+        };
+        assert!(static_lib.exists(), "expected static library at {}", static_lib.display());
+        assert_eq!(lib.functions.len(), 3);
+        assert_eq!(lib.functions[0].return_type, "f32");
+        assert_eq!(lib.functions[1].return_type, "u64");
+        assert_eq!(lib.functions[2].return_type, "usize");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
