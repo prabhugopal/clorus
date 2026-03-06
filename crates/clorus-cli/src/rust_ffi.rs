@@ -280,7 +280,8 @@ impl RustFfiProcessor {
                 let lib_path = PathBuf::from(path);
                 if !lib_path.exists() {
                     return Err(format!(
-                        "Rust dependency path not found: {}",
+                        "Rust dependency '{}' path not found: {}",
+                        name,
                         lib_path.display()
                     ));
                 }
@@ -3203,6 +3204,30 @@ bad-token-lib = { path = "bad-token-lib", interface = "interfaces/bad-token-lib.
         assert!(err.contains("interfaces/bad-token-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_reports_dependency_name_for_missing_path() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+missing-lib = { path = "definitely-not-here-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected missing dependency path failure"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Rust dependency 'missing-lib' path not found"));
+        assert!(err.contains("definitely-not-here-lib"));
     }
 
     #[test]

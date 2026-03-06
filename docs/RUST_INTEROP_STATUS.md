@@ -118,6 +118,7 @@ The CLI/rust-ffi integration tests now cover:
 - malformed interface parse diagnostics with file-path + line/column context surfaced through `process_dependencies`
 - malformed interface tokenize diagnostics include interface-file path context in `process_dependencies`
 - wrapper compile failures from interface-driven generation include interface-file path context
+- missing local dependency-path diagnostics include dependency name + path
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
 - explicit interface path must be a file (directory-path misuse rejected with clear diagnostics)
 - explicit interface type-matrix validation (unsupported param and return types rejected before wrapper compile)
