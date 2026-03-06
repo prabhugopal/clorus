@@ -568,12 +568,12 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
                                         match rust_lib_result {
                                             Ok(mut rust_lib) => {
                                                 // Register library with full rust.* module name for lookup
-                                                rust_lib.name = format!("rust.{}", dep_name.replace('-', "_"));
+                                                rust_lib.name = format!("rust.{}", dep_name);
                                                 println!("  → Registered {} functions from {}", rust_lib.functions.len(), dep_name);
 
                                                 // DEBUG: Print all functions
                                                 if std::env::var("CLORUS_DEBUG_REPL").is_ok() {
-                                                    eprintln!("DEBUG: Functions in rust.{}:", dep_name.replace('-', "_"));
+                                                    eprintln!("DEBUG: Functions in rust.{}:", dep_name);
                                                 }
                                                 for (i, func) in rust_lib.functions.iter().enumerate() {
                                                     if i < 10 {

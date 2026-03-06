@@ -1777,7 +1777,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
             // Process rust imports
             for rust_import in rust_imports {
                 if let Some(ref alias) = rust_import.alias {
-                    let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                    let rust_module = format!("rust.{}", rust_import.library);
                     ns_ctx.aliases.insert(alias.clone(), rust_module);
                 }
             }

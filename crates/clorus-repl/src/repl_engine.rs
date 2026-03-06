@@ -383,7 +383,7 @@ impl<'ctx> ReplEngine<'ctx> {
                 // Process rust imports - add rust.* aliases for this module
                 for rust_import in rust_imports {
                     if let Some(alias) = &rust_import.alias {
-                        let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                        let rust_module = format!("rust.{}", rust_import.library);
                         module_aliases.insert(alias.clone(), rust_module);
                     }
                 }
@@ -479,7 +479,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
                     for rust_import in rust_imports {
                         if let Some(alias) = &rust_import.alias {
-                            let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                            let rust_module = format!("rust.{}", rust_import.library);
                             self.namespace.aliases.insert(alias.clone(), rust_module);
                         }
                     }
@@ -562,8 +562,7 @@ impl<'ctx> ReplEngine<'ctx> {
                 // Process Rust imports
                 for rust_import in rust_imports {
                     if let Some(alias) = &rust_import.alias {
-                        // Convert library name to module format: "coral-gfx" -> "rust.coral_gfx"
-                        let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                        let rust_module = format!("rust.{}", rust_import.library);
                         self.namespace.aliases.insert(alias.clone(), rust_module);
                     }
                 }
@@ -787,8 +786,7 @@ impl<'ctx> ReplEngine<'ctx> {
                     // Process rust imports
                     for rust_import in rust_imports {
                         if let Some(alias) = &rust_import.alias {
-                            // Convert library name to module format: "egui-hello" -> "rust.egui_hello"
-                            let rust_module = format!("rust.{}", rust_import.library.replace('-', "_"));
+                            let rust_module = format!("rust.{}", rust_import.library);
                             self.namespace.aliases.insert(alias.clone(), rust_module);
                         }
                     }
