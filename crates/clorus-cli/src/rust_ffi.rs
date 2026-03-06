@@ -2312,6 +2312,7 @@ auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
             Ok(_) => panic!("expected unsupported pointer signature rejection"),
             Err(e) => e,
         });
+        assert!(err.contains("Rust dependency 'auto-parse-bad-ptr-lib':"));
         assert!(
             err.contains("Wrapper crate build failed"),
             "expected wrapper build failure, got: {}",
@@ -2744,6 +2745,7 @@ dup-iface-lib = { path = "dup-iface-lib", interface = "interfaces/dup-iface-lib.
             Ok(_) => panic!("expected duplicate normalized function-name error"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'dup-iface-lib':"));
         assert!(err.contains(
             "defines duplicate exported function name 'foo_bar' after normalization"
         ));
@@ -2812,6 +2814,7 @@ invalid-export-lib = { path = "invalid-export-lib", interface = "interfaces/inva
             Ok(_) => panic!("expected invalid normalized export symbol error"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'invalid-export-lib':"));
         assert!(err.contains("normalizes to invalid export symbol 'answer?'"));
         assert!(err.contains("interfaces/invalid-export-lib.clri"));
 
@@ -2876,6 +2879,7 @@ empty-iface-lib = { path = "empty-iface-lib", interface = "interfaces/empty-ifac
             Ok(_) => panic!("expected empty interface rejection"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'empty-iface-lib':"));
         assert!(err.contains("contains no function definitions"));
         assert!(err.contains("interfaces/empty-iface-lib.clri"));
 
@@ -3012,6 +3016,7 @@ unsupported-types-lib = { path = "unsupported-types-lib", interface = "interface
             Ok(_) => panic!("expected unsupported interface type rejection"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'unsupported-types-lib':"));
         assert!(err.contains("unsupported param type 'Vec<u8>'"));
         assert!(err.contains("interfaces/unsupported-types-lib.clri"));
 
@@ -3078,6 +3083,7 @@ unsupported-return-lib = { path = "unsupported-return-lib", interface = "interfa
             Ok(_) => panic!("expected unsupported interface return type rejection"),
             Err(e) => e,
         };
+        assert!(err.contains("Rust dependency 'unsupported-return-lib':"));
         assert!(err.contains("unsupported return type 'Vec<u8>'"));
         assert!(err.contains("interfaces/unsupported-return-lib.clri"));
 
@@ -3143,6 +3149,7 @@ unsupported-pointer-lib = { path = "unsupported-pointer-lib", interface = "inter
             Ok(_) => panic!("expected unsupported interface pointer-type rejection"),
             Err(e) => e,
         });
+        assert!(err.contains("Rust dependency 'unsupported-pointer-lib':"));
         assert!(
             err.contains("unsupported param type"),
             "expected unsupported param-type rejection, got: {}",

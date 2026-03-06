@@ -120,6 +120,7 @@ The CLI/rust-ffi integration tests now cover:
 - malformed interface tokenize diagnostics include interface-file path context in `process_dependencies`
 - wrapper compile failures from interface-driven generation include interface-file path context
 - parse/tokenize/wrapper-compile interface failures assert dependency-name context end-to-end
+- interface semantic rejection paths (duplicate names, invalid export symbols, unsupported types) assert dependency-name context
 - missing local dependency-path diagnostics include dependency name + path
 - dependency processing errors now include dependency-name context prefixes
 - missing dependency path / shape errors now flow through shared dependency-context formatting
