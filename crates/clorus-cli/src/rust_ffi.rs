@@ -55,6 +55,17 @@ struct InterfaceBinding {
 }
 
 impl RustFfiProcessor {
+    fn is_valid_export_symbol(name: &str) -> bool {
+        let mut chars = name.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !(first == '_' || first.is_ascii_alphabetic()) {
+            return false;
+        }
+        chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    }
+
     fn compare_version_like(a: &str, b: &str) -> std::cmp::Ordering {
         fn parse_parts(v: &str) -> Vec<u64> {
             v.split('.')
@@ -806,6 +817,12 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                     }
                     None => exposed_name.clone(),
                 };
+                if !Self::is_valid_export_symbol(&exposed_name) {
+                    return Err(format!(
+                        "Interface '{}' defines function '{}' which normalizes to invalid export symbol '{}'. Use only [A-Za-z0-9_-] and avoid leading digits.",
+                        interface_path, f.name, exposed_name
+                    ));
+                }
                 Ok(InterfaceBinding {
                     exposed_name,
                     rust_symbol,
@@ -1037,6 +1054,16 @@ mod tests {
             RustFfiProcessor::compare_version_like("1.0", "1.0.0"),
             std::cmp::Ordering::Equal
         );
+    }
+
+    #[test]
+    fn is_valid_export_symbol_accepts_c_ffi_safe_identifiers() {
+        assert!(RustFfiProcessor::is_valid_export_symbol("foo"));
+        assert!(RustFfiProcessor::is_valid_export_symbol("_foo_2"));
+        assert!(RustFfiProcessor::is_valid_export_symbol("foo_bar"));
+        assert!(!RustFfiProcessor::is_valid_export_symbol(""));
+        assert!(!RustFfiProcessor::is_valid_export_symbol("2foo"));
+        assert!(!RustFfiProcessor::is_valid_export_symbol("foo?"));
     }
 
     #[test]
@@ -2120,6 +2147,72 @@ dup-iface-lib = { path = "dup-iface-lib", interface = "interfaces/dup-iface-lib.
             "defines duplicate exported function name 'foo_bar' after normalization"
         ));
         assert!(err.contains("interfaces/dup-iface-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_rejects_invalid_normalized_export_symbol() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_invalid_export_symbol_{}",
+            unique
+        ));
+        let dep_dir = root.join("invalid-export-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "invalid-export-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn answer() -> u64 { 42 }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("invalid-export-lib.clri"),
+            r#"(interface invalid-export-lib
+  (fn answer? [] :u64 :rust "answer")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+invalid-export-lib = { path = "invalid-export-lib", interface = "interfaces/invalid-export-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected invalid normalized export symbol error"),
+            Err(e) => e,
+        };
+        assert!(err.contains("normalizes to invalid export symbol 'answer?'"));
+        assert!(err.contains("interfaces/invalid-export-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
