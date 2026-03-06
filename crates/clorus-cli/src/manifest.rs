@@ -567,4 +567,42 @@ libm = { version = "0.2", interface = true }
         assert_eq!(dep.get_version(), Some("0.2"));
         assert!(matches!(dep.get_interface(), Some(InterfaceSpec::Auto)));
     }
+
+    #[test]
+    fn rust_dependency_interface_false_in_path_form_is_treated_as_no_interface() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+demo-lib = { path = "../demo-lib", interface = false }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let dep = manifest
+            .rust_dependencies
+            .get("demo-lib")
+            .expect("demo-lib dependency should exist");
+        assert_eq!(dep.get_path(), Some("../demo-lib"));
+        assert!(dep.get_interface().is_none());
+    }
+
+    #[test]
+    fn rust_dependency_interface_false_in_version_form_is_treated_as_no_interface() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+libm = { version = "0.2", interface = false }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let dep = manifest
+            .rust_dependencies
+            .get("libm")
+            .expect("libm dependency should exist");
+        assert_eq!(dep.get_version(), Some("0.2"));
+        assert!(dep.get_interface().is_none());
+    }
 }
