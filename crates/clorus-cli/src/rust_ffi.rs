@@ -1521,6 +1521,26 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_explicit_accepts_clri_extension() {
+        let resolved = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.clri".to_string()),
+        )
+        .expect("clri extension should be accepted");
+        assert_eq!(resolved, "interfaces/demo-lib.clri");
+    }
+
+    #[test]
+    fn resolve_interface_path_explicit_accepts_legacy_extension() {
+        let resolved = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.clorus-ffi".to_string()),
+        )
+        .expect("legacy extension should be accepted");
+        assert_eq!(resolved, "interfaces/demo-lib.clorus-ffi");
+    }
+
+    #[test]
     fn with_dependency_context_adds_prefix_when_missing() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",

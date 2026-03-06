@@ -142,6 +142,7 @@ The CLI/rust-ffi integration tests now cover:
 - dependency-context prefixing still wraps diagnostics labeled for a different dependency name
 - dependency-context wrapping normalizes leading error whitespace and avoids trailing filler for blank errors
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
+- explicit interface-path acceptance for both supported extensions (`.clri`, `.clorus-ffi`) is unit-covered
 - explicit interface path must be a file (directory-path misuse rejected with clear diagnostics)
 - explicit interface type-matrix validation (unsupported param and return types rejected before wrapper compile)
 - explicit interface pointer-type validation (non-`*mut u8` pointer signatures rejected with clear diagnostics)
