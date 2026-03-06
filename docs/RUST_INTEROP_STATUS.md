@@ -33,6 +33,7 @@ Notes:
 - `version` dependencies are resolved from Cargo registry source.
 - When multiple registry versions of the same crate appear in metadata, resolver prefers the highest discovered registry version.
 - If the highest discovered registry version has no `lib` target, resolver falls back to the highest version that does have a `lib` target.
+- Version ordering now handles semver prerelease/build metadata for deterministic registry candidate selection.
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.

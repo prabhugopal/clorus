@@ -116,6 +116,13 @@ impl RustFfiProcessor {
     }
 
     fn compare_version_like(a: &str, b: &str) -> std::cmp::Ordering {
+        fn split_semver(v: &str) -> (&str, Option<&str>) {
+            let without_build = v.split_once('+').map_or(v, |(core, _)| core);
+            without_build
+                .split_once('-')
+                .map_or((without_build, None), |(core, pre)| (core, Some(pre)))
+        }
+
         fn parse_parts(v: &str) -> Vec<u64> {
             v.split('.')
                 .map(|part| {
@@ -128,8 +135,40 @@ impl RustFfiProcessor {
                 .collect()
         }
 
-        let av = parse_parts(a);
-        let bv = parse_parts(b);
+        fn compare_prerelease(a: &str, b: &str) -> std::cmp::Ordering {
+            let a_parts: Vec<&str> = a.split('.').collect();
+            let b_parts: Vec<&str> = b.split('.').collect();
+            let max_len = a_parts.len().max(b_parts.len());
+
+            for i in 0..max_len {
+                let ai = a_parts.get(i);
+                let bi = b_parts.get(i);
+                match (ai, bi) {
+                    (None, None) => return std::cmp::Ordering::Equal,
+                    (None, Some(_)) => return std::cmp::Ordering::Less,
+                    (Some(_), None) => return std::cmp::Ordering::Greater,
+                    (Some(a_seg), Some(b_seg)) => {
+                        let a_num = a_seg.parse::<u64>();
+                        let b_num = b_seg.parse::<u64>();
+                        let ord = match (a_num, b_num) {
+                            (Ok(an), Ok(bn)) => an.cmp(&bn),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => a_seg.cmp(b_seg),
+                        };
+                        if ord != std::cmp::Ordering::Equal {
+                            return ord;
+                        }
+                    }
+                }
+            }
+            std::cmp::Ordering::Equal
+        }
+
+        let (a_core, a_pre) = split_semver(a);
+        let (b_core, b_pre) = split_semver(b);
+        let av = parse_parts(a_core);
+        let bv = parse_parts(b_core);
         let max_len = av.len().max(bv.len());
 
         for i in 0..max_len {
@@ -141,7 +180,12 @@ impl RustFfiProcessor {
             }
         }
 
-        std::cmp::Ordering::Equal
+        match (a_pre, b_pre) {
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (Some(ap), Some(bp)) => compare_prerelease(ap, bp),
+        }
     }
 
     fn should_build_offline(source: &RustDepSource) -> bool {
@@ -1342,6 +1386,42 @@ mod tests {
         assert_eq!(
             RustFfiProcessor::compare_version_like("1.0", "1.0.0"),
             std::cmp::Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn compare_version_like_prefers_release_over_prerelease_for_same_core() {
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.3", "1.2.3-alpha.1"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.3-beta.1", "1.2.3"),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_version_like_orders_prerelease_identifiers_semver_style() {
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.3-alpha.2", "1.2.3-alpha.10"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.3-alpha.1", "1.2.3-alpha.beta"),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_version_like_ignores_build_metadata() {
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.3+build.1", "1.2.3+build.99"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.4+build.1", "1.2.3+build.99"),
+            std::cmp::Ordering::Greater
         );
     }
 
