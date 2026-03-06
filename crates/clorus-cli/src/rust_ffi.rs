@@ -3076,6 +3076,71 @@ unsupported-pointer-lib = { path = "unsupported-pointer-lib", interface = "inter
     }
 
     #[test]
+    fn process_dependencies_e2e_reports_interface_parse_location_context() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_interface_parse_location_{}",
+            unique
+        ));
+        let dep_dir = root.join("bad-iface-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "bad-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping(x: i32) -> i32 { x }\n")
+            .expect("write dep lib");
+
+        // Deliberately malformed: param type must be keyword (`:i32`), not symbol (`i32`).
+        std::fs::write(
+            iface_dir.join("bad-iface-lib.clri"),
+            r#"(interface bad-iface-lib
+  (fn ping [x i32] :i32)
+)"#,
+        )
+        .expect("write malformed interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+bad-iface-lib = { path = "bad-iface-lib", interface = "interfaces/bad-iface-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected malformed interface parse failure"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Failed to parse interface file"));
+        assert!(err.contains("interfaces/bad-iface-lib.clri"));
+        assert!(err.contains("Expected keyword"));
+        assert!(err.contains("line"));
+        assert!(err.contains("column"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_interface_uses_legacy_when_clri_absent() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
