@@ -848,7 +848,29 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::panic::{catch_unwind, resume_unwind, UnwindSafe};
+    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn cwd_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_cwd<T, F>(dir: &Path, f: F) -> T
+    where
+        F: FnOnce() -> T + UnwindSafe,
+    {
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
+        let original = std::env::current_dir().expect("get cwd");
+        std::env::set_current_dir(dir).expect("cd temp root");
+        let result = catch_unwind(f);
+        std::env::set_current_dir(original).expect("restore cwd");
+        match result {
+            Ok(value) => value,
+            Err(payload) => resume_unwind(payload),
+        }
+    }
 
     #[test]
     fn generate_wrapper_cargo_toml_for_version_dependency() {
@@ -1047,14 +1069,10 @@ mod tests {
         std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
         std::fs::write(iface_dir.join("libm.clri"), "(interface libm)").expect("write clri");
 
-        let original = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(&root).expect("cd temp root");
-
-        let resolved =
+        let resolved = with_cwd(&root, || {
             RustFfiProcessor::resolve_interface_path("libm", crate::manifest::InterfaceSpec::Auto)
-                .expect("auto resolve should find .clri");
-
-        std::env::set_current_dir(original).expect("restore cwd");
+                .expect("auto resolve should find .clri")
+        });
         let _ = std::fs::remove_dir_all(root);
 
         assert_eq!(resolved, "interfaces/libm.clri");
@@ -1069,16 +1087,13 @@ mod tests {
         let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_missing_{}", unique));
         std::fs::create_dir_all(&root).expect("create temp root");
 
-        let original = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(&root).expect("cd temp root");
-
-        let err = RustFfiProcessor::resolve_interface_path(
-            "missing-lib",
-            crate::manifest::InterfaceSpec::Auto,
-        )
-        .expect_err("auto resolve should fail");
-
-        std::env::set_current_dir(original).expect("restore cwd");
+        let err = with_cwd(&root, || {
+            RustFfiProcessor::resolve_interface_path(
+                "missing-lib",
+                crate::manifest::InterfaceSpec::Auto,
+            )
+            .expect_err("auto resolve should fail")
+        });
         let _ = std::fs::remove_dir_all(root);
 
         assert!(err.contains("Interface auto-discovery failed"));
@@ -1247,11 +1262,10 @@ demo-math = { path = "demo-math", interface = true }
         )
         .expect("parse manifest");
 
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(&root).expect("cd root");
-        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
-            .expect("process dependencies");
-        std::env::set_current_dir(original).expect("restore cwd");
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
 
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
@@ -1325,11 +1339,10 @@ impl-only-lib = { path = "impl-only-lib", interface = true }
         )
         .expect("parse manifest");
 
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(&root).expect("cd root");
-        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
-            .expect("process dependencies");
-        std::env::set_current_dir(original).expect("restore cwd");
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
 
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
@@ -1384,13 +1397,10 @@ missing-iface-lib = { path = "missing-iface-lib", interface = true }
         )
         .expect("parse manifest");
 
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(&root).expect("cd root");
-        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
             Ok(_) => panic!("expected interface auto-discovery failure"),
             Err(e) => e,
-        };
-        std::env::set_current_dir(original).expect("restore cwd");
+        });
 
         assert!(err.contains("Interface auto-discovery failed"));
         assert!(err.contains("interfaces/missing-iface-lib.clri"));
@@ -1444,11 +1454,10 @@ auto-parse-lib = { path = "auto-parse-lib" }
         )
         .expect("parse manifest");
 
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(&root).expect("cd root");
-        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
-            .expect("process dependencies");
-        std::env::set_current_dir(original).expect("restore cwd");
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
 
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
@@ -1521,11 +1530,10 @@ legacy-iface-lib = { path = "legacy-iface-lib", interface = "custom-ifaces/legac
         )
         .expect("parse manifest");
 
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(&root).expect("cd root");
-        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
-            .expect("process dependencies");
-        std::env::set_current_dir(original).expect("restore cwd");
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
 
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
@@ -1591,17 +1599,91 @@ auto-legacy-lib = { path = "auto-legacy-lib", interface = true }
         )
         .expect("parse manifest");
 
-        let original = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(&root).expect("cd root");
-        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
-            .expect("process dependencies");
-        std::env::set_current_dir(original).expect("restore cwd");
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
 
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
         assert_eq!(lib.name, "auto_legacy_lib_ffi");
         let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["pong"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_interface_prefers_clri_over_legacy() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_auto_prefers_clri_{}", unique));
+        let dep_dir = root.join("prefer-clri-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "prefer-clri-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn ping() -> i32 { 11 }
+pub fn pong() -> i32 { 12 }
+"#,
+        )
+        .expect("write dep lib");
+
+        // Both interfaces are present; auto-resolution should prefer .clri.
+        std::fs::write(
+            iface_dir.join("prefer-clri-lib.clri"),
+            r#"(interface prefer-clri-lib
+  (fn ping [] :i32)
+)"#,
+        )
+        .expect("write clri interface");
+        std::fs::write(
+            iface_dir.join("prefer-clri-lib.clorus-ffi"),
+            r#"(interface prefer-clri-lib
+  (fn pong [] :i32)
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+prefer-clri-lib = { path = "prefer-clri-lib", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "prefer_clri_lib_ffi");
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, vec!["ping"]);
 
         let _ = std::fs::remove_dir_all(&root);
     }
