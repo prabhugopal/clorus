@@ -7521,6 +7521,44 @@ mod tests {
     }
 
     #[test]
+    fn test_declare_rust_library_functions_does_not_collide_with_core_add() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        // Runtime intrinsic symbol should already exist.
+        assert!(codegen.module.get_function("clorus_add").is_some());
+
+        let lib = RustLibrary {
+            name: "example-rust-lib".to_string(),
+            functions: vec![RustFunction {
+                name: "add".to_string(),
+                params: vec![
+                    RustParam {
+                        name: "a".to_string(),
+                        type_name: "f64".to_string(),
+                    },
+                    RustParam {
+                        name: "b".to_string(),
+                        type_name: "f64".to_string(),
+                    },
+                ],
+                return_type: "f64".to_string(),
+            }],
+        };
+
+        let result = codegen.declare_rust_library_functions(&lib);
+        assert!(result.is_ok(), "unexpected error: {:?}", result.err());
+        assert!(
+            codegen
+                .module
+                .get_function("clorus_example_rust_lib__add")
+                .is_some()
+        );
+        // Core intrinsic remains intact.
+        assert!(codegen.module.get_function("clorus_add").is_some());
+    }
+
+    #[test]
     fn test_declare_rust_library_functions_supports_extended_numeric_types() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
