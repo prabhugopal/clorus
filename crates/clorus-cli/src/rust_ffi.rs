@@ -1722,6 +1722,76 @@ demo-narrow = { path = "demo-narrow", interface = true }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_interface_bool_and_string_types() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_bool_string_{}", unique));
+        let dep_dir = root.join("demo-text");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "demo-text"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn flip_bool(x: bool) -> bool { !x }
+pub fn echo_string(s: String) -> String { s }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("demo-text.clri"),
+            r#"(interface demo-text
+  (fn flip-bool [x :bool] :bool)
+  (fn echo-string [s :string] :string)
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+demo-text = { path = "demo-text", interface = true }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "demo_text_ffi");
+        assert_eq!(lib.functions.len(), 2);
+        assert_eq!(lib.functions[0].return_type, "bool");
+        assert_eq!(lib.functions[1].return_type, "String");
+        assert_eq!(lib.functions[1].params[0].type_name, "String");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_interface_with_rust_symbol_override() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
