@@ -797,6 +797,12 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 interface.functions.len()
             );
         }
+        if interface.functions.is_empty() {
+            return Err(format!(
+                "Interface '{}' contains no function definitions. Add at least one `(fn ...)` entry.",
+                interface_path
+            ));
+        }
 
         // Convert interface functions to wrapper bindings and exposed symbols.
         let bindings: Vec<InterfaceBinding> = interface
@@ -2213,6 +2219,70 @@ invalid-export-lib = { path = "invalid-export-lib", interface = "interfaces/inva
         };
         assert!(err.contains("normalizes to invalid export symbol 'answer?'"));
         assert!(err.contains("interfaces/invalid-export-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_rejects_empty_interface_definition() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_empty_interface_definition_{}",
+            unique
+        ));
+        let dep_dir = root.join("empty-iface-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "empty-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn answer() -> u64 { 42 }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("empty-iface-lib.clri"),
+            r#"(interface empty-iface-lib)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+empty-iface-lib = { path = "empty-iface-lib", interface = "interfaces/empty-iface-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected empty interface rejection"),
+            Err(e) => e,
+        };
+        assert!(err.contains("contains no function definitions"));
+        assert!(err.contains("interfaces/empty-iface-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
