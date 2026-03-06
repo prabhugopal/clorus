@@ -130,7 +130,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path auto-parse pointer-mismatch rejection happens during signature filtering (before wrapper build) and includes explicit hint (`*mut u8` and `*const u8` are the only auto-supported raw pointer carriers)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`) with `:rust` symbol override for impl/associated methods
-- explicit legacy interface (`.clorus-ffi`) E2E coverage includes split pointer forms (`:*const u8`)
+- explicit legacy interface (`.clorus-ffi`) E2E coverage includes split pointer forms (`:*const u8`, `:*mut u8`) with wrapper conversion assertions
 - explicit legacy interface (`.clorus-ffi`) E2E coverage includes compact pointer forms (`:*const-u8`)
 - local path dependency + explicit `.clri` interface path
 - local path dependency + explicit `.clri` interface path supports both compact and split pointer forms (`:*const-u8` / `:*const u8`, `:*mut-u8` / `:*mut u8`)
