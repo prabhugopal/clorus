@@ -823,6 +823,12 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 interface_file_path.display()
             ));
         }
+        if interface_file_path.is_dir() {
+            return Err(format!(
+                "Interface path points to a directory, not a file: {}",
+                interface_file_path.display()
+            ));
+        }
 
         use crate::interface::parse_interface_file;
         let interface = parse_interface_file(&interface_file_path)?;
@@ -1751,6 +1757,60 @@ missing-explicit-iface-lib = { path = "missing-explicit-iface-lib", interface = 
 
         assert!(err.contains("Interface file not found"));
         assert!(err.contains("interfaces/not-there.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_explicit_interface_directory_path_reports_clear_error() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_explicit_interface_dir_{}",
+            unique
+        ));
+        let dep_dir = root.join("dir-iface-lib");
+        let iface_dir = root.join("interfaces");
+        let bad_iface_dir = iface_dir.join("dir-iface-lib.clri");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&bad_iface_dir).expect("create bad interface dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "dir-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 1 }\n")
+            .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+dir-iface-lib = { path = "dir-iface-lib", interface = "interfaces/dir-iface-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected explicit interface directory-path failure"),
+            Err(e) => e,
+        };
+        assert!(err.contains("Interface path points to a directory"));
+        assert!(err.contains("interfaces/dir-iface-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
