@@ -1150,6 +1150,45 @@ mod tests {
     }
 
     #[test]
+    fn retain_supported_ffi_functions_accepts_core_supported_types() {
+        let functions = vec![
+            FunctionInfo {
+                name: "ok_bool".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "x".to_string(),
+                    type_name: "bool".to_string(),
+                }],
+                return_type: "bool".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_string".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "s".to_string(),
+                    type_name: "String".to_string(),
+                }],
+                return_type: "String".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_ptr".to_string(),
+                params: vec![],
+                return_type: "*mut u8".to_string(),
+            },
+            FunctionInfo {
+                name: "ok_void".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "p".to_string(),
+                    type_name: "*mut u8".to_string(),
+                }],
+                return_type: "()".to_string(),
+            },
+        ];
+
+        let filtered = RustFfiProcessor::retain_supported_ffi_functions(functions, false);
+        let names: Vec<String> = filtered.into_iter().map(|f| f.name).collect();
+        assert_eq!(names, vec!["ok_bool", "ok_string", "ok_ptr", "ok_void"]);
+    }
+
+    #[test]
     fn collect_unsupported_signature_details_reports_reason() {
         let functions = vec![
             FunctionInfo {
