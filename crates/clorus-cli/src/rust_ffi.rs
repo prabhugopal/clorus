@@ -1145,4 +1145,49 @@ impl Foo {
         assert!(generated.contains("clorus_new_point"));
         assert!(generated.contains("Point::new"));
     }
+
+    #[test]
+    fn generate_wrapper_lib_rs_from_interface_handles_pointer_sized_ints() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_iface_wrap_ints_{}", unique));
+        std::fs::create_dir_all(root.join("src")).expect("create temp src");
+
+        let bindings = vec![
+            InterfaceBinding {
+                exposed_name: "take_isize".to_string(),
+                rust_symbol: "take_isize".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "n".to_string(),
+                    type_name: "isize".to_string(),
+                }],
+                return_type: "isize".to_string(),
+            },
+            InterfaceBinding {
+                exposed_name: "take_usize".to_string(),
+                rust_symbol: "take_usize".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "n".to_string(),
+                    type_name: "usize".to_string(),
+                }],
+                return_type: "usize".to_string(),
+            },
+        ];
+
+        RustFfiProcessor::generate_wrapper_lib_rs_from_interface(&root, "demo-lib", &bindings)
+            .expect("generate wrapper");
+
+        let generated =
+            std::fs::read_to_string(root.join("src/lib.rs")).expect("read generated wrapper");
+        let _ = std::fs::remove_dir_all(&root);
+
+        // ABI carrier types
+        assert!(generated.contains("fn clorus_take_isize(n: i64) -> i64"));
+        assert!(generated.contains("fn clorus_take_usize(n: u64) -> u64"));
+        // Rust-side conversions
+        assert!(generated.contains("let n_rust = n as isize;"));
+        assert!(generated.contains("let n_rust = n as usize;"));
+    }
 }
