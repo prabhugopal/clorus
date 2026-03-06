@@ -3057,6 +3057,42 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_pointer_value())
             }
+            "compare" | "__clorus_compare_values" => {
+                if args.len() != 2 {
+                    return Err("compare requires 2 arguments".to_string());
+                }
+
+                let left = self.compile_expr(&args[0])?;
+                let right = self.compile_expr(&args[1])?;
+
+                let compare_fn = self
+                    .module
+                    .get_function("clorus_compare_values")
+                    .ok_or("clorus_compare_values not declared")?;
+                let cmp_i64 = self
+                    .builder
+                    .build_call(compare_fn, &[left.into(), right.into()], "compare_call")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+
+                let value_long_fn = self
+                    .module
+                    .get_function("clorus_value_long")
+                    .ok_or("clorus_value_long not declared")?;
+                let boxed = self
+                    .builder
+                    .build_call(value_long_fn, &[cmp_i64.into()], "compare_boxed")
+                    .unwrap();
+
+                Ok(boxed
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
             "re-find" => {
                 if args.len() != 2 {
                     return Err("re-find requires 2 arguments: pattern, string".to_string());

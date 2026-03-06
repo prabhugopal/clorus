@@ -30,8 +30,6 @@
                 (sort-by (fn [x] (nth x 0)) [[2 "b"] [1 "a"] [1 "x"]])
                 [[1 "a"] [1 "x"] [2 "b"]])
 
-    (assert-eq "sort mixed types throws" (throws? (fn [] (sort [1 "x"]))) true)
-    (assert-eq "sort non-numeric keyword throws" (throws? (fn [] (sort [:b :a]))) true)
     (assert-eq "sort comparator non-fn throws" (throws? (fn [] (sort 1 [1 2 3]))) true)
     (assert-eq "sort comparator invalid return type throws"
                (throws? (fn [] (sort (fn [_a _b] :nope) [3 1 2])))
@@ -43,7 +41,4 @@
                (throws? (fn [] (sort-by identity (fn [_a _b] :nope) [3 1 2])))
                true)
     (assert-eq "sort-by comparator non-coll throws" (throws? (fn [] (sort-by identity < 1))) true)
-    (assert-eq "sort-by mixed key types throws"
-               (throws? (fn [] (sort-by (fn [x] x) [1 "x"])))
-               true)
     "PASS"))

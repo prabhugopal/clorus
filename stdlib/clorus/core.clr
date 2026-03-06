@@ -220,6 +220,11 @@
     coll
     (throw (str fname " expects collection"))))
 
+;; compare - generic ordering helper
+;; Returns negative/zero/positive like clojure.core/compare.
+(defn compare [a b]
+  (__clorus_compare_values a b))
+
 ;; conj - Add element to collection (at end for vectors)
 ;; Simple implementation that works with vectors
 ;; Example: (conj [1 2 3] 4) ; => [1 2 3 4]
@@ -474,21 +479,6 @@
     []
     (conj (butlast (rest coll)) (first coll))))
 
-(defn all-number? [coll]
-  (if (empty? coll)
-    true
-    (if (number? (first coll))
-      (all-number? (rest coll))
-      false)))
-
-(defn all-number-keys? [keyfn coll]
-  (if (empty? coll)
-    true
-    (if (number? (keyfn (first coll)))
-      (all-number-keys? keyfn (rest coll))
-      false)))
-
-
 ;; stable merge helper for numeric sort
 (defn merge-sorted-numeric [left right]
   (if (empty? left)
@@ -530,15 +520,7 @@
 ;; 2-arity: comparator function
 (defn sort
   ([coll]
-   (if (< (count coll) 2)
-     coll
-     (if (all-number? coll)
-       (let [n (count coll)
-             mid (quot n 2)
-             left (sort (take mid coll))
-             right (sort (drop mid coll))]
-         (merge-sorted-numeric left right))
-       (throw "sort currently supports numeric collections only"))))
+   (sort compare coll))
   ([comp coll]
    (let [comp (ensure-fn "sort" comp)
          coll (ensure-coll "sort" coll)]
@@ -589,16 +571,7 @@
 
 (defn sort-by
   ([keyfn coll]
-   (if (< (count coll) 2)
-     coll
-     (let [keyfn (ensure-fn "sort-by" keyfn)]
-       (if (all-number-keys? keyfn coll)
-         (let [n (count coll)
-               mid (quot n 2)
-               left (sort-by keyfn (take mid coll))
-               right (sort-by keyfn (drop mid coll))]
-           (merge-sorted-by-key keyfn left right))
-         (throw "sort-by currently supports numeric keys only")))))
+   (sort-by keyfn compare coll))
   ([keyfn comp coll]
    (let [keyfn (ensure-fn "sort-by" keyfn)
          comp (ensure-fn "sort-by" comp)

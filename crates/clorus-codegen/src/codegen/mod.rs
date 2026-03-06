@@ -615,6 +615,8 @@ impl<'ctx> CodeGen<'ctx> {
             "trim-right",
             "replace",
             "replace-first",
+            "compare",
+            "__clorus_compare_values",
             "re-find",
             "re-matches",
             "re-seq",
@@ -1140,6 +1142,7 @@ impl<'ctx> CodeGen<'ctx> {
         );
         self.declare_value2_to_i32_fn("clorus_includes");
         self.declare_value2_to_i64_fn("clorus_compare_strings");
+        self.declare_value2_to_i64_fn("clorus_compare_values");
 
         // String utility functions
         self.declare_value_and_i64_to_value_fn("clorus_char_at");

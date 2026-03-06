@@ -914,6 +914,10 @@ impl<'ctx> ReplEngine<'ctx> {
             eprintln!("DEBUG eval_internal: Verifying LLVM module...");
         }
         codegen.finalize_global_init();
+        if std::env::var("CLORUS_DEBUG_IR").is_ok() {
+            let ir = codegen.get_module().print_to_string().to_string();
+            let _ = std::fs::write("/tmp/clorus_repl_ir.ll", ir);
+        }
         // Verify LLVM module before JIT
         if let Err(e) = codegen.get_module().verify() {
             if std::env::var("CLORUS_DEBUG_IR").is_ok() {

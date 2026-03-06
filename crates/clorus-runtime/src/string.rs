@@ -840,6 +840,121 @@ pub extern "C" fn clorus_compare_strings(s1: *mut Value, s2: *mut Value) -> i64 
     }
 }
 
+/// Compare two values for ordering.
+/// Returns negative/zero/positive like clojure.core/compare.
+///
+/// Current contract:
+/// - numbers compare numerically (Long/Double cross-compatible)
+/// - strings/keywords/symbols compare lexicographically
+/// - bool compares false < true
+/// - nil compares before non-nil
+/// - mixed remaining types fall back to tag ordering for deterministic behavior
+#[no_mangle]
+pub extern "C" fn clorus_compare_values(a: *mut Value, b: *mut Value) -> i64 {
+    unsafe {
+        if a.is_null() && b.is_null() {
+            return 0;
+        }
+        if a.is_null() {
+            return -1;
+        }
+        if b.is_null() {
+            return 1;
+        }
+
+        let at = (*a).header().tag();
+        let bt = (*b).header().tag();
+
+        if at == ValueTag::Nil && bt == ValueTag::Nil {
+            return 0;
+        }
+        if at == ValueTag::Nil {
+            return -1;
+        }
+        if bt == ValueTag::Nil {
+            return 1;
+        }
+
+        if (at == ValueTag::Long || at == ValueTag::Double) && (bt == ValueTag::Long || bt == ValueTag::Double) {
+            let av = match at {
+                ValueTag::Long => (*a).as_long() as f64,
+                ValueTag::Double => (*a).as_double(),
+                _ => 0.0,
+            };
+            let bv = match bt {
+                ValueTag::Long => (*b).as_long() as f64,
+                ValueTag::Double => (*b).as_double(),
+                _ => 0.0,
+            };
+            return if av < bv {
+                -1
+            } else if av > bv {
+                1
+            } else {
+                0
+            };
+        }
+
+        if at == ValueTag::String && bt == ValueTag::String {
+            let as_ = (*a).as_string();
+            let bs_ = (*b).as_string();
+            return if as_ < bs_ {
+                -1
+            } else if as_ > bs_ {
+                1
+            } else {
+                0
+            };
+        }
+
+        if at == ValueTag::Keyword && bt == ValueTag::Keyword {
+            let as_ = (*a).as_keyword();
+            let bs_ = (*b).as_keyword();
+            return if as_ < bs_ {
+                -1
+            } else if as_ > bs_ {
+                1
+            } else {
+                0
+            };
+        }
+
+        if at == ValueTag::Symbol && bt == ValueTag::Symbol {
+            let as_ = (*a).as_symbol();
+            let bs_ = (*b).as_symbol();
+            return if as_ < bs_ {
+                -1
+            } else if as_ > bs_ {
+                1
+            } else {
+                0
+            };
+        }
+
+        if at == ValueTag::Bool && bt == ValueTag::Bool {
+            let av = (*a).as_bool();
+            let bv = (*b).as_bool();
+            return if av == bv {
+                0
+            } else if !av && bv {
+                -1
+            } else {
+                1
+            };
+        }
+
+        let at_num = at as i32;
+        let bt_num = bt as i32;
+        if at_num < bt_num {
+            -1
+        } else if at_num > bt_num {
+            1
+        } else {
+            0
+        }
+    }
+}
+
 /// Create a string value from a C string pointer
 /// Used for map destructuring with :strs
 #[no_mangle]
