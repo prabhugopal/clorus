@@ -4558,6 +4558,32 @@ foo_bar = { path = "foo_bar" }
     }
 
     #[test]
+    fn process_dependencies_reports_errors_in_sorted_dependency_order() {
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+z-last = { path = "missing-z" }
+a-first = { path = "missing-a" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected missing-path failure"),
+            Err(e) => e,
+        };
+
+        assert!(err.contains("Rust dependency 'a-first':"));
+        assert!(err.contains("missing-a"));
+    }
+
+    #[test]
     fn process_dependencies_e2e_reports_interface_parse_location_context() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
