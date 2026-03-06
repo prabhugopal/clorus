@@ -106,6 +106,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path dependency + explicit `.clri` interface path
 - local path dependency + explicit `.clri` interface path with `:rust` symbol override for impl/associated methods
 - empty `:rust` symbol override rejection with explicit function+interface-path diagnostics
+- duplicate normalized interface function-name rejection with explicit interface-path diagnostics
 - local path dependency + `interface = true` auto interface fallback to legacy when `.clri` is absent
 - local path dependency + `interface = true` auto interface preference for `.clri` when both `.clri` and `.clorus-ffi` exist
 - `interface = true` missing-interface diagnostics with explicit searched paths

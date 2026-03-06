@@ -2,6 +2,7 @@ use crate::interface::InterfaceFunction;
 use crate::manifest::Manifest;
 use clorus_ffi_gen::{FfiGenerator, FunctionInfo};
 use serde::Deserialize;
+use std::collections::HashSet;
 use std::fs;
 /// Automatic Rust FFI processing - Phase 2 Architecture
 /// Generates wrapper crates in target/rust-ffi/ instead of polluting library source
@@ -820,6 +821,15 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
+        let mut exposed_names = HashSet::new();
+        for binding in &bindings {
+            if !exposed_names.insert(binding.exposed_name.clone()) {
+                return Err(format!(
+                    "Interface '{}' defines duplicate exported function name '{}' after normalization. Rename one function to avoid wrapper symbol collision.",
+                    interface_path, binding.exposed_name
+                ));
+            }
+        }
 
         let functions: Vec<FunctionInfo> = bindings
             .iter()
@@ -2040,6 +2050,76 @@ invalid-override-lib = { path = "invalid-override-lib", interface = "interfaces/
         };
         assert!(err.contains("Invalid :rust override for function 'forty-two'"));
         assert!(err.contains("interfaces/invalid-override-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_rejects_duplicate_normalized_interface_names() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_dup_iface_names_{}",
+            unique
+        ));
+        let dep_dir = root.join("dup-iface-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "dup-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn foo_bar() -> u64 { 1 }
+pub fn foo_bar_alt() -> u64 { 2 }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("dup-iface-lib.clri"),
+            r#"(interface dup-iface-lib
+  (fn foo-bar [] :u64 :rust "foo_bar")
+  (fn foo_bar [] :u64 :rust "foo_bar_alt")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+dup-iface-lib = { path = "dup-iface-lib", interface = "interfaces/dup-iface-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected duplicate normalized function-name error"),
+            Err(e) => e,
+        };
+        assert!(err.contains(
+            "defines duplicate exported function name 'foo_bar' after normalization"
+        ));
+        assert!(err.contains("interfaces/dup-iface-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
