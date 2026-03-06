@@ -1488,6 +1488,29 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_auto_prefers_clri_when_both_exist() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_both_{}", unique));
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+        std::fs::write(iface_dir.join("libm.clri"), "(interface libm)")
+            .expect("write clri interface");
+        std::fs::write(iface_dir.join("libm.clorus-ffi"), "(interface libm)")
+            .expect("write legacy interface");
+
+        let resolved = with_cwd(&root, || {
+            RustFfiProcessor::resolve_interface_path("libm", crate::manifest::InterfaceSpec::Auto)
+                .expect("auto resolve should prefer clri when both exist")
+        });
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(resolved, "interfaces/libm.clri");
+    }
+
+    #[test]
     fn resolve_interface_path_auto_reports_clear_error_when_missing() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

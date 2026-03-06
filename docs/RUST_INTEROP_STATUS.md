@@ -151,3 +151,4 @@ The CLI/rust-ffi integration tests now cover:
 - `interface = true` missing-interface diagnostics with explicit searched paths
 - explicit interface-path missing diagnostics with concrete missing file path
 - auto-interface fallback to legacy (`.clorus-ffi`) and explicit directory-path rejection are unit-covered
+- auto-interface preference order (prefer `.clri` when both `.clri` and `.clorus-ffi` exist) is unit-covered
