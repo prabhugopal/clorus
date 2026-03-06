@@ -762,6 +762,22 @@ impl<'ctx> CodeGen<'ctx> {
         None
     }
 
+    fn rust_ffi_symbol_name(lib_name: &str, func_name: &str) -> String {
+        fn normalize(raw: &str) -> String {
+            raw.chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect()
+        }
+
+        format!("clorus_{}__{}", normalize(lib_name), normalize(func_name))
+    }
+
     /// Register a Rust FFI library so its functions can be used
     pub fn register_rust_library(&mut self, lib: RustLibrary) {
         for key in Self::rust_library_lookup_keys(&lib.name) {
@@ -821,8 +837,8 @@ impl<'ctx> CodeGen<'ctx> {
                 other => return Err(format!("Unsupported return type in FFI: {}", other)),
             };
 
-            // Declare function with clorus_ prefix
-            let ffi_name = format!("clorus_{}", func.name);
+            // Declare function with dependency-scoped prefix to avoid collisions with core runtime FFI symbols.
+            let ffi_name = Self::rust_ffi_symbol_name(&lib.name, &func.name);
             self.module.add_function(&ffi_name, return_type, None);
         }
 
@@ -7499,6 +7515,12 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_ffi_symbol_name_is_dependency_scoped() {
+        let symbol = CodeGen::rust_ffi_symbol_name("example-rust-lib", "add");
+        assert_eq!(symbol, "clorus_example_rust_lib__add");
+    }
+
+    #[test]
     fn test_declare_rust_library_functions_supports_extended_numeric_types() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
@@ -7552,7 +7574,12 @@ mod tests {
         let result = codegen.declare_rust_library_functions(&lib);
         assert!(result.is_ok(), "unexpected error: {:?}", result.err());
         for fn_name in ["f32_id", "u32_id", "u64_id", "isize_id", "usize_id"] {
-            assert!(codegen.module.get_function(&format!("clorus_{}", fn_name)).is_some());
+            assert!(
+                codegen
+                    .module
+                    .get_function(&format!("clorus_mathx__{}", fn_name))
+                    .is_some()
+            );
         }
     }
 

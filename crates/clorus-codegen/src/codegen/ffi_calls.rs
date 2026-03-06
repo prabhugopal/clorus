@@ -224,7 +224,7 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Call the FFI function
-        let ffi_func_name = format!("clorus_{}", rust_func_name);
+        let ffi_func_name = Self::rust_ffi_symbol_name(&lib.name, &rust_func_name);
         let ffi_func = self.module.get_function(&ffi_func_name).ok_or_else(|| {
             format!(
                 "FFI function {} not found - did you (use rust.{})?",

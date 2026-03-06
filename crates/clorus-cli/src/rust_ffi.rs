@@ -55,6 +55,24 @@ struct InterfaceBinding {
 }
 
 impl RustFfiProcessor {
+    fn normalize_symbol_component(raw: &str) -> String {
+        raw.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    }
+
+    fn rust_wrapper_export_symbol(dep_name: &str, exposed_name: &str) -> String {
+        let dep = Self::normalize_symbol_component(dep_name);
+        let func = Self::normalize_symbol_component(exposed_name);
+        format!("clorus_{}__{}", dep, func)
+    }
+
     fn with_dependency_context(dep_name: &str, err: String) -> String {
         let dep_label = format!("Rust dependency '{}'", dep_name);
         let prefix = format!("{}:", dep_label);
@@ -664,13 +682,42 @@ crate-type = ["cdylib", "staticlib", "rlib"]
              // This crate wraps the original library and provides C-compatible FFI functions\n\
              \n\
              use {}::*;\n\
+             use std::ffi::{{CStr, CString}};\n\
+             use std::os::raw::c_char;\n\
              \n",
             original_name, lib_name
         );
 
-        // Add generated FFI wrappers
-        if !generator.functions.is_empty() {
-            content.push_str(&generator.generate_c_wrappers());
+        for func in &generator.functions {
+            let wrapper_name = Self::rust_wrapper_export_symbol(original_name, &func.name);
+            let c_params: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", p.name, Self::rust_to_c_type(&p.type_name)))
+                .collect();
+            let c_return = Self::rust_to_c_type(&func.return_type);
+            let param_conversions: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| Self::c_to_rust_conversion(&p.name, &p.type_name))
+                .collect();
+            let call_params: Vec<String> = func
+                .params
+                .iter()
+                .map(|p| format!("{}_rust", p.name))
+                .collect();
+            let return_conversion = Self::rust_to_c_conversion("result", &func.return_type);
+
+            content.push_str(&format!(
+                "#[no_mangle]\npub extern \"C\" fn {}({}) -> {} {{\n{}\n    let result = {}({});\n{}\n}}\n\n",
+                wrapper_name,
+                c_params.join(", "),
+                c_return,
+                param_conversions.join("\n"),
+                func.name,
+                call_params.join(", "),
+                return_conversion
+            ));
         }
 
         fs::write(wrapper_dir.join("src/lib.rs"), content)
@@ -748,7 +795,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         );
 
         for binding in bindings {
-            let wrapper_name = format!("clorus_{}", binding.exposed_name);
+            let wrapper_name = Self::rust_wrapper_export_symbol(original_name, &binding.exposed_name);
             let c_params: Vec<String> = binding
                 .params
                 .iter()
@@ -1772,7 +1819,7 @@ impl Foo {
             std::fs::read_to_string(root.join("src/lib.rs")).expect("read generated wrapper");
         let _ = std::fs::remove_dir_all(&root);
 
-        assert!(generated.contains("clorus_new_point"));
+        assert!(generated.contains("clorus_demo_lib__new_point"));
         assert!(generated.contains("Point::new"));
     }
 
@@ -1814,11 +1861,47 @@ impl Foo {
         let _ = std::fs::remove_dir_all(&root);
 
         // ABI carrier types
-        assert!(generated.contains("fn clorus_take_isize(n: i64) -> i64"));
-        assert!(generated.contains("fn clorus_take_usize(n: u64) -> u64"));
+        assert!(generated.contains("fn clorus_demo_lib__take_isize(n: i64) -> i64"));
+        assert!(generated.contains("fn clorus_demo_lib__take_usize(n: u64) -> u64"));
         // Rust-side conversions
         assert!(generated.contains("let n_rust = n as isize;"));
         assert!(generated.contains("let n_rust = n as usize;"));
+    }
+
+    #[test]
+    fn generate_wrapper_lib_rs_uses_dependency_scoped_export_symbols() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_iface_wrap_dep_scoped_{}", unique));
+        std::fs::create_dir_all(root.join("src")).expect("create temp src");
+
+        let mut generator = FfiGenerator::new();
+        generator.functions = vec![FunctionInfo {
+            name: "add".to_string(),
+            params: vec![
+                clorus_ffi_gen::ParamInfo {
+                    name: "a".to_string(),
+                    type_name: "f64".to_string(),
+                },
+                clorus_ffi_gen::ParamInfo {
+                    name: "b".to_string(),
+                    type_name: "f64".to_string(),
+                },
+            ],
+            return_type: "f64".to_string(),
+        }];
+
+        RustFfiProcessor::generate_wrapper_lib_rs(&root, "example-rust-lib", &generator)
+            .expect("generate wrapper");
+
+        let generated =
+            std::fs::read_to_string(root.join("src/lib.rs")).expect("read generated wrapper");
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert!(generated.contains("fn clorus_example_rust_lib__add("));
+        assert!(!generated.contains("fn clorus_add("));
     }
 
     #[test]

@@ -104,6 +104,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path dependency + `.clri` auto interface + narrow integer signatures (`i8/u8/i16/u16`)
 - local path dependency + `.clri` auto interface + bool/string signatures
 - local path dependency + `.clri` `:rust` override for impl/associated methods
+- Rust wrapper export symbols are dependency-scoped (e.g., `clorus_<dep>__<fn>`) to avoid collisions with core runtime FFI names
 - local path auto-parse with unsupported-signature filtering
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
 - local path `interface = false` is covered and behaves like omitted interface (auto-parse path flow)
