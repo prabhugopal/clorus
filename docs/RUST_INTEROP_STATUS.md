@@ -120,6 +120,7 @@ The CLI/rust-ffi integration tests now cover:
 - wrapper compile failures from interface-driven generation include interface-file path context
 - missing local dependency-path diagnostics include dependency name + path
 - dependency processing errors now include dependency-name context prefixes
+- missing dependency path / shape errors now flow through shared dependency-context formatting
 - version+`interface = true` auto-discovery failures include dependency-name context and searched interface paths
 - unsupported explicit interface-extension failures include dependency-name context
 - explicit interface directory-path failures include dependency-name context

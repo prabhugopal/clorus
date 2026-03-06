@@ -294,19 +294,18 @@ impl RustFfiProcessor {
             let source = if let Some(path) = dep.get_path() {
                 let lib_path = PathBuf::from(path);
                 if !lib_path.exists() {
-                    return Err(format!(
-                        "Rust dependency '{}' path not found: {}",
+                    return Err(Self::with_dependency_context(
                         name,
-                        lib_path.display()
+                        format!("path not found: {}", lib_path.display()),
                     ));
                 }
                 RustDepSource::Path(lib_path)
             } else if let Some(version) = dep.get_version() {
                 RustDepSource::Version(version.to_string())
             } else {
-                return Err(format!(
-                    "Rust dependency '{}' must specify either path or version",
-                    name
+                return Err(Self::with_dependency_context(
+                    name,
+                    "must specify either path or version".to_string(),
                 ));
             };
 
@@ -3267,7 +3266,7 @@ missing-lib = { path = "definitely-not-here-lib" }
             Ok(_) => panic!("expected missing dependency path failure"),
             Err(e) => e,
         };
-        assert!(err.contains("Rust dependency 'missing-lib' path not found"));
+        assert!(err.contains("Rust dependency 'missing-lib': path not found"));
         assert!(err.contains("definitely-not-here-lib"));
     }
 
