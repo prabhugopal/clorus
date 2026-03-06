@@ -1468,4 +1468,78 @@ auto-parse-lib = { path = "auto-parse-lib" }
 
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_explicit_legacy_interface_path() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_e2e_legacy_iface_{}", unique));
+        let dep_dir = root.join("legacy-iface-lib");
+        let custom_iface_dir = root.join("custom-ifaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&custom_iface_dir).expect("create custom interface dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "legacy-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn ping() -> i32 { 7 }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            custom_iface_dir.join("legacy-iface-lib.clorus-ffi"),
+            r#"(interface legacy-iface-lib
+  (fn ping [] :i32)
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+legacy-iface-lib = { path = "legacy-iface-lib", interface = "custom-ifaces/legacy-iface-lib.clorus-ffi" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(&root).expect("cd root");
+        let processed = RustFfiProcessor::process_dependencies(&manifest, false)
+            .expect("process dependencies");
+        std::env::set_current_dir(original).expect("restore cwd");
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "legacy_iface_lib_ffi");
+        let static_lib = if lib.static_lib_path.is_absolute() {
+            lib.static_lib_path.clone()
+        } else {
+            root.join(&lib.static_lib_path)
+        };
+        assert!(static_lib.exists(), "expected static library at {}", static_lib.display());
+        assert_eq!(lib.functions.len(), 1);
+        assert_eq!(lib.functions[0].name, "ping");
+        assert_eq!(lib.functions[0].return_type, "i32");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
