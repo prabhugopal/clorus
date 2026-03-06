@@ -131,7 +131,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path dependency + explicit legacy interface path (`.clorus-ffi`)
 - local path dependency + explicit legacy interface path (`.clorus-ffi`) with `:rust` symbol override for impl/associated methods
 - explicit legacy interface (`.clorus-ffi`) E2E coverage includes split pointer forms (`:*const u8`, `:*mut u8`) with wrapper conversion assertions
-- explicit legacy interface (`.clorus-ffi`) E2E coverage includes compact pointer forms (`:*const-u8`)
+- explicit legacy interface (`.clorus-ffi`) E2E coverage includes compact pointer forms (`:*const-u8`, `:*mut-u8`) with wrapper conversion assertions
 - local path dependency + explicit `.clri` interface path
 - local path dependency + explicit `.clri` interface path supports both compact and split pointer forms (`:*const-u8` / `:*const u8`, `:*mut-u8` / `:*mut u8`)
 - explicit `.clri` split-pointer E2E coverage validates both const and mut pointer wrappers (`*const u8`, `*mut u8`) and generated export symbols

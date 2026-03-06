@@ -3346,6 +3346,7 @@ edition = "2021"
             dep_dir.join("src/lib.rs"),
             r#"
 pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
+pub fn id_mut_ptr(p: *mut u8) -> *mut u8 { p }
 "#,
         )
         .expect("write dep lib");
@@ -3354,6 +3355,7 @@ pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
             iface_dir.join("legacy-compact-ptr-lib.clorus-ffi"),
             r#"(interface legacy-compact-ptr-lib
   (fn id-const-ptr [p :*const-u8] :*const-u8 :rust "id_const_ptr")
+  (fn id-mut-ptr [p :*mut-u8] :*mut-u8 :rust "id_mut_ptr")
 )"#,
         )
         .expect("write interface");
@@ -3379,10 +3381,35 @@ legacy-compact-ptr-lib = { path = "legacy-compact-ptr-lib", interface = "interfa
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
         assert_eq!(lib.name, "legacy_compact_ptr_lib_ffi");
-        assert_eq!(lib.functions.len(), 1);
-        assert_eq!(lib.functions[0].name, "id_const_ptr");
-        assert_eq!(lib.functions[0].params[0].type_name, "*const u8");
-        assert_eq!(lib.functions[0].return_type, "*const u8");
+        assert_eq!(lib.functions.len(), 2);
+
+        let const_fn = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_const_ptr")
+            .expect("id_const_ptr function should exist");
+        assert_eq!(const_fn.params[0].type_name, "*const u8");
+        assert_eq!(const_fn.return_type, "*const u8");
+
+        let mut_fn = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_mut_ptr")
+            .expect("id_mut_ptr function should exist");
+        assert_eq!(mut_fn.params[0].type_name, "*mut u8");
+        assert_eq!(mut_fn.return_type, "*mut u8");
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("legacy_compact_ptr_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("fn clorus_legacy_compact_ptr_lib__id_const_ptr("));
+        assert!(generated.contains("fn clorus_legacy_compact_ptr_lib__id_mut_ptr("));
+        assert!(generated.contains("let p_rust = p as *const u8;"));
+        assert!(generated.contains("let p_rust = p;"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
