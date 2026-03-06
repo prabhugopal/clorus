@@ -7439,6 +7439,22 @@ mod tests {
     }
 
     #[test]
+    fn test_rust_library_resolution_when_registered_with_prefixed_name() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        codegen.register_rust_library(RustLibrary {
+            name: "rust.coral-gfx".to_string(),
+            functions: vec![],
+        });
+
+        assert!(codegen.resolve_rust_library("coral-gfx").is_some());
+        assert!(codegen.resolve_rust_library("coral_gfx").is_some());
+        assert!(codegen.resolve_rust_library("rust.coral-gfx").is_some());
+        assert!(codegen.resolve_rust_library("rust.coral_gfx").is_some());
+    }
+
+    #[test]
     fn test_compile_multiple_fn() {
         let context = Context::create();
         let mut codegen = CodeGen::new(&context, "test");
