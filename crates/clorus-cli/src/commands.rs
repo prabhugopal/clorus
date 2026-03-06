@@ -6,7 +6,17 @@ use std::io::{Write, Read};
 use crate::manifest::Manifest;
 use clorus_syntax::Expr;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NewTemplate {
+    Basic,
+    RustInterop,
+}
+
 pub fn new(name: &str) -> Result<(), String> {
+    new_with_template(name, NewTemplate::Basic)
+}
+
+pub fn new_with_template(name: &str, template: NewTemplate) -> Result<(), String> {
     let project_path = Path::new(name);
 
     if project_path.exists() {
@@ -16,10 +26,15 @@ pub fn new(name: &str) -> Result<(), String> {
     // Create project structure
     fs::create_dir_all(project_path.join("src"))
         .map_err(|e| format!("Failed to create directories: {}", e))?;
+    if template == NewTemplate::RustInterop {
+        fs::create_dir_all(project_path.join("interfaces"))
+            .map_err(|e| format!("Failed to create interfaces directory: {}", e))?;
+    }
 
     // Create Clorus.toml
-    let manifest_content = format!(
-        r#"[package]
+    let manifest_content = match template {
+        NewTemplate::Basic => format!(
+            r#"[package]
 name = "{}"
 version = "0.1.0"
 authors = []
@@ -27,15 +42,31 @@ authors = []
 [build]
 entry = "src/main.clrs"
 "#,
-        name
-    );
+            name
+        ),
+        NewTemplate::RustInterop => format!(
+            r#"[package]
+name = "{}"
+version = "0.1.0"
+authors = []
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+libm = {{ version = "0.2", interface = "interfaces/libm.clri" }}
+"#,
+            name
+        ),
+    };
 
     fs::write(project_path.join("Clorus.toml"), manifest_content)
         .map_err(|e| format!("Failed to create Clorus.toml: {}", e))?;
 
     // Create src/main.clrs with modern namespace + -main entrypoint template.
-    let main_content = format!(
-        r#"; {} entrypoint
+    let main_content = match template {
+        NewTemplate::Basic => format!(
+            r#"; {} entrypoint
 (ns main)
 
 (defn -main [& _args]
@@ -43,11 +74,37 @@ entry = "src/main.clrs"
     (println "Hello from {}!")
     0))
 "#,
-        name, name
-    );
+            name, name
+        ),
+        NewTemplate::RustInterop => r#"; Rust interop starter template
+; Canonical import style: ns :rust clause.
+(ns main
+  (:rust [libm :as m]))
+
+(defn -main [& _args]
+  (do
+    (println "Rust interop starter")
+    (println "sin(0.0) =" (m/sin 0.0))
+    (println "cos(0.0) =" (m/cos 0.0))
+    0))
+"#
+        .to_string(),
+    };
 
     fs::write(project_path.join("src/main.clrs"), main_content)
         .map_err(|e| format!("Failed to create main.clrs: {}", e))?;
+
+    if template == NewTemplate::RustInterop {
+        let interface_content = r#"(interface libm
+  (fn sin [x :f64] :f64)
+  (fn cos [x :f64] :f64))
+"#;
+        fs::write(
+            project_path.join("interfaces").join("libm.clri"),
+            interface_content,
+        )
+        .map_err(|e| format!("Failed to create interfaces/libm.clri: {}", e))?;
+    }
 
     // Create .gitignore
     let gitignore_content = r#"target/
@@ -2561,7 +2618,7 @@ pub fn pack_workspace(output_dir: Option<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::new;
+    use super::{new, new_with_template, NewTemplate};
     use std::env;
     use std::fs;
     use tempfile::tempdir;
@@ -2596,5 +2653,45 @@ mod tests {
             "generated template should include -main entrypoint"
         );
 
+    }
+
+    #[test]
+    fn new_project_rust_interop_template_includes_rust_dependency_and_ns_rust_clause() {
+        let tmp = tempdir().expect("failed to create tempdir");
+        let original_cwd = env::current_dir().expect("failed to get cwd");
+        let _cwd_guard = CwdGuard(original_cwd);
+        env::set_current_dir(tmp.path()).expect("failed to cd to tempdir");
+
+        let project_name = "interop-app";
+        new_with_template(project_name, NewTemplate::RustInterop).expect("clorus new failed");
+
+        let manifest_path = tmp.path().join(project_name).join("Clorus.toml");
+        let manifest = fs::read_to_string(&manifest_path).expect("failed to read manifest");
+        assert!(
+            manifest.contains("[rust-dependencies]"),
+            "rust interop template should include rust-dependencies section"
+        );
+        assert!(
+            manifest.contains("libm = { version = \"0.2\", interface = \"interfaces/libm.clri\" }"),
+            "rust interop template should include libm version+interface dependency"
+        );
+
+        let main_path = tmp.path().join(project_name).join("src/main.clrs");
+        let main_content = fs::read_to_string(&main_path).expect("failed to read generated main.clrs");
+        assert!(
+            main_content.contains("(:rust [libm :as m])"),
+            "rust interop template should include :rust ns import"
+        );
+        assert!(
+            !main_content.contains("(use rust.libm)"),
+            "rust interop template should avoid redundant use rust import"
+        );
+
+        let interface_path = tmp.path().join(project_name).join("interfaces/libm.clri");
+        let interface_content = fs::read_to_string(&interface_path).expect("failed to read generated libm.clri");
+        assert!(
+            interface_content.contains("(interface libm"),
+            "rust interop template should generate libm.clri interface file"
+        );
     }
 }

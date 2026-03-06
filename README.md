@@ -174,6 +174,20 @@ runtime code, REPL/CLI code, and first-party test/debug scripts.
   `clorus run --legacy-run`.
 - `clorus repl` also runs on the JIT execution path by default.
 
+## Rust Interop (Current)
+
+- Canonical file/module import style is `ns` + `:rust`:
+
+```clojure
+(ns main
+  (:rust [libm :as m]))
+```
+
+- In interactive REPL usage, `(use rust.<lib>)` is still supported for compatibility.
+- Preferred interop contract file is `.clri` (legacy `.clorus-ffi` remains supported).
+- Canonical status and limits are tracked in:
+  - `docs/RUST_INTEROP_STATUS.md`
+
 ### Example Workflow
 
 ```bash

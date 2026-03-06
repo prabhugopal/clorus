@@ -56,10 +56,50 @@ fn main() {
         "new" => {
             if args.len() < 3 {
                 eprintln!("Error: 'clorus new' requires a project name");
-                eprintln!("Usage: clorus new <name>");
+                eprintln!("Usage: clorus new <name> [--template basic|rust-interop] [--rust-interop]");
                 std::process::exit(1);
             }
-            commands::new(&args[2])
+
+            let mut template = commands::NewTemplate::Basic;
+            let mut i = 3usize;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--rust-interop" => {
+                        template = commands::NewTemplate::RustInterop;
+                        i += 1;
+                    }
+                    "--template" => {
+                        let value = args.get(i + 1).ok_or_else(|| {
+                            "Missing template value after --template (expected basic or rust-interop)"
+                                .to_string()
+                        });
+                        match value {
+                            Ok(v) => {
+                                template = match v.as_str() {
+                                    "basic" => commands::NewTemplate::Basic,
+                                    "rust-interop" => commands::NewTemplate::RustInterop,
+                                    other => {
+                                        return eprintln_and_exit(format!(
+                                            "Unknown template '{}'. Expected: basic, rust-interop",
+                                            other
+                                        ));
+                                    }
+                                };
+                                i += 2;
+                            }
+                            Err(e) => return eprintln_and_exit(e),
+                        }
+                    }
+                    unknown => {
+                        return eprintln_and_exit(format!(
+                            "Unknown option for 'new': {}",
+                            unknown
+                        ));
+                    }
+                }
+            }
+
+            commands::new_with_template(&args[2], template)
         }
         "build" => {
             // Check for --workspace flag
@@ -177,6 +217,8 @@ fn print_help() {
     println!();
     println!("COMMANDS:");
     println!("    new <name>    Create a new Clorus project");
+    println!("                    --template basic|rust-interop");
+    println!("                    --rust-interop  Shortcut for --template rust-interop");
     println!("    build         Compile the current project");
     println!("                    --workspace  Build all workspace members");
     println!("    run           Run the current project (JIT by default)");
@@ -207,6 +249,8 @@ fn print_help() {
     println!();
     println!("EXAMPLES:");
     println!("    clorus new my-project       Create a new project");
+    println!("    clorus new my-app --rust-interop  Create crates.io Rust interop starter");
+    println!("    clorus new my-app --template rust-interop");
     println!("    clorus run                  Run with JIT (default)");
     println!("    clorus run --legacy-run     Run with legacy compile+execute path");
     println!("    clorus run arg1 arg2        Run with arguments passed to -main");
@@ -221,4 +265,9 @@ fn print_help() {
     println!("    clorus clean --workspace    Clean all workspace members");
     println!();
     println!("See https://github.com/yourusername/clorus for more information");
+}
+
+fn eprintln_and_exit(message: String) {
+    eprintln!("Error: {}", message);
+    std::process::exit(1);
 }

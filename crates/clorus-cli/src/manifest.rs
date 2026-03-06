@@ -275,8 +275,16 @@ pub enum RustDependency {
         #[serde(deserialize_with = "deserialize_interface")]
         interface: InterfaceSpec,
     },
+    WithVersionInterface {
+        version: String,
+        #[serde(deserialize_with = "deserialize_interface")]
+        interface: InterfaceSpec,
+    },
     Path {
         path: String,
+    },
+    Version {
+        version: String,
     },
     Simple(String),
 }
@@ -324,6 +332,8 @@ impl RustDependency {
         match self {
             RustDependency::WithInterface { path, .. } => Some(path),
             RustDependency::Path { path } => Some(path),
+            RustDependency::WithVersionInterface { .. } => None,
+            RustDependency::Version { .. } => None,
             RustDependency::Simple(_) => None,
         }
     }
@@ -331,6 +341,8 @@ impl RustDependency {
     pub fn get_version(&self) -> Option<&str> {
         match self {
             RustDependency::Simple(version) => Some(version),
+            RustDependency::Version { version } => Some(version),
+            RustDependency::WithVersionInterface { version, .. } => Some(version),
             _ => None,
         }
     }
@@ -338,6 +350,7 @@ impl RustDependency {
     pub fn get_interface(&self) -> Option<InterfaceSpec> {
         match self {
             RustDependency::WithInterface { interface, .. } => Some(interface.clone()),
+            RustDependency::WithVersionInterface { interface, .. } => Some(interface.clone()),
             _ => None,
         }
     }
@@ -512,5 +525,46 @@ demo-lib = { path = "../demo-lib", interface = "interfaces/demo-lib.clri" }
             dep.get_interface(),
             Some(InterfaceSpec::Path(ref p)) if p == "interfaces/demo-lib.clri"
         ));
+    }
+
+    #[test]
+    fn rust_dependency_version_with_interface_parses() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+libm = { version = "0.2", interface = "interfaces/libm.clri" }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let dep = manifest
+            .rust_dependencies
+            .get("libm")
+            .expect("libm dependency should exist");
+        assert_eq!(dep.get_version(), Some("0.2"));
+        assert!(matches!(
+            dep.get_interface(),
+            Some(InterfaceSpec::Path(ref p)) if p == "interfaces/libm.clri"
+        ));
+    }
+
+    #[test]
+    fn rust_dependency_version_with_auto_interface_parses() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+libm = { version = "0.2", interface = true }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let dep = manifest
+            .rust_dependencies
+            .get("libm")
+            .expect("libm dependency should exist");
+        assert_eq!(dep.get_version(), Some("0.2"));
+        assert!(matches!(dep.get_interface(), Some(InterfaceSpec::Auto)));
     }
 }
