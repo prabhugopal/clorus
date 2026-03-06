@@ -107,6 +107,7 @@ The CLI/rust-ffi integration tests now cover:
 - Rust wrapper export symbols are dependency-scoped (e.g., `clorus_<dep>__<fn>`) to avoid collisions with core runtime FFI names
 - local path auto-parse E2E regression covers dependency-scoped export generation for collision-prone names (e.g., `add`, `multiply`)
 - explicit interface (`interface = true`) E2E regression covers dependency-scoped export generation for collision-prone names
+- explicit interface + `:rust` override E2E regression also enforces dependency-scoped export generation
 - codegen regression covers coexistence of core intrinsics and same-named Rust exports (e.g., core `clorus_add` and Rust `add`)
 - local path auto-parse with unsupported-signature filtering
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
