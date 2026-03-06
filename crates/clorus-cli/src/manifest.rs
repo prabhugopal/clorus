@@ -631,4 +631,22 @@ libm = { version = "0.2", interface = false }
             "serialized manifest should preserve explicit interface=false"
         );
     }
+
+    #[test]
+    fn rust_dependency_path_interface_false_round_trips_as_false() {
+        let toml = r#"
+[package]
+name = "demo"
+version = "0.1.0"
+
+[rust-dependencies]
+demo-lib = { path = "../demo-lib", interface = false }
+"#;
+        let manifest: Manifest = toml::from_str(toml).expect("manifest should parse");
+        let serialized = toml::to_string(&manifest).expect("manifest should serialize");
+        assert!(
+            serialized.contains("interface = false"),
+            "serialized manifest should preserve explicit interface=false for path dependencies"
+        );
+    }
 }

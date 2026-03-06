@@ -1707,6 +1707,18 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_disabled_returns_internal_guard_error() {
+        let err = RustFfiProcessor::resolve_interface_path(
+            "demo-lib",
+            crate::manifest::InterfaceSpec::Disabled,
+        )
+        .expect_err("disabled interface spec should not be resolved directly");
+
+        assert!(err.contains("demo-lib"));
+        assert!(err.contains("interface=false"));
+    }
+
+    #[test]
     fn resolve_interface_path_explicit_rejects_directory_with_context() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
