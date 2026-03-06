@@ -1467,6 +1467,27 @@ mod tests {
     }
 
     #[test]
+    fn resolve_interface_path_auto_uses_legacy_when_clri_absent() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_legacy_{}", unique));
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+        std::fs::write(iface_dir.join("libm.clorus-ffi"), "(interface libm)")
+            .expect("write legacy interface");
+
+        let resolved = with_cwd(&root, || {
+            RustFfiProcessor::resolve_interface_path("libm", crate::manifest::InterfaceSpec::Auto)
+                .expect("auto resolve should find legacy interface when clri is absent")
+        });
+        let _ = std::fs::remove_dir_all(root);
+
+        assert_eq!(resolved, "interfaces/libm.clorus-ffi");
+    }
+
+    #[test]
     fn resolve_interface_path_auto_reports_clear_error_when_missing() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1538,6 +1559,29 @@ mod tests {
         )
         .expect("legacy extension should be accepted");
         assert_eq!(resolved, "interfaces/demo-lib.clorus-ffi");
+    }
+
+    #[test]
+    fn resolve_interface_path_explicit_rejects_directory_with_context() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_rustffi_iface_dir_{}", unique));
+        let iface_dir = root.join("interfaces").join("demo-lib.clri");
+        std::fs::create_dir_all(&iface_dir).expect("create interface directory");
+
+        let err = with_cwd(&root, || {
+            RustFfiProcessor::resolve_interface_path(
+                "demo-lib",
+                crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.clri".to_string()),
+            )
+            .expect_err("expected directory path rejection")
+        });
+        let _ = std::fs::remove_dir_all(root);
+
+        assert!(err.contains("Interface path for 'demo-lib' points to a directory"));
+        assert!(err.contains("interfaces/demo-lib.clri"));
     }
 
     #[test]
