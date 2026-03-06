@@ -83,6 +83,16 @@ impl RustFfiProcessor {
             .collect()
     }
 
+    fn likely_impl_method_only_api(src_path: &Path) -> bool {
+        let Ok(source) = fs::read_to_string(src_path) else {
+            return false;
+        };
+
+        // Heuristic: impl blocks with pub methods are present.
+        // Auto-discovery currently focuses on top-level pub fn items.
+        source.contains("impl ") && source.contains("pub fn ")
+    }
+
     fn resolve_interface_path(
         dep_name: &str,
         interface_spec: crate::manifest::InterfaceSpec,
@@ -245,6 +255,11 @@ impl RustFfiProcessor {
         if generator.functions.is_empty() {
             if verbose {
                 println!("      No public functions found - creating empty wrapper");
+                if Self::likely_impl_method_only_api(&lib_src) {
+                    println!(
+                        "      Hint: impl methods are not auto-discovered. Expose free bridge functions or use an interface + bridge API."
+                    );
+                }
             }
         } else if verbose {
             println!("      Found {} public functions", generator.functions.len());
@@ -313,6 +328,12 @@ impl RustFfiProcessor {
             let mut error = format!(
                 "Rust dependency '{}' resolved from registry but no FFI-compatible functions were discovered in its lib target. Add an interface file (interfaces/{}.clri) or use a local bridge crate.",
                 name, name
+            );
+            error.push_str(
+                "\nCommon cause: API is primarily impl/associated methods; auto-discovery currently targets top-level pub fn.",
+            );
+            error.push_str(
+                "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
             );
             if !unsupported_details.is_empty() {
                 error.push_str("\nUnsupported signature examples:");
@@ -850,5 +871,30 @@ mod tests {
 
         assert!(err.contains("Interface auto-discovery failed"));
         assert!(err.contains("interfaces/missing-lib.clri"));
+    }
+
+    #[test]
+    fn likely_impl_method_only_api_detects_impl_patterns() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("clorus_impl_detect_{}", unique));
+        std::fs::create_dir_all(&root).expect("create temp root");
+        let src = root.join("lib.rs");
+        std::fs::write(
+            &src,
+            r#"
+pub struct Foo;
+impl Foo {
+    pub fn new() -> Self { Foo }
+}
+"#,
+        )
+        .expect("write source");
+
+        let detected = RustFfiProcessor::likely_impl_method_only_api(&src);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(detected);
     }
 }
