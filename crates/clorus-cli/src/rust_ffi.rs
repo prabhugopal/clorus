@@ -1529,7 +1529,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
 
         assert!(err.contains("Interface auto-discovery failed"));
+        assert!(err.contains("missing-lib"));
         assert!(err.contains("interfaces/missing-lib.clri"));
+        assert!(err.contains("interfaces/missing-lib.clorus-ffi"));
     }
 
     #[test]
