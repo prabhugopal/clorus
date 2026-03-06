@@ -187,6 +187,10 @@ impl FfiGenerator {
         match rust_type {
             "f32" => "f32".to_string(),
             "f64" => "f64".to_string(),
+            "i8" => "i8".to_string(),
+            "u8" => "u8".to_string(),
+            "i16" => "i16".to_string(),
+            "u16" => "u16".to_string(),
             "i32" => "i32".to_string(),
             "u32" => "u32".to_string(),
             "i64" => "i64".to_string(),
@@ -204,7 +208,18 @@ impl FfiGenerator {
 
     fn c_to_rust_conversion(&self, name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+            "f32"
+            | "f64"
+            | "i8"
+            | "u8"
+            | "i16"
+            | "u16"
+            | "i32"
+            | "u32"
+            | "i64"
+            | "u64"
+            | "bool"
+            | "*mut u8" => {
                 format!("    let {}_rust = {};", name, name)
             }
             "*const u8" => format!("    let {}_rust = {} as *const u8;", name, name),
@@ -220,7 +235,18 @@ impl FfiGenerator {
 
     fn rust_to_c_conversion(&self, name: &str, rust_type: &str) -> String {
         match rust_type {
-            "f32" | "f64" | "i32" | "u32" | "i64" | "u64" | "bool" | "*mut u8" => {
+            "f32"
+            | "f64"
+            | "i8"
+            | "u8"
+            | "i16"
+            | "u16"
+            | "i32"
+            | "u32"
+            | "i64"
+            | "u64"
+            | "bool"
+            | "*mut u8" => {
                 format!("    {}", name)
             }
             "*const u8" => format!("    {} as *mut u8", name),
@@ -260,10 +286,17 @@ impl FfiGenerator {
                     match p.type_name.as_str() {
                         "f32" => "self.context.f32_type().into()".to_string(),
                         "f64" => "f64_type.into()".to_string(),
+                        "i8" => "self.context.i8_type().into()".to_string(),
+                        "u8" => "self.context.i8_type().into()".to_string(),
+                        "i16" => "self.context.i16_type().into()".to_string(),
+                        "u16" => "self.context.i16_type().into()".to_string(),
                         "i32" => "self.context.i32_type().into()".to_string(),
                         "u32" => "self.context.i32_type().into()".to_string(),
                         "i64" => "self.context.i64_type().into()".to_string(),
                         "u64" => "self.context.i64_type().into()".to_string(),
+                        "bool" => "self.context.bool_type().into()".to_string(),
+                        "*mut u8" => "i8_ptr_type.into()".to_string(),
+                        "*const u8" => "i8_ptr_type.into()".to_string(),
                         "isize" => "self.context.i64_type().into()".to_string(),
                         "usize" => "self.context.i64_type().into()".to_string(),
                         "String" => "i8_ptr_type.into()".to_string(),
@@ -276,10 +309,17 @@ impl FfiGenerator {
             let return_type = match func.return_type.as_str() {
                 "f32" => "self.context.f32_type()",
                 "f64" => "f64_type",
+                "i8" => "self.context.i8_type()",
+                "u8" => "self.context.i8_type()",
+                "i16" => "self.context.i16_type()",
+                "u16" => "self.context.i16_type()",
                 "i32" => "self.context.i32_type()",
                 "u32" => "self.context.i32_type()",
                 "i64" => "self.context.i64_type()",
                 "u64" => "self.context.i64_type()",
+                "bool" => "self.context.bool_type()",
+                "*mut u8" => "i8_ptr_type",
+                "*const u8" => "i8_ptr_type",
                 "isize" => "self.context.i64_type()",
                 "usize" => "self.context.i64_type()",
                 "String" => "i8_ptr_type",
@@ -398,5 +438,33 @@ mod tests {
         assert_eq!(generator.functions[0].return_type, "*const u8");
 
         let _ = std::fs::remove_file(&temp_file);
+    }
+
+    #[test]
+    fn test_generate_wrapper_supports_narrow_ints_and_const_pointer() {
+        let mut generator = FfiGenerator::new();
+        generator.functions.push(FunctionInfo {
+            name: "demo".to_string(),
+            params: vec![
+                ParamInfo {
+                    name: "a".to_string(),
+                    type_name: "i8".to_string(),
+                },
+                ParamInfo {
+                    name: "b".to_string(),
+                    type_name: "u16".to_string(),
+                },
+                ParamInfo {
+                    name: "p".to_string(),
+                    type_name: "*const u8".to_string(),
+                },
+            ],
+            return_type: "*const u8".to_string(),
+        });
+
+        let wrappers = generator.generate_c_wrappers();
+        assert!(wrappers.contains("pub extern \"C\" fn clorus_demo(a: i8, b: u16, p: *mut u8) -> *mut u8"));
+        assert!(wrappers.contains("let p_rust = p as *const u8;"));
+        assert!(wrappers.contains("result as *mut u8"));
     }
 }
