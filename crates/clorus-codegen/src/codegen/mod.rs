@@ -720,9 +720,49 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(())
     }
 
+    fn rust_library_lookup_keys(name: &str) -> Vec<String> {
+        let mut keys = Vec::new();
+        let raw = name.to_string();
+        let no_prefix = raw.strip_prefix("rust.").unwrap_or(&raw).to_string();
+        let hyphen = no_prefix.replace('_', "-");
+        let underscore = no_prefix.replace('-', "_");
+
+        keys.push(raw.clone());
+        keys.push(no_prefix.clone());
+        keys.push(format!("rust.{}", no_prefix));
+
+        if hyphen != no_prefix {
+            keys.push(hyphen.clone());
+            keys.push(format!("rust.{}", hyphen));
+        }
+        if underscore != no_prefix {
+            keys.push(underscore.clone());
+            keys.push(format!("rust.{}", underscore));
+        }
+
+        let mut unique = Vec::new();
+        for key in keys {
+            if !unique.contains(&key) {
+                unique.push(key);
+            }
+        }
+        unique
+    }
+
+    fn resolve_rust_library(&self, name: &str) -> Option<RustLibrary> {
+        for key in Self::rust_library_lookup_keys(name) {
+            if let Some(lib) = self.rust_libraries.get(&key) {
+                return Some(lib.clone());
+            }
+        }
+        None
+    }
+
     /// Register a Rust FFI library so its functions can be used
     pub fn register_rust_library(&mut self, lib: RustLibrary) {
-        self.rust_libraries.insert(lib.name.clone(), lib);
+        for key in Self::rust_library_lookup_keys(&lib.name) {
+            self.rust_libraries.insert(key, lib.clone());
+        }
     }
 
     /// Register a namespace as coming from a .clip package (Phase 4)
@@ -6457,31 +6497,13 @@ impl<'ctx> CodeGen<'ctx> {
 
                         // Not a Clorus function - try Rust FFI libraries
                         let rust_lib = self
-                            .rust_libraries
-                            .get(namespace_or_alias)
-                            .cloned()
+                            .resolve_rust_library(namespace_or_alias)
                             .or_else(|| {
-                                if namespace_or_alias.starts_with("rust.") {
-                                    self.rust_libraries
-                                        .get(namespace_or_alias.strip_prefix("rust.").unwrap())
-                                        .cloned()
-                                } else {
-                                    None
-                                }
-                            })
-                            .or_else(|| {
-                                // Check if this is an alias for a rust.* module
-                                self.namespace.aliases.get(namespace_or_alias).and_then(
-                                    |resolved| {
-                                        if resolved.starts_with("rust.") {
-                                            self.rust_libraries
-                                                .get(resolved.strip_prefix("rust.").unwrap())
-                                                .cloned()
-                                        } else {
-                                            None
-                                        }
-                                    },
-                                )
+                                // Check if this is an alias for a rust.* module.
+                                self.namespace
+                                    .aliases
+                                    .get(namespace_or_alias)
+                                    .and_then(|resolved| self.resolve_rust_library(resolved))
                             });
 
                         if let Some(lib) = rust_lib {
@@ -7120,7 +7142,7 @@ impl<'ctx> CodeGen<'ctx> {
                     }
 
                     // Declare FFI functions for this library
-                    if let Some(lib) = self.rust_libraries.get(&rust_import.library).cloned() {
+                    if let Some(lib) = self.resolve_rust_library(&rust_import.library) {
                         self.declare_rust_library_functions(&lib)?;
                     }
                 }
@@ -7198,7 +7220,7 @@ impl<'ctx> CodeGen<'ctx> {
                 if module.starts_with("rust.") {
                     let lib_name = module.strip_prefix("rust.").unwrap();
 
-                    if let Some(lib) = self.rust_libraries.get(lib_name).cloned() {
+                    if let Some(lib) = self.resolve_rust_library(lib_name) {
                         // Auto-declare all functions from this library
                         self.declare_rust_library_functions(&lib)?;
                     } else {
@@ -7398,6 +7420,22 @@ mod tests {
 
         // Verify a lambda function was created
         assert!(codegen.functions.contains_key("_lambda_0"));
+    }
+
+    #[test]
+    fn test_rust_library_resolution_hyphen_underscore_prefix_variants() {
+        let context = Context::create();
+        let mut codegen = CodeGen::new(&context, "test");
+
+        codegen.register_rust_library(RustLibrary {
+            name: "egui-hello".to_string(),
+            functions: vec![],
+        });
+
+        assert!(codegen.resolve_rust_library("egui-hello").is_some());
+        assert!(codegen.resolve_rust_library("egui_hello").is_some());
+        assert!(codegen.resolve_rust_library("rust.egui-hello").is_some());
+        assert!(codegen.resolve_rust_library("rust.egui_hello").is_some());
     }
 
     #[test]
