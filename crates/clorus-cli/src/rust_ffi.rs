@@ -2641,6 +2641,69 @@ auto-parse-lib = { path = "auto-parse-lib" }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_rejects_when_no_supported_functions() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_autoparse_none_supported_{}",
+            unique
+        ));
+        let dep_dir = root.join("auto-parse-none-supported-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-none-supported-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn unsupported_vec(xs: Vec<u8>) -> Vec<u8> { xs }
+pub fn unsupported_ptr(p: *mut i32) -> *mut i32 { p }
+pub fn unsupported_return_only() -> Vec<u8> { Vec::new() }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected no-supported-functions rejection"),
+            Err(e) => e,
+        };
+
+        assert!(err.contains("Rust dependency 'auto-parse-none-supported-lib':"));
+        assert!(err.contains("none are FFI-compatible after signature filtering"));
+        assert!(err.contains("unsupported param"));
+        assert!(err.contains("unsupported return type"));
+        assert!(err.contains("*mut i32"));
+        assert!(err.contains("`*mut u8` or `*const u8`"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_parse_supports_bool_string_and_pointer() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
