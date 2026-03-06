@@ -92,3 +92,12 @@ Today, reliable production path is:
 - Foundation: **implemented**
 - Production for selected APIs: **usable**
 - Full seamless Rust interop: **in progress**
+
+## Current E2E Coverage
+
+The CLI/rust-ffi integration tests now cover:
+
+- local path dependency + `.clri` auto interface + extended numeric signatures
+- local path dependency + `.clri` `:rust` override for impl/associated methods
+- local path auto-parse with unsupported-signature filtering
+- `interface = true` missing-interface diagnostics with explicit searched paths
