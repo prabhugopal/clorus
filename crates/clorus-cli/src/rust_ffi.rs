@@ -619,13 +619,42 @@ impl RustFfiProcessor {
         metadata: &CargoMetadata,
         dep_name: &str,
     ) -> Result<(PathBuf, String), String> {
-        let package = metadata
+        let mut candidates: Vec<&CargoPackage> = metadata
+            .packages
+            .iter()
+            .filter(|p| {
+                p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+")
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return Err(format!(
+                "Registry dependency '{}' was not found in cargo metadata package set. \
+Check the crate name/version in Clorus.toml and ensure cargo metadata can resolve the dependency.",
+                dep_name
+            ));
+        }
+
+        candidates.sort_by(|a, b| Self::compare_version_like(&b.version, &a.version));
+
+        for package in candidates {
+            if let Some(lib_target) = package
+                .targets
+                .iter()
+                .find(|t| t.kind.iter().any(|k| k == "lib"))
+            {
+                return Ok((PathBuf::from(&lib_target.src_path), package.version.clone()));
+            }
+        }
+
+        let resolved = metadata
             .packages
             .iter()
             .filter(|p| {
                 p.name == dep_name && p.source.as_deref().unwrap_or("").starts_with("registry+")
             })
             .max_by(|a, b| Self::compare_version_like(&a.version, &b.version))
+            .map(|p| p.version.clone())
             .ok_or_else(|| {
                 format!(
                     "Registry dependency '{}' was not found in cargo metadata package set. \
@@ -633,21 +662,12 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
                     dep_name
                 )
             })?;
-
-        let lib_target = package
-            .targets
-            .iter()
-            .find(|t| t.kind.iter().any(|k| k == "lib"))
-            .ok_or_else(|| {
-                format!(
-                    "Registry dependency '{}' (resolved {}) has no lib target. \
+        Err(format!(
+            "Registry dependency '{}' (resolved {}) has no lib target. \
 Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
 an explicit interface for a bridge exposing extern \"C\" functions.",
-                    dep_name, package.version
-                )
-            })?;
-
-        Ok((PathBuf::from(&lib_target.src_path), package.version.clone()))
+            dep_name, resolved
+        ))
     }
 
     /// Generate Cargo.toml for the wrapper crate
@@ -1276,6 +1296,41 @@ mod tests {
             RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
         assert_eq!(version, "0.10.0");
         assert_eq!(src, PathBuf::from("/tmp/registry/v0_10/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_prefers_highest_registry_version_with_lib_target() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "0.10.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bin".to_string()],
+                        src_path: "/tmp/registry/v0_10/src/main.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "0.9.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_9/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.9.2");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_9/src/lib.rs"));
     }
 
     #[test]
