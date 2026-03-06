@@ -116,6 +116,7 @@ The CLI/rust-ffi integration tests now cover:
 - empty interface-definition rejection (must define at least one `(fn ...)`)
 - invalid `:rust` path-symbol rejection (e.g. malformed `Type::method` paths)
 - malformed interface parse diagnostics with file-path + line/column context surfaced through `process_dependencies`
+- malformed interface tokenize diagnostics include interface-file path context in `process_dependencies`
 - wrapper compile failures from interface-driven generation include interface-file path context
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
 - explicit interface path must be a file (directory-path misuse rejected with clear diagnostics)

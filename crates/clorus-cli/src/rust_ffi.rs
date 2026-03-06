@@ -3144,6 +3144,68 @@ bad-rust-symbol-lib = { path = "bad-rust-symbol-lib", interface = "interfaces/ba
     }
 
     #[test]
+    fn process_dependencies_e2e_reports_interface_tokenize_context() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_interface_tokenize_context_{}",
+            unique
+        ));
+        let dep_dir = root.join("bad-token-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "bad-token-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 1 }\n")
+            .expect("write dep lib");
+
+        // Deliberately malformed tokenizer input: unterminated string.
+        std::fs::write(
+            iface_dir.join("bad-token-lib.clri"),
+            r#"(interface bad-token-lib
+  (fn ping [] :i32 :rust "unterminated)
+)"#,
+        )
+        .expect("write malformed interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+bad-token-lib = { path = "bad-token-lib", interface = "interfaces/bad-token-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected tokenize failure"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Failed to tokenize interface file"));
+        assert!(err.contains("interfaces/bad-token-lib.clri"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_reports_interface_parse_location_context() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
