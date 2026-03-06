@@ -2998,6 +2998,84 @@ unsupported-return-lib = { path = "unsupported-return-lib", interface = "interfa
     }
 
     #[test]
+    fn process_dependencies_e2e_rejects_unsupported_interface_pointer_type() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_unsupported_interface_pointer_type_{}",
+            unique
+        ));
+        let dep_dir = root.join("unsupported-pointer-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "unsupported-pointer-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn ptr_roundtrip(p: *mut i32) -> *mut i32 { p }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("unsupported-pointer-lib.clri"),
+            r#"(interface unsupported-pointer-lib
+  (fn ptr-roundtrip [p :ptr-i32] :ptr-i32)
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+unsupported-pointer-lib = { path = "unsupported-pointer-lib", interface = "interfaces/unsupported-pointer-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected unsupported interface pointer-type rejection"),
+            Err(e) => e,
+        });
+        assert!(
+            err.contains("unsupported param type"),
+            "expected unsupported param-type rejection, got: {}",
+            err
+        );
+        assert!(
+            err.contains("ptr-i32"),
+            "expected unsupported pointer-ish type context, got: {}",
+            err
+        );
+        assert!(
+            err.contains("unsupported-pointer-lib.clri"),
+            "expected interface path context, got: {}",
+            err
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_interface_uses_legacy_when_clri_absent() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
