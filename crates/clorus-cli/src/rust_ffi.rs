@@ -703,6 +703,14 @@ impl RustFfiProcessor {
         }
         let is_registry_source = |source: Option<&str>| source.unwrap_or("").trim().starts_with("registry+");
         let has_lib_kind = |target: &CargoTarget| target.kind.iter().any(|k| k.trim() == "lib");
+        let normalized_pkg_id = |id: &str| -> String {
+            let trimmed = id.trim();
+            if trimmed.is_empty() {
+                "<unknown>".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        };
         let normalized_target_kinds = |package: &CargoPackage| -> String {
             let mut kinds = package
                 .targets
@@ -719,8 +727,7 @@ impl RustFfiProcessor {
         let normalized_version = |package: &CargoPackage, dep_name: &str| -> Result<String, String> {
             let version = package.version.trim();
             if version.is_empty() {
-                let pkg_id = package.id.trim();
-                let pkg_id = if pkg_id.is_empty() { "<unknown>" } else { pkg_id };
+                let pkg_id = normalized_pkg_id(&package.id);
                 return Err(format!(
                     "Registry dependency '{}' resolved package '{}' had an empty version in cargo metadata. \
 Re-run cargo metadata and check dependency graph consistency.",
@@ -766,10 +773,11 @@ Re-run cargo metadata and check dependency graph consistency.",
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .unwrap_or("<unknown>");
+                let pkg_id = normalized_pkg_id(&package.id);
                 return Err(format!(
                     "Registry dependency '{}' resolved to non-registry package source '{}' (resolved {}, pkg id {}). \
 Check Cargo patch/replace/path overrides or use a local path dependency in Clorus.toml.",
-                    dep_name, source, resolved_version, package.id
+                    dep_name, source, resolved_version, pkg_id
                 ));
             }
 
@@ -2954,6 +2962,46 @@ mod tests {
         assert!(err.contains("path+file:///tmp/local/demo-math"));
         assert!(err.contains("pkg id path+file:///tmp/local/demo-math#0.2.0"));
         assert!(err.contains("use a local path dependency in Clorus.toml"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_normalizes_pkg_id_in_non_registry_diagnostic() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "  path+file:///tmp/local/demo-math#0.2.0   ".to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some("path+file:///tmp/local/demo-math".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/local/demo-math/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg: "path+file:///tmp/local/demo-math#0.2.0".to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root points to non-registry source");
+        assert!(err.contains("pkg id path+file:///tmp/local/demo-math#0.2.0"));
+        assert!(!err.contains("pkg id   path+file:///tmp/local/demo-math#0.2.0"));
     }
 
     #[test]
