@@ -796,7 +796,8 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
         };
         let dep_pkg_id_for_error: String;
         let dep_pkg_id = if let Some(root_id) = resolve.root.as_ref() {
-            let Some(root_node) = resolve.nodes.iter().find(|n| &n.id == root_id) else {
+            let mut root_nodes = resolve.nodes.iter().filter(|n| &n.id == root_id);
+            let Some(root_node) = root_nodes.next() else {
                 return Err(format!(
                     "Registry dependency '{}' could not be resolved from cargo metadata: \
 resolve.root '{}' was present but no matching resolve node was found. \
@@ -804,6 +805,13 @@ Re-run cargo metadata and check dependency graph consistency.",
                     dep_name, root_id
                 ));
             };
+            if root_nodes.next().is_some() {
+                return Err(format!(
+                    "Registry dependency '{}' has inconsistent cargo metadata: \
+resolve.root '{}' matched multiple resolve nodes. Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, root_id
+                ));
+            }
             let mut root_matches = root_node
                 .deps
                 .iter()
@@ -1961,6 +1969,37 @@ mod tests {
             .expect_err("should fail when resolve root node is missing");
         assert!(err.contains("resolve.root 'path+file:///tmp/wrapper#0.1.0'"));
         assert!(err.contains("no matching resolve node was found"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_resolve_root_matches_multiple_nodes() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                name: "demo_wrapper".to_string(),
+                version: "0.1.0".to_string(),
+                source: None,
+                targets: vec![],
+            }],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![
+                    CargoResolveNode {
+                        id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                        deps: vec![],
+                    },
+                    CargoResolveNode {
+                        id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                        deps: vec![],
+                    },
+                ],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when resolve root matches multiple nodes");
+        assert!(err.contains("matched multiple resolve nodes"));
+        assert!(err.contains("resolve.root 'path+file:///tmp/wrapper#0.1.0'"));
     }
 
     #[test]
