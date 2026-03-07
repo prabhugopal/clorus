@@ -55,6 +55,7 @@ Notes:
 - Non-registry source diagnostics normalize source strings (trimmed; blank -> `<unknown>`).
 - Resolver dependency-name matching is trim-normalized (metadata edge names, package names, and incoming dependency argument).
 - Resolved lib-target `src_path` is trim-validated; empty lib source paths now fail explicitly as metadata inconsistency.
+- Lib-target kind detection is trim-normalized (`" lib "` is treated as `lib`).
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
 - If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
 - If `resolve.root` is present but missing its node, resolver now errors explicitly (metadata inconsistency).

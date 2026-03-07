@@ -698,11 +698,12 @@ impl RustFfiProcessor {
             );
         }
         let is_registry_source = |source: Option<&str>| source.unwrap_or("").trim().starts_with("registry+");
+        let has_lib_kind = |target: &CargoTarget| target.kind.iter().any(|k| k.trim() == "lib");
         let resolved_lib_src = |package: &CargoPackage, dep_name: &str| -> Result<PathBuf, String> {
             let Some(lib_target) = package
                 .targets
                 .iter()
-                .find(|t| t.kind.iter().any(|k| k == "lib"))
+                .find(|t| has_lib_kind(t))
             else {
                 let resolved_kinds = package
                     .targets
@@ -765,7 +766,7 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
         candidates.sort_by(|a, b| Self::compare_version_like(&b.version, &a.version));
 
         for package in candidates {
-            if package.targets.iter().any(|t| t.kind.iter().any(|k| k == "lib")) {
+            if package.targets.iter().any(&has_lib_kind) {
                 return Ok((resolved_lib_src(package, dep_name)?, package.version.clone()));
             }
         }
@@ -1683,6 +1684,51 @@ mod tests {
                     targets: vec![CargoTarget {
                         kind: vec!["lib".to_string()],
                         src_path: "/tmp/registry/v0_9_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_supports_whitespace_wrapped_lib_target_kind() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["  lib  ".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
                     }],
                 },
             ],
