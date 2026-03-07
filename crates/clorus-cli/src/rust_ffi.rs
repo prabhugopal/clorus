@@ -698,6 +698,38 @@ impl RustFfiProcessor {
             );
         }
         let is_registry_source = |source: Option<&str>| source.unwrap_or("").trim().starts_with("registry+");
+        let resolved_lib_src = |package: &CargoPackage, dep_name: &str| -> Result<PathBuf, String> {
+            let Some(lib_target) = package
+                .targets
+                .iter()
+                .find(|t| t.kind.iter().any(|k| k == "lib"))
+            else {
+                let resolved_kinds = package
+                    .targets
+                    .iter()
+                    .flat_map(|t| t.kind.iter().cloned())
+                    .collect::<Vec<String>>();
+                return Err(format!(
+                    "Registry dependency '{}' (resolved {}) has no lib target. \
+Available target kinds for resolved package: [{}]. \
+Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
+an explicit interface for a bridge exposing extern \"C\" functions.",
+                    dep_name,
+                    package.version,
+                    resolved_kinds.join(", ")
+                ));
+            };
+
+            let src = lib_target.src_path.trim();
+            if src.is_empty() {
+                return Err(format!(
+                    "Registry dependency '{}' (resolved {}) reported an empty lib src_path in cargo metadata. \
+Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, package.version
+                ));
+            }
+            Ok(PathBuf::from(src))
+        };
         if let Some(package) = Self::resolve_root_dependency_package(metadata, dep_name)? {
             if !is_registry_source(package.source.as_deref()) {
                 let source = package.source.as_deref().unwrap_or("<unknown>");
@@ -708,28 +740,7 @@ Check Cargo patch/replace/path overrides or use a local path dependency in Cloru
                 ));
             }
 
-            if let Some(lib_target) = package
-                .targets
-                .iter()
-                .find(|t| t.kind.iter().any(|k| k == "lib"))
-            {
-                return Ok((PathBuf::from(&lib_target.src_path), package.version.clone()));
-            }
-
-            let resolved_kinds = package
-                .targets
-                .iter()
-                .flat_map(|t| t.kind.iter().cloned())
-                .collect::<Vec<String>>();
-            return Err(format!(
-                "Registry dependency '{}' (resolved {}) has no lib target. \
-Available target kinds for resolved package: [{}]. \
-Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
-an explicit interface for a bridge exposing extern \"C\" functions.",
-                dep_name,
-                package.version,
-                resolved_kinds.join(", ")
-            ));
+            return Ok((resolved_lib_src(package, dep_name)?, package.version.clone()));
         }
 
         let mut candidates: Vec<&CargoPackage> = metadata
@@ -749,12 +760,8 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
         candidates.sort_by(|a, b| Self::compare_version_like(&b.version, &a.version));
 
         for package in candidates {
-            if let Some(lib_target) = package
-                .targets
-                .iter()
-                .find(|t| t.kind.iter().any(|k| k == "lib"))
-            {
-                return Ok((PathBuf::from(&lib_target.src_path), package.version.clone()));
+            if package.targets.iter().any(|t| t.kind.iter().any(|k| k == "lib")) {
+                return Ok((resolved_lib_src(package, dep_name)?, package.version.clone()));
             }
         }
 
@@ -1751,6 +1758,51 @@ mod tests {
             .expect_err("should fail when direct root dependency has no lib target");
         assert!(err.contains("Registry dependency 'demo-math' (resolved 0.2.0) has no lib target"));
         assert!(err.contains("Available target kinds for resolved package: [bin]"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_resolved_lib_target_has_empty_src_path() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "   ".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when resolved lib target has empty src_path");
+        assert!(err.contains("reported an empty lib src_path"));
+        assert!(err.contains("resolved 0.2.0"));
     }
 
     #[test]
