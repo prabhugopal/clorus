@@ -1387,6 +1387,41 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_prefers_release_over_prerelease_for_same_core() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "1.2.3-alpha.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v1_2_3_alpha_2/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    name: "demo-math".to_string(),
+                    version: "1.2.3".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v1_2_3/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "1.2.3");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v1_2_3/src/lib.rs"));
+    }
+
+    #[test]
     fn compare_version_like_handles_patch_width() {
         assert_eq!(
             RustFfiProcessor::compare_version_like("1.2.10", "1.2.2"),

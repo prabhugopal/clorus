@@ -35,6 +35,7 @@ Notes:
 - If the highest discovered registry version has no `lib` target, resolver falls back to the highest version that does have a `lib` target.
 - Version ordering now handles semver prerelease/build metadata for deterministic registry candidate selection.
 - Version ordering also tolerates `v`-prefixed version strings from metadata (`v1.2.3`).
+- Registry candidate selection prefers release over prerelease when core semver is the same (e.g. `1.2.3` over `1.2.3-alpha.2`).
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.
