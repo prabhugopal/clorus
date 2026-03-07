@@ -38,8 +38,10 @@ Notes:
 - Registry candidate selection prefers release over prerelease when core semver is the same (e.g. `1.2.3` over `1.2.3-alpha.2`).
 - Registry resolution now prefers the wrapper root's direct dependency edge from `cargo metadata resolve` over unrelated higher transitive versions.
 - If that direct resolved package is bin-only, build fails fast against that package (no silent fallback to unrelated transitive lib versions).
-- If `cargo metadata resolve.root` is absent, resolver uses a unique graph edge match for the dependency name when available, then falls back to version ordering.
+- If `cargo metadata resolve.root` is absent, resolver uses a unique graph edge match for the dependency name when available.
+- If there is no usable resolve graph context at all, resolver falls back to version ordering.
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
+- If `resolve.root` is absent and multiple package ids match the dependency name, resolver now errors as ambiguous (no silent highest-version pick).
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.
