@@ -821,8 +821,8 @@ resolve.root '{}' matched multiple resolve nodes. Re-run cargo metadata and chec
                         .deps
                         .iter()
                         .filter(|d| d.name == dep_name)
-                        .map(|d| d.pkg.as_str())
-                        .collect::<Vec<_>>()
+                        .map(|d| d.pkg.trim().to_string())
+                        .collect::<Vec<String>>()
                 });
             let Some(mut packages) = root_matches.take() else {
                 return Err(format!(
@@ -843,8 +843,8 @@ Root '{}' resolves to package ids: [{}]. Pin the dependency explicitly in Cargo/
                     packages.join(", ")
                 ));
             }
-            let pkg = packages[0];
-            dep_pkg_id_for_error = pkg.to_string();
+            let pkg = packages[0].clone();
+            dep_pkg_id_for_error = pkg.clone();
             pkg
         } else {
             // Some metadata shapes omit resolve.root. In that case, use a unique
@@ -854,8 +854,8 @@ Root '{}' resolves to package ids: [{}]. Pin the dependency explicitly in Cargo/
                 .iter()
                 .flat_map(|n| n.deps.iter())
                 .filter(|d| d.name == dep_name)
-                .map(|d| d.pkg.as_str())
-                .collect::<Vec<_>>();
+                .map(|d| d.pkg.trim().to_string())
+                .collect::<Vec<String>>();
             pkg_ids.sort_unstable();
             pkg_ids.dedup();
             if pkg_ids.is_empty() {
@@ -873,8 +873,8 @@ Resolved package ids: [{}]. Pin the dependency explicitly in Cargo/Clorus.toml o
                     dep_name, resolved
                 ));
             }
-            dep_pkg_id_for_error = pkg_ids[0].to_string();
-            pkg_ids[0]
+            dep_pkg_id_for_error = pkg_ids[0].clone();
+            pkg_ids[0].clone()
         };
         if dep_pkg_id.trim().is_empty() {
             return Err(format!(
@@ -1774,6 +1774,40 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_supports_root_missing_unique_edge_with_whitespace_package_id() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                    .to_string(),
+                name: "demo-math".to_string(),
+                version: "0.2.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["lib".to_string()],
+                    src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                }],
+            }],
+            resolve: Some(CargoResolve {
+                root: None,
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/consumer#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "  registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0 "
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
+    }
+
+    #[test]
     fn resolve_registry_lib_src_errors_when_root_missing_and_resolution_is_ambiguous() {
         let metadata = CargoMetadata {
             packages: vec![
@@ -2072,6 +2106,51 @@ mod tests {
 
         let (src, version) =
             RustFfiProcessor::resolve_registry_lib_src(&metadata, "math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_supports_root_edge_package_id_with_whitespace() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "  registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0  "
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
         assert_eq!(version, "0.2.0");
         assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
     }
