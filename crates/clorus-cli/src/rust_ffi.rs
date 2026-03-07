@@ -797,7 +797,12 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
         let dep_pkg_id_for_error: String;
         let dep_pkg_id = if let Some(root_id) = resolve.root.as_ref() {
             let Some(root_node) = resolve.nodes.iter().find(|n| &n.id == root_id) else {
-                return Ok(None);
+                return Err(format!(
+                    "Registry dependency '{}' could not be resolved from cargo metadata: \
+resolve.root '{}' was present but no matching resolve node was found. \
+Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, root_id
+                ));
             };
             let mut root_matches = root_node
                 .deps
@@ -812,7 +817,12 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
                         .collect::<Vec<_>>()
                 });
             let Some(mut packages) = root_matches.take() else {
-                return Ok(None);
+                return Err(format!(
+                    "Registry dependency '{}' could not be resolved from cargo metadata root '{}': \
+no dependency edge was present for '{}'. \
+Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, root_id, dep_name
+                ));
             };
             packages.sort_unstable();
             packages.dedup();
@@ -1839,6 +1849,57 @@ mod tests {
         assert!(err.contains("resolve graph pointed to package id"));
         assert!(err.contains("demo-math@0.2.0"));
         assert!(err.contains("missing from cargo metadata packages"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_resolve_root_node_is_missing() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                name: "demo_wrapper".to_string(),
+                version: "0.1.0".to_string(),
+                source: None,
+                targets: vec![],
+            }],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when resolve root node is missing");
+        assert!(err.contains("resolve.root 'path+file:///tmp/wrapper#0.1.0'"));
+        assert!(err.contains("no matching resolve node was found"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_root_edge_for_dependency_is_missing() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                name: "demo_wrapper".to_string(),
+                version: "0.1.0".to_string(),
+                source: None,
+                targets: vec![],
+            }],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "other-dep".to_string(),
+                        pkg: "registry+https://github.com/rust-lang/crates.io-index#other-dep@1.0.0"
+                            .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root edge for dependency is missing");
+        assert!(err.contains("no dependency edge was present for 'demo-math'"));
+        assert!(err.contains("root 'path+file:///tmp/wrapper#0.1.0'"));
     }
 
     #[test]
