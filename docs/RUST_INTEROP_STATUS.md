@@ -42,6 +42,7 @@ Notes:
 - If that direct resolved package is bin-only, build fails fast against that package (no silent fallback to unrelated transitive lib versions).
 - If `cargo metadata resolve.root` is absent, resolver uses a unique graph edge match for the dependency name when available.
 - If there is no usable resolve graph context at all, resolver falls back to version ordering.
+- Fallback version ordering now rejects ambiguous top-version registry lib matches with distinct package ids (no nondeterministic first-match selection).
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
 - Non-registry failures are covered for both root-edge resolution and unique-edge resolution when `resolve.root` is missing.

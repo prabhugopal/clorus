@@ -769,10 +769,32 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
 
         candidates.sort_by(|a, b| Self::compare_version_like(&b.version, &a.version));
 
-        for package in candidates {
-            if package.targets.iter().any(&has_lib_kind) {
-                return Ok((resolved_lib_src(package, dep_name)?, package.version.clone()));
+        let lib_candidates: Vec<&CargoPackage> = candidates
+            .iter()
+            .copied()
+            .filter(|p| p.targets.iter().any(&has_lib_kind))
+            .collect();
+        if let Some(best) = lib_candidates.first().copied() {
+            let best_version = best.version.trim();
+            let mut best_ids: Vec<String> = lib_candidates
+                .iter()
+                .copied()
+                .filter(|p| Self::compare_version_like(p.version.trim(), best_version) == std::cmp::Ordering::Equal)
+                .map(|p| p.id.trim().to_string())
+                .collect();
+            best_ids.sort();
+            best_ids.dedup();
+            if best_ids.len() > 1 {
+                return Err(format!(
+                    "Registry dependency '{}' has ambiguous top-version resolution in cargo metadata: \
+multiple packages matched version '{}' with distinct package ids [{}]. \
+Pin an exact version or inspect cargo metadata/patch overrides.",
+                    dep_name,
+                    best.version.trim(),
+                    best_ids.join(", ")
+                ));
             }
+            return Ok((resolved_lib_src(best, dep_name)?, best.version.clone()));
         }
 
         let resolved_pkg = metadata
@@ -1613,6 +1635,45 @@ mod tests {
             RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
         assert_eq!(version, "0.9.2");
         assert_eq!(src, PathBuf::from("/tmp/registry/v0_9/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_on_ambiguous_top_registry_version() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.2".to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/a/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.2-alt".to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/b/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail on ambiguous top version");
+        assert!(err.contains("ambiguous top-version resolution"));
+        assert!(err.contains("version '0.9.2'"));
+        assert!(err.contains("demo-math@0.9.2-alt"));
     }
 
     #[test]
