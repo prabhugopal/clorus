@@ -858,11 +858,9 @@ Re-run cargo metadata and inspect dependency graph consistency.",
             return Ok((resolved_lib_src(best, dep_name)?, normalized_version(best, dep_name)?));
         }
 
-        let resolved_pkg = metadata
-            .packages
-            .iter()
-            .filter(|p| p.name.trim() == dep_name && is_registry_source(p.source.as_deref()))
-            .max_by(|a, b| Self::compare_version_like(&a.version, &b.version))
+        let top_version = candidates
+            .first()
+            .map(|p| p.version.trim())
             .ok_or_else(|| {
                 format!(
                     "Registry dependency '{}' was not found in cargo metadata package set. \
@@ -870,6 +868,46 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
                     dep_name
                 )
             })?;
+        let top_candidates: Vec<&CargoPackage> = candidates
+            .iter()
+            .copied()
+            .filter(|p| Self::compare_version_like(p.version.trim(), top_version) == std::cmp::Ordering::Equal)
+            .collect();
+        let top_ids_raw: Vec<String> = top_candidates
+            .iter()
+            .copied()
+            .map(|p| p.id.trim().to_string())
+            .collect();
+        if top_ids_raw.iter().any(|id| id.is_empty()) {
+            return Err(format!(
+                "Registry dependency '{}' has inconsistent cargo metadata: \
+top-version '{}' no-lib candidates included an empty package id. \
+Re-run cargo metadata and inspect registry resolution consistency.",
+                dep_name, top_version
+            ));
+        }
+        let mut top_ids = top_ids_raw;
+        top_ids.sort();
+        top_ids.dedup();
+        if top_ids.len() > 1 {
+            return Err(format!(
+                "Registry dependency '{}' has ambiguous top-version no-lib resolution in cargo metadata: \
+multiple packages matched version '{}' with distinct package ids [{}]. \
+Pin an exact version or inspect cargo metadata/patch overrides.",
+                dep_name,
+                top_version,
+                top_ids.join(", ")
+            ));
+        }
+        if top_candidates.len() > 1 {
+            return Err(format!(
+                "Registry dependency '{}' has inconsistent cargo metadata: \
+multiple top-version '{}' no-lib entries matched the same package id '{}'. \
+Re-run cargo metadata and inspect dependency graph consistency.",
+                dep_name, top_version, top_ids[0]
+            ));
+        }
+        let resolved_pkg = top_candidates[0];
         let resolved_kinds = normalized_target_kinds(resolved_pkg);
         Err(format!(
             "Registry dependency '{}' (resolved {}) has no lib target. \
@@ -3418,6 +3456,78 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when registry package has no effective target kinds");
         assert!(err.contains("Available target kinds for resolved package: [<none>]"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_on_ambiguous_top_no_lib_candidates() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.3.0-a"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.3.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bin".to_string()],
+                        src_path: "/tmp/registry/a/src/main.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.3.0-b"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.3.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bench".to_string()],
+                        src_path: "/tmp/registry/b/src/bench.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when top-version no-lib candidates are ambiguous");
+        assert!(err.contains("ambiguous top-version no-lib resolution"));
+        assert!(err.contains("demo-math@0.3.0-a"));
+        assert!(err.contains("demo-math@0.3.0-b"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_on_top_no_lib_candidate_with_empty_id() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: String::new(),
+                    name: "demo-math".to_string(),
+                    version: "0.3.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bin".to_string()],
+                        src_path: "/tmp/registry/a/src/main.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bin".to_string()],
+                        src_path: "/tmp/registry/b/src/main.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when top-version no-lib candidate has empty id");
+        assert!(err.contains("no-lib candidates included an empty package id"));
+        assert!(err.contains("top-version '0.3.0'"));
     }
 
     #[test]
