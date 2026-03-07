@@ -30,10 +30,14 @@ enum RustDepSource {
 #[derive(Debug, Deserialize)]
 struct CargoMetadata {
     packages: Vec<CargoPackage>,
+    #[serde(default)]
+    resolve: Option<CargoResolve>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CargoPackage {
+    #[serde(default)]
+    id: String,
     name: String,
     version: String,
     source: Option<String>,
@@ -44,6 +48,27 @@ struct CargoPackage {
 struct CargoTarget {
     kind: Vec<String>,
     src_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoResolve {
+    #[serde(default)]
+    root: Option<String>,
+    #[serde(default)]
+    nodes: Vec<CargoResolveNode>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoResolveNode {
+    id: String,
+    #[serde(default)]
+    deps: Vec<CargoResolveDep>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoResolveDep {
+    name: String,
+    pkg: String,
 }
 
 #[derive(Debug, Clone)]
@@ -665,6 +690,31 @@ impl RustFfiProcessor {
         metadata: &CargoMetadata,
         dep_name: &str,
     ) -> Result<(PathBuf, String), String> {
+        if let Some(package) = Self::resolve_registry_package_from_root(metadata, dep_name) {
+            if let Some(lib_target) = package
+                .targets
+                .iter()
+                .find(|t| t.kind.iter().any(|k| k == "lib"))
+            {
+                return Ok((PathBuf::from(&lib_target.src_path), package.version.clone()));
+            }
+
+            let resolved_kinds = package
+                .targets
+                .iter()
+                .flat_map(|t| t.kind.iter().cloned())
+                .collect::<Vec<String>>();
+            return Err(format!(
+                "Registry dependency '{}' (resolved {}) has no lib target. \
+Available target kinds for resolved package: [{}]. \
+Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
+an explicit interface for a bridge exposing extern \"C\" functions.",
+                dep_name,
+                package.version,
+                resolved_kinds.join(", ")
+            ));
+        }
+
         let mut candidates: Vec<&CargoPackage> = metadata
             .packages
             .iter()
@@ -721,6 +771,27 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
             resolved_pkg.version,
             resolved_kinds.join(", ")
         ))
+    }
+
+    fn resolve_registry_package_from_root<'a>(
+        metadata: &'a CargoMetadata,
+        dep_name: &str,
+    ) -> Option<&'a CargoPackage> {
+        let resolve = metadata.resolve.as_ref()?;
+        let root_id = resolve.root.as_ref()?;
+        let root_node = resolve.nodes.iter().find(|n| &n.id == root_id)?;
+
+        let dep_pkg_id = root_node
+            .deps
+            .iter()
+            .find(|d| d.name == dep_name)
+            .map(|d| d.pkg.as_str())?;
+
+        metadata.packages.iter().find(|p| {
+            p.id == dep_pkg_id
+                && p.name == dep_name
+                && p.source.as_deref().unwrap_or("").starts_with("registry+")
+        })
     }
 
     /// Generate Cargo.toml for the wrapper crate
@@ -1288,6 +1359,7 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "0.1.0".to_string(),
                     source: Some("path+file:///tmp/demo-math".to_string()),
@@ -1297,6 +1369,7 @@ mod tests {
                     }],
                 },
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "0.2.0".to_string(),
                     source: Some(
@@ -1308,6 +1381,7 @@ mod tests {
                     }],
                 },
             ],
+            resolve: None,
         };
 
         let (src, version) =
@@ -1321,6 +1395,7 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "0.10.0".to_string(),
                     source: Some(
@@ -1332,6 +1407,7 @@ mod tests {
                     }],
                 },
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "0.9.2".to_string(),
                     source: Some(
@@ -1343,6 +1419,7 @@ mod tests {
                     }],
                 },
             ],
+            resolve: None,
         };
 
         let (src, version) =
@@ -1356,6 +1433,7 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "0.10.0".to_string(),
                     source: Some(
@@ -1367,6 +1445,7 @@ mod tests {
                     }],
                 },
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "0.9.2".to_string(),
                     source: Some(
@@ -1378,6 +1457,7 @@ mod tests {
                     }],
                 },
             ],
+            resolve: None,
         };
 
         let (src, version) =
@@ -1391,6 +1471,7 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "1.2.3-alpha.2".to_string(),
                     source: Some(
@@ -1402,6 +1483,7 @@ mod tests {
                     }],
                 },
                 CargoPackage {
+                    id: String::new(),
                     name: "demo-math".to_string(),
                     version: "1.2.3".to_string(),
                     source: Some(
@@ -1413,12 +1495,71 @@ mod tests {
                     }],
                 },
             ],
+            resolve: None,
         };
 
         let (src, version) =
             RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
         assert_eq!(version, "1.2.3");
         assert_eq!(src, PathBuf::from("/tmp/registry/v1_2_3/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_prefers_root_dependency_over_higher_transitive_version() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_9_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
     }
 
     #[test]
@@ -1507,6 +1648,7 @@ mod tests {
     fn resolve_registry_lib_src_errors_when_registry_package_missing() {
         let metadata = CargoMetadata {
             packages: vec![CargoPackage {
+                id: String::new(),
                 name: "demo-math".to_string(),
                 version: "0.1.0".to_string(),
                 source: Some("path+file:///tmp/demo-math".to_string()),
@@ -1515,6 +1657,7 @@ mod tests {
                     src_path: "/tmp/local/src/lib.rs".to_string(),
                 }],
             }],
+            resolve: None,
         };
 
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
@@ -1527,6 +1670,7 @@ mod tests {
     fn resolve_registry_lib_src_errors_when_registry_package_has_no_lib_target() {
         let metadata = CargoMetadata {
             packages: vec![CargoPackage {
+                id: String::new(),
                 name: "demo-math".to_string(),
                 version: "0.3.0".to_string(),
                 source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
@@ -1535,6 +1679,7 @@ mod tests {
                     src_path: "/tmp/registry/src/main.rs".to_string(),
                 }],
             }],
+            resolve: None,
         };
 
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
