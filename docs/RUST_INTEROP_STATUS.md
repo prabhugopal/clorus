@@ -37,6 +37,7 @@ Notes:
 - Version ordering also tolerates `v`-prefixed version strings from metadata (`v1.2.3`).
 - Registry candidate selection prefers release over prerelease when core semver is the same (e.g. `1.2.3` over `1.2.3-alpha.2`).
 - Registry resolution now prefers the wrapper root's direct dependency edge from `cargo metadata resolve` over unrelated higher transitive versions.
+- If that direct resolved package is bin-only, build fails fast against that package (no silent fallback to unrelated transitive lib versions).
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.
