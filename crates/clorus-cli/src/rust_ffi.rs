@@ -832,6 +832,13 @@ Re-run cargo metadata and check dependency graph consistency.",
                     dep_name, root_id, dep_name
                 ));
             };
+            if packages.iter().any(|pkg| pkg.is_empty()) {
+                return Err(format!(
+                    "Registry dependency '{}' resolve graph contained an empty package id for dependency edge '{}'. \
+Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, dep_name
+                ));
+            }
             packages.sort_unstable();
             packages.dedup();
             if packages.len() != 1 {
@@ -856,6 +863,13 @@ Root '{}' resolves to package ids: [{}]. Pin the dependency explicitly in Cargo/
                 .filter(|d| d.name == dep_name)
                 .map(|d| d.pkg.trim().to_string())
                 .collect::<Vec<String>>();
+            if pkg_ids.iter().any(|pkg| pkg.is_empty()) {
+                return Err(format!(
+                    "Registry dependency '{}' resolve graph contained an empty package id for dependency edge '{}'. \
+Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, dep_name
+                ));
+            }
             pkg_ids.sort_unstable();
             pkg_ids.dedup();
             if pkg_ids.is_empty() {
@@ -1925,6 +1939,39 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_errors_when_root_missing_edges_mix_empty_and_non_empty_package_ids() {
+        let metadata = CargoMetadata {
+            packages: vec![],
+            resolve: Some(CargoResolve {
+                root: None,
+                nodes: vec![
+                    CargoResolveNode {
+                        id: "path+file:///tmp/consumer-a#0.1.0".to_string(),
+                        deps: vec![CargoResolveDep {
+                            name: "demo-math".to_string(),
+                            pkg: "".to_string(),
+                        }],
+                    },
+                    CargoResolveNode {
+                        id: "path+file:///tmp/consumer-b#0.1.0".to_string(),
+                        deps: vec![CargoResolveDep {
+                            name: "demo-math".to_string(),
+                            pkg:
+                                "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                    .to_string(),
+                        }],
+                    },
+                ],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root-missing edges contain any empty package id");
+        assert!(err.contains("contained an empty package id"));
+        assert!(err.contains("dependency edge 'demo-math'"));
+    }
+
+    #[test]
     fn resolve_registry_lib_src_errors_when_resolve_points_to_missing_package_id() {
         let metadata = CargoMetadata {
             packages: vec![CargoPackage {
@@ -1979,6 +2026,42 @@ mod tests {
 
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when resolve edge package id is empty");
+        assert!(err.contains("contained an empty package id"));
+        assert!(err.contains("dependency edge 'demo-math'"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_root_edge_mix_empty_and_non_empty_package_ids() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                name: "demo_wrapper".to_string(),
+                version: "0.1.0".to_string(),
+                source: None,
+                targets: vec![],
+            }],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![
+                        CargoResolveDep {
+                            name: "demo-math".to_string(),
+                            pkg:
+                                "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                    .to_string(),
+                        },
+                        CargoResolveDep {
+                            name: "demo-math".to_string(),
+                            pkg: " ".to_string(),
+                        },
+                    ],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root edge package ids include an empty value");
         assert!(err.contains("contained an empty package id"));
         assert!(err.contains("dependency edge 'demo-math'"));
     }
