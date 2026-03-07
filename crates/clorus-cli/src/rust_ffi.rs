@@ -703,6 +703,19 @@ impl RustFfiProcessor {
         }
         let is_registry_source = |source: Option<&str>| source.unwrap_or("").trim().starts_with("registry+");
         let has_lib_kind = |target: &CargoTarget| target.kind.iter().any(|k| k.trim() == "lib");
+        let normalized_version = |package: &CargoPackage, dep_name: &str| -> Result<String, String> {
+            let version = package.version.trim();
+            if version.is_empty() {
+                let pkg_id = package.id.trim();
+                let pkg_id = if pkg_id.is_empty() { "<unknown>" } else { pkg_id };
+                return Err(format!(
+                    "Registry dependency '{}' resolved package '{}' had an empty version in cargo metadata. \
+Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, pkg_id
+                ));
+            }
+            Ok(version.to_string())
+        };
         let resolved_lib_src = |package: &CargoPackage, dep_name: &str| -> Result<PathBuf, String> {
             let Some(lib_target) = package
                 .targets
@@ -736,6 +749,7 @@ Re-run cargo metadata and check dependency graph consistency.",
             Ok(PathBuf::from(src))
         };
         if let Some(package) = Self::resolve_root_dependency_package(metadata, dep_name)? {
+            let resolved_version = normalized_version(package, dep_name)?;
             if !is_registry_source(package.source.as_deref()) {
                 let source = package
                     .source
@@ -746,11 +760,11 @@ Re-run cargo metadata and check dependency graph consistency.",
                 return Err(format!(
                     "Registry dependency '{}' resolved to non-registry package source '{}' (resolved {}, pkg id {}). \
 Check Cargo patch/replace/path overrides or use a local path dependency in Clorus.toml.",
-                    dep_name, source, package.version, package.id
+                    dep_name, source, resolved_version, package.id
                 ));
             }
 
-            return Ok((resolved_lib_src(package, dep_name)?, package.version.clone()));
+            return Ok((resolved_lib_src(package, dep_name)?, resolved_version));
         }
 
         let mut candidates: Vec<&CargoPackage> = metadata
@@ -765,6 +779,9 @@ Check Cargo patch/replace/path overrides or use a local path dependency in Cloru
 Check the crate name/version in Clorus.toml and ensure cargo metadata can resolve the dependency.",
                 dep_name
             ));
+        }
+        for package in &candidates {
+            let _ = normalized_version(package, dep_name)?;
         }
 
         candidates.sort_by(|a, b| Self::compare_version_like(&b.version, &a.version));
@@ -803,7 +820,7 @@ Pin an exact version or inspect cargo metadata/patch overrides.",
                     best_ids.join(", ")
                 ));
             }
-            return Ok((resolved_lib_src(best, dep_name)?, best.version.clone()));
+            return Ok((resolved_lib_src(best, dep_name)?, normalized_version(best, dep_name)?));
         }
 
         let resolved_pkg = metadata
@@ -3242,6 +3259,71 @@ mod tests {
         assert!(err.contains("Available target kinds for resolved package: [bin]"));
         assert!(err.contains("Only library crates can be auto-wrapped"));
         assert!(err.contains("use a local bridge crate"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_root_resolved_package_version_is_empty() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "   ".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                            .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root-resolved package has empty version");
+        assert!(err.contains("empty version"));
+        assert!(err.contains("demo-math@0.2.0"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_fallback_candidate_version_is_empty() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                    .to_string(),
+                name: "demo-math".to_string(),
+                version: String::new(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["lib".to_string()],
+                    src_path: "/tmp/registry/src/lib.rs".to_string(),
+                }],
+            }],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when fallback candidate has empty version");
+        assert!(err.contains("empty version"));
+        assert!(err.contains("demo-math@0.2.0"));
     }
 
     #[test]
