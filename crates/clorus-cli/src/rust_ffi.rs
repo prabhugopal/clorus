@@ -793,10 +793,14 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
             .collect();
         if let Some(best) = lib_candidates.first().copied() {
             let best_version = best.version.trim();
-            let best_ids_raw: Vec<String> = lib_candidates
+            let top_candidates: Vec<&CargoPackage> = lib_candidates
                 .iter()
                 .copied()
                 .filter(|p| Self::compare_version_like(p.version.trim(), best_version) == std::cmp::Ordering::Equal)
+                .collect();
+            let best_ids_raw: Vec<String> = top_candidates
+                .iter()
+                .copied()
                 .map(|p| p.id.trim().to_string())
                 .collect();
             if best_ids_raw.iter().any(|id| id.is_empty()) {
@@ -818,6 +822,16 @@ Pin an exact version or inspect cargo metadata/patch overrides.",
                     dep_name,
                     best.version.trim(),
                     best_ids.join(", ")
+                ));
+            }
+            if top_candidates.len() > 1 {
+                return Err(format!(
+                    "Registry dependency '{}' has inconsistent cargo metadata: \
+multiple top-version '{}' entries matched the same package id '{}'. \
+Re-run cargo metadata and inspect dependency graph consistency.",
+                    dep_name,
+                    best.version.trim(),
+                    best_ids[0]
                 ));
             }
             return Ok((resolved_lib_src(best, dep_name)?, normalized_version(best, dep_name)?));
@@ -1738,6 +1752,46 @@ mod tests {
             .expect_err("should fail when top fallback candidate package id is empty");
         assert!(err.contains("included an empty package id"));
         assert!(err.contains("top-version '0.9.2'"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_on_duplicate_top_version_same_package_id() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.2"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/a/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.2"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.2".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/b/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when top version has duplicate same-id entries");
+        assert!(err.contains("multiple top-version '0.9.2' entries"));
+        assert!(err.contains("demo-math@0.9.2"));
     }
 
     #[test]

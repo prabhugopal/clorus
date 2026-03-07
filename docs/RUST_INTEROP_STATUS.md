@@ -44,6 +44,7 @@ Notes:
 - If there is no usable resolve graph context at all, resolver falls back to version ordering.
 - Fallback version ordering now rejects ambiguous top-version registry lib matches with distinct package ids (no nondeterministic first-match selection).
 - Fallback version ordering also rejects empty package ids in top-version candidates as metadata inconsistency.
+- Fallback version ordering rejects duplicate top-version entries sharing the same package id (metadata inconsistency).
 - Registry resolution now rejects empty package version fields in metadata (both root-resolved and fallback candidates).
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
