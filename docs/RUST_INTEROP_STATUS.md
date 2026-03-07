@@ -42,6 +42,8 @@ Notes:
 - If there is no usable resolve graph context at all, resolver falls back to version ordering.
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
+- Non-registry failures are covered for both root-edge resolution and unique-edge resolution when `resolve.root` is missing.
+- Non-registry failures also remain explicit when cargo metadata omits `source` for the resolved package (`<unknown>` in diagnostics).
 - If `resolve.root` is absent and multiple package ids match the dependency name, resolver now errors as ambiguous (no silent highest-version pick).
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
 - If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
