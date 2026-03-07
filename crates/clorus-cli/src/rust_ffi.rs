@@ -703,6 +703,19 @@ impl RustFfiProcessor {
         }
         let is_registry_source = |source: Option<&str>| source.unwrap_or("").trim().starts_with("registry+");
         let has_lib_kind = |target: &CargoTarget| target.kind.iter().any(|k| k.trim() == "lib");
+        let normalized_target_kinds = |package: &CargoPackage| -> String {
+            let mut kinds = package
+                .targets
+                .iter()
+                .flat_map(|t| t.kind.iter())
+                .map(|k| k.trim())
+                .filter(|k| !k.is_empty())
+                .map(|k| k.to_string())
+                .collect::<Vec<String>>();
+            kinds.sort();
+            kinds.dedup();
+            kinds.join(", ")
+        };
         let normalized_version = |package: &CargoPackage, dep_name: &str| -> Result<String, String> {
             let version = package.version.trim();
             if version.is_empty() {
@@ -722,11 +735,7 @@ Re-run cargo metadata and check dependency graph consistency.",
                 .iter()
                 .find(|t| has_lib_kind(t))
             else {
-                let resolved_kinds = package
-                    .targets
-                    .iter()
-                    .flat_map(|t| t.kind.iter().cloned())
-                    .collect::<Vec<String>>();
+                let resolved_kinds = normalized_target_kinds(package);
                 return Err(format!(
                     "Registry dependency '{}' (resolved {}) has no lib target. \
 Available target kinds for resolved package: [{}]. \
@@ -734,7 +743,7 @@ Only library crates can be auto-wrapped from registry sources; use a local bridg
 an explicit interface for a bridge exposing extern \"C\" functions.",
                     dep_name,
                     package.version,
-                    resolved_kinds.join(", ")
+                    resolved_kinds
                 ));
             };
 
@@ -849,11 +858,7 @@ Check the crate name/version in Clorus.toml and ensure cargo metadata can resolv
                     dep_name
                 )
             })?;
-        let resolved_kinds = resolved_pkg
-            .targets
-            .iter()
-            .flat_map(|t| t.kind.iter().cloned())
-            .collect::<Vec<String>>();
+        let resolved_kinds = normalized_target_kinds(resolved_pkg);
         Err(format!(
             "Registry dependency '{}' (resolved {}) has no lib target. \
 Available target kinds for resolved package: [{}]. \
@@ -861,7 +866,7 @@ Only library crates can be auto-wrapped from registry sources; use a local bridg
 an explicit interface for a bridge exposing extern \"C\" functions.",
             dep_name,
             resolved_pkg.version,
-            resolved_kinds.join(", ")
+            resolved_kinds
         ))
     }
 
@@ -3313,6 +3318,33 @@ mod tests {
         assert!(err.contains("Available target kinds for resolved package: [bin]"));
         assert!(err.contains("Only library crates can be auto-wrapped"));
         assert!(err.contains("use a local bridge crate"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_no_lib_target_kinds_are_whitespace_wrapped() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: String::new(),
+                name: "demo-math".to_string(),
+                version: "0.3.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![
+                    CargoTarget {
+                        kind: vec![" bin ".to_string()],
+                        src_path: "/tmp/registry/src/main.rs".to_string(),
+                    },
+                    CargoTarget {
+                        kind: vec![" bin ".to_string(), " test ".to_string()],
+                        src_path: "/tmp/registry/src/test.rs".to_string(),
+                    },
+                ],
+            }],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when registry package has no lib target");
+        assert!(err.contains("Available target kinds for resolved package: [bin, test]"));
     }
 
     #[test]

@@ -46,6 +46,7 @@ Notes:
 - Fallback version ordering also rejects empty package ids in top-version candidates as metadata inconsistency.
 - Fallback version ordering rejects duplicate top-version entries sharing the same package id (metadata inconsistency).
 - Registry resolution now rejects empty package version fields in metadata (both root-resolved and fallback candidates).
+- No-lib-target diagnostics normalize/sort/dedupe target kind labels before reporting.
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
 - Non-registry failures are covered for both root-edge resolution and unique-edge resolution when `resolve.root` is missing.
