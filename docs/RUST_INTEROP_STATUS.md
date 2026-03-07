@@ -45,6 +45,7 @@ Notes:
 - Non-registry failures are covered for both root-edge resolution and unique-edge resolution when `resolve.root` is missing.
 - Non-registry failures also remain explicit when cargo metadata omits `source` for the resolved package (`<unknown>` in diagnostics).
 - If `resolve.root` is absent and multiple package ids match the dependency name, resolver now errors as ambiguous (no silent highest-version pick).
+- If `resolve.root` is absent and no resolve edge matches the dependency name, resolver now errors explicitly as metadata inconsistency (no `<none>` ambiguity fallback).
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
 - If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
 - If `resolve.root` is present but missing its node, resolver now errors explicitly (metadata inconsistency).

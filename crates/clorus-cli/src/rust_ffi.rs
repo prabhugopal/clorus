@@ -850,12 +850,15 @@ Root '{}' resolves to package ids: [{}]. Pin the dependency explicitly in Cargo/
                 .collect::<Vec<_>>();
             pkg_ids.sort_unstable();
             pkg_ids.dedup();
+            if pkg_ids.is_empty() {
+                return Err(format!(
+                    "Registry dependency '{}' could not be resolved from cargo metadata (resolve.root missing): \
+no dependency edge was found for '{}'. Re-run cargo metadata and check dependency graph consistency.",
+                    dep_name, dep_name
+                ));
+            }
             if pkg_ids.len() != 1 {
-                let resolved = if pkg_ids.is_empty() {
-                    "<none>".to_string()
-                } else {
-                    pkg_ids.join(", ")
-                };
+                let resolved = pkg_ids.join(", ");
                 return Err(format!(
                     "Registry dependency '{}' has ambiguous resolution in cargo metadata (resolve.root missing). \
 Resolved package ids: [{}]. Pin the dependency explicitly in Cargo/Clorus.toml or use a path bridge crate.",
@@ -1815,6 +1818,39 @@ mod tests {
         assert!(err.contains("resolve.root missing"));
         assert!(err.contains("demo-math@0.2.0"));
         assert!(err.contains("demo-math@0.9.0"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_root_missing_and_dependency_edge_absent() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "registry+https://github.com/rust-lang/crates.io-index#other-dep@1.0.0"
+                    .to_string(),
+                name: "other-dep".to_string(),
+                version: "1.0.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["lib".to_string()],
+                    src_path: "/tmp/registry/other/src/lib.rs".to_string(),
+                }],
+            }],
+            resolve: Some(CargoResolve {
+                root: None,
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/consumer#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "other-dep".to_string(),
+                        pkg: "registry+https://github.com/rust-lang/crates.io-index#other-dep@1.0.0"
+                            .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when resolve.root is missing and dependency edge is absent");
+        assert!(err.contains("resolve.root missing"));
+        assert!(err.contains("no dependency edge was found for 'demo-math'"));
     }
 
     #[test]
