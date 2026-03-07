@@ -778,14 +778,30 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
         dep_name: &str,
     ) -> Option<&'a CargoPackage> {
         let resolve = metadata.resolve.as_ref()?;
-        let root_id = resolve.root.as_ref()?;
-        let root_node = resolve.nodes.iter().find(|n| &n.id == root_id)?;
-
-        let dep_pkg_id = root_node
-            .deps
-            .iter()
-            .find(|d| d.name == dep_name)
-            .map(|d| d.pkg.as_str())?;
+        let dep_pkg_id = if let Some(root_id) = resolve.root.as_ref() {
+            let root_node = resolve.nodes.iter().find(|n| &n.id == root_id)?;
+            root_node
+                .deps
+                .iter()
+                .find(|d| d.name == dep_name)
+                .map(|d| d.pkg.as_str())?
+        } else {
+            // Some metadata shapes omit resolve.root. In that case, use a unique
+            // dependency edge match if available; otherwise fall back to version sorting.
+            let mut pkg_ids = resolve
+                .nodes
+                .iter()
+                .flat_map(|n| n.deps.iter())
+                .filter(|d| d.name == dep_name)
+                .map(|d| d.pkg.as_str())
+                .collect::<Vec<_>>();
+            pkg_ids.sort_unstable();
+            pkg_ids.dedup();
+            if pkg_ids.len() != 1 {
+                return None;
+            }
+            pkg_ids[0]
+        };
 
         metadata.packages.iter().find(|p| {
             p.id == dep_pkg_id
@@ -1619,6 +1635,57 @@ mod tests {
             .expect_err("should fail when direct root dependency has no lib target");
         assert!(err.contains("Registry dependency 'demo-math' (resolved 0.2.0) has no lib target"));
         assert!(err.contains("Available target kinds for resolved package: [bin]"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_uses_unique_resolve_edge_when_root_missing() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_9_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: None,
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/consumer#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
     }
 
     #[test]
