@@ -52,6 +52,8 @@ Notes:
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
 - If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
 - If `resolve.root` is present but missing its node, resolver now errors explicitly (metadata inconsistency).
+- `resolve.root` is trim-normalized before node lookup; whitespace-padded values are accepted.
+- If `resolve.root` is present but empty after trimming, resolver errors explicitly (metadata inconsistency).
 - If `resolve.root` matches multiple resolve nodes, resolver now errors explicitly (metadata inconsistency).
 - If `resolve.root` exists but has no edge for the requested dependency name, resolver now errors explicitly (metadata inconsistency).
 - Root-edge package selection now keys by resolved package id, so renamed dependency keys still resolve correctly.
