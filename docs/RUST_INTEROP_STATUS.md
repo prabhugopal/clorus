@@ -43,6 +43,7 @@ Notes:
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
 - If `resolve.root` is absent and multiple package ids match the dependency name, resolver now errors as ambiguous (no silent highest-version pick).
+- If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.
