@@ -699,9 +699,9 @@ impl RustFfiProcessor {
             {
                 let source = package.source.as_deref().unwrap_or("<unknown>");
                 return Err(format!(
-                    "Registry dependency '{}' resolved to non-registry package source '{}' (resolved {}). \
+                    "Registry dependency '{}' resolved to non-registry package source '{}' (resolved {}, pkg id {}). \
 Check Cargo patch/replace/path overrides or use a local path dependency in Clorus.toml.",
-                    dep_name, source, package.version
+                    dep_name, source, package.version, package.id
                 ));
             }
 
@@ -1831,6 +1831,7 @@ mod tests {
             .expect_err("should fail when root points to a non-registry source");
         assert!(err.contains("resolved to non-registry package source"));
         assert!(err.contains("path+file:///tmp/local/demo-math"));
+        assert!(err.contains("pkg id path+file:///tmp/local/demo-math#0.2.0"));
         assert!(err.contains("use a local path dependency in Clorus.toml"));
     }
 

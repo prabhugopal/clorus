@@ -41,6 +41,7 @@ Notes:
 - If `cargo metadata resolve.root` is absent, resolver uses a unique graph edge match for the dependency name when available.
 - If there is no usable resolve graph context at all, resolver falls back to version ordering.
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
+- Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
 - If `resolve.root` is absent and multiple package ids match the dependency name, resolver now errors as ambiguous (no silent highest-version pick).
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
