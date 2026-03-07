@@ -44,6 +44,7 @@ Notes:
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
 - If `resolve.root` is absent and multiple package ids match the dependency name, resolver now errors as ambiguous (no silent highest-version pick).
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
+- If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.

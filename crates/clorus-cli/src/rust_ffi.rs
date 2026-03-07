@@ -799,14 +799,33 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
             let Some(root_node) = resolve.nodes.iter().find(|n| &n.id == root_id) else {
                 return Ok(None);
             };
-            let Some(pkg) = root_node
+            let mut root_matches = root_node
                 .deps
                 .iter()
                 .find(|d| d.name == dep_name)
-                .map(|d| d.pkg.as_str())
-            else {
+                .map(|_| {
+                    root_node
+                        .deps
+                        .iter()
+                        .filter(|d| d.name == dep_name)
+                        .map(|d| d.pkg.as_str())
+                        .collect::<Vec<_>>()
+                });
+            let Some(mut packages) = root_matches.take() else {
                 return Ok(None);
             };
+            packages.sort_unstable();
+            packages.dedup();
+            if packages.len() != 1 {
+                return Err(format!(
+                    "Registry dependency '{}' has ambiguous root resolution in cargo metadata. \
+Root '{}' resolves to package ids: [{}]. Pin the dependency explicitly in Cargo/Clorus.toml or use a path bridge crate.",
+                    dep_name,
+                    root_id,
+                    packages.join(", ")
+                ));
+            }
+            let pkg = packages[0];
             dep_pkg_id_for_error = pkg.to_string();
             pkg
         } else {
@@ -1820,6 +1839,71 @@ mod tests {
         assert!(err.contains("resolve graph pointed to package id"));
         assert!(err.contains("demo-math@0.2.0"));
         assert!(err.contains("missing from cargo metadata packages"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_root_resolution_is_ambiguous() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.9.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_9_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![
+                        CargoResolveDep {
+                            name: "demo-math".to_string(),
+                            pkg: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                        },
+                        CargoResolveDep {
+                            name: "demo-math".to_string(),
+                            pkg: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.0"
+                                .to_string(),
+                        },
+                    ],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root resolution is ambiguous");
+        assert!(err.contains("ambiguous root resolution"));
+        assert!(err.contains("demo-math@0.2.0"));
+        assert!(err.contains("demo-math@0.9.0"));
     }
 
     #[test]
