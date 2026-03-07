@@ -145,7 +145,9 @@ impl RustFfiProcessor {
             let without_build = v.split_once('+').map_or(v, |(core, _)| core);
             without_build
                 .split_once('-')
-                .map_or((without_build, None), |(core, pre)| (core, Some(pre)))
+                .map_or((without_build.trim(), None), |(core, pre)| {
+                    (core.trim(), Some(pre.trim()))
+                })
         }
 
         fn parse_parts(v: &str) -> Vec<u64> {
@@ -175,6 +177,8 @@ impl RustFfiProcessor {
                     (None, Some(_)) => return std::cmp::Ordering::Less,
                     (Some(_), None) => return std::cmp::Ordering::Greater,
                     (Some(a_seg), Some(b_seg)) => {
+                        let a_seg = a_seg.trim();
+                        let b_seg = b_seg.trim();
                         let a_num = a_seg.parse::<u64>();
                         let b_num = b_seg.parse::<u64>();
                         let ord = match (a_num, b_num) {
@@ -3049,6 +3053,18 @@ mod tests {
         assert_eq!(
             RustFfiProcessor::compare_version_like("v1.2.3-alpha.1", "1.2.3-alpha.2"),
             std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_version_like_trims_prerelease_and_build_whitespace() {
+        assert_eq!(
+            RustFfiProcessor::compare_version_like("1.2.3- alpha.2 ", "1.2.3-alpha.10"),
+            std::cmp::Ordering::Less
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like(" 1.2.3 +build.1 ", "1.2.3+build.99"),
+            std::cmp::Ordering::Equal
         );
     }
 
