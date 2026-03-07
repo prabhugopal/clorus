@@ -50,6 +50,7 @@ Notes:
 - Empty package ids are rejected even when mixed with non-empty candidates (no ambiguous-resolution fallback).
 - Resolve-edge package ids are normalized via trimming before lookup, so incidental whitespace in metadata does not break selection.
 - Resolve-edge dependency names are trim-normalized before matching, so incidental whitespace in metadata does not break edge selection.
+- Metadata package-id matching is trim-normalized, and ambiguous multi-package matches for the same resolved id now fail explicitly.
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
 - If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
 - If `resolve.root` is present but missing its node, resolver now errors explicitly (metadata inconsistency).

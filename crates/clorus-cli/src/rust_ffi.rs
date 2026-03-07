@@ -906,15 +906,25 @@ Re-run cargo metadata and check dependency graph consistency.",
             ));
         }
 
-        let package = metadata.packages.iter().find(|p| p.id == dep_pkg_id);
-        if package.is_none() {
+        let mut packages = metadata
+            .packages
+            .iter()
+            .filter(|p| p.id.trim() == dep_pkg_id);
+        let Some(package) = packages.next() else {
             return Err(format!(
                 "Registry dependency '{}' resolve graph pointed to package id '{}' but it was missing from cargo metadata packages. \
 Re-run cargo metadata and check dependency graph consistency.",
                 dep_name, dep_pkg_id_for_error
             ));
+        };
+        if packages.next().is_some() {
+            return Err(format!(
+                "Registry dependency '{}' resolve graph pointed to package id '{}' but multiple packages matched that id in cargo metadata packages. \
+Re-run cargo metadata and check dependency graph consistency.",
+                dep_name, dep_pkg_id_for_error
+            ));
         }
-        Ok(package)
+        Ok(Some(package))
     }
 
     /// Generate Cargo.toml for the wrapper crate
@@ -2042,6 +2052,109 @@ mod tests {
         assert!(err.contains("resolve graph pointed to package id"));
         assert!(err.contains("demo-math@0.2.0"));
         assert!(err.contains("missing from cargo metadata packages"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_supports_metadata_package_id_with_whitespace() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "  registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0  "
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_package_id_matches_multiple_metadata_packages() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0_a/src/lib.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "  registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0  "
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0_b/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when resolved package id matches multiple metadata packages");
+        assert!(err.contains("multiple packages matched that id"));
+        assert!(err.contains("demo-math@0.2.0"));
     }
 
     #[test]
