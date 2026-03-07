@@ -47,6 +47,7 @@ Notes:
 - If root resolve edge maps a dependency name to multiple package ids, resolver now errors as ambiguous (no first-match behavior).
 - If `resolve.root` is present but missing its node, resolver now errors explicitly (metadata inconsistency).
 - If `resolve.root` exists but has no edge for the requested dependency name, resolver now errors explicitly (metadata inconsistency).
+- Root-edge package selection now keys by resolved package id, so renamed dependency keys still resolve correctly.
 - If no FFI-compatible functions can be discovered, provide `interface = "..."`.
 - `interface = false` is explicitly supported and treated as "no interface specified"
   (same behavior as omitting `interface`), and round-trips in manifest serialization.

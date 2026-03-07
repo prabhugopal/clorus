@@ -866,10 +866,7 @@ Resolved package ids: [{}]. Pin the dependency explicitly in Cargo/Clorus.toml o
             pkg_ids[0]
         };
 
-        let package = metadata
-            .packages
-            .iter()
-            .find(|p| p.id == dep_pkg_id && p.name == dep_name);
+        let package = metadata.packages.iter().find(|p| p.id == dep_pkg_id);
         if package.is_none() {
             return Err(format!(
                 "Registry dependency '{}' resolve graph pointed to package id '{}' but it was missing from cargo metadata packages. \
@@ -1900,6 +1897,51 @@ mod tests {
             .expect_err("should fail when root edge for dependency is missing");
         assert!(err.contains("no dependency edge was present for 'demo-math'"));
         assert!(err.contains("root 'path+file:///tmp/wrapper#0.1.0'"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_supports_root_edge_for_renamed_dependency_key() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/registry/v0_2_0/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let (src, version) =
+            RustFfiProcessor::resolve_registry_lib_src(&metadata, "math").expect("resolve");
+        assert_eq!(version, "0.2.0");
+        assert_eq!(src, PathBuf::from("/tmp/registry/v0_2_0/src/lib.rs"));
     }
 
     #[test]
