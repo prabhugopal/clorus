@@ -722,7 +722,11 @@ impl RustFfiProcessor {
                 .collect::<Vec<String>>();
             kinds.sort();
             kinds.dedup();
-            kinds.join(", ")
+            if kinds.is_empty() {
+                "<none>".to_string()
+            } else {
+                kinds.join(", ")
+            }
         };
         let normalized_version = |package: &CargoPackage, dep_name: &str| -> Result<String, String> {
             let version = package.version.trim();
@@ -3393,6 +3397,27 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when registry package has no lib target");
         assert!(err.contains("Available target kinds for resolved package: [bin, test]"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_no_lib_target_kinds_are_effectively_empty() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: String::new(),
+                name: "demo-math".to_string(),
+                version: "0.3.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["   ".to_string()],
+                    src_path: "/tmp/registry/src/main.rs".to_string(),
+                }],
+            }],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when registry package has no effective target kinds");
+        assert!(err.contains("Available target kinds for resolved package: [<none>]"));
     }
 
     #[test]
