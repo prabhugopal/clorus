@@ -36,6 +36,7 @@ Notes:
 - Version ordering now handles semver prerelease/build metadata for deterministic registry candidate selection.
 - Version ordering also tolerates `v`-prefixed version strings from metadata (`v1.2.3`).
 - Registry candidate selection prefers release over prerelease when core semver is the same (e.g. `1.2.3` over `1.2.3-alpha.2`).
+- Version comparison trim-normalizes metadata strings before semver-like ordering.
 - Registry resolution now prefers the wrapper root's direct dependency edge from `cargo metadata resolve` over unrelated higher transitive versions.
 - If that direct resolved package is bin-only, build fails fast against that package (no silent fallback to unrelated transitive lib versions).
 - If `cargo metadata resolve.root` is absent, resolver uses a unique graph edge match for the dependency name when available.

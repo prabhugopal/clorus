@@ -192,8 +192,8 @@ impl RustFfiProcessor {
             std::cmp::Ordering::Equal
         }
 
-        let (a_core, a_pre) = split_semver(a);
-        let (b_core, b_pre) = split_semver(b);
+        let (a_core, a_pre) = split_semver(a.trim());
+        let (b_core, b_pre) = split_semver(b.trim());
         let av = parse_parts(a_core);
         let bv = parse_parts(b_core);
         let max_len = av.len().max(bv.len());
@@ -2992,6 +2992,14 @@ mod tests {
         );
         assert_eq!(
             RustFfiProcessor::compare_version_like("1.0", "1.0.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like(" 1.2.10 ", "1.2.2"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            RustFfiProcessor::compare_version_like(" 1.0 ", "1.0.0 "),
             std::cmp::Ordering::Equal
         );
     }
