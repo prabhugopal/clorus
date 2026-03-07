@@ -732,7 +732,12 @@ Re-run cargo metadata and check dependency graph consistency.",
         };
         if let Some(package) = Self::resolve_root_dependency_package(metadata, dep_name)? {
             if !is_registry_source(package.source.as_deref()) {
-                let source = package.source.as_deref().unwrap_or("<unknown>");
+                let source = package
+                    .source
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("<unknown>");
                 return Err(format!(
                     "Registry dependency '{}' resolved to non-registry package source '{}' (resolved {}, pkg id {}). \
 Check Cargo patch/replace/path overrides or use a local path dependency in Clorus.toml.",
@@ -2858,6 +2863,46 @@ mod tests {
 
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when root points to non-registry source with unknown source field");
+        assert!(err.contains("resolved to non-registry package source '<unknown>'"));
+        assert!(err.contains("pkg id path+file:///tmp/local/demo-math#0.2.0"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_errors_when_root_resolution_points_to_whitespace_source() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "path+file:///tmp/local/demo-math#0.2.0".to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some("   ".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "/tmp/local/demo-math/src/lib.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg: "path+file:///tmp/local/demo-math#0.2.0".to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when root points to non-registry source with whitespace source");
         assert!(err.contains("resolved to non-registry package source '<unknown>'"));
         assert!(err.contains("pkg id path+file:///tmp/local/demo-math#0.2.0"));
     }

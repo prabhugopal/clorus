@@ -52,6 +52,7 @@ Notes:
 - Resolve-edge dependency names are trim-normalized before matching, so incidental whitespace in metadata does not break edge selection.
 - Metadata package-id matching is trim-normalized, and ambiguous multi-package matches for the same resolved id now fail explicitly.
 - Resolve node ids and package source strings from cargo metadata are trim-normalized before root resolution / registry-source checks.
+- Non-registry source diagnostics normalize source strings (trimmed; blank -> `<unknown>`).
 - Resolver dependency-name matching is trim-normalized (metadata edge names, package names, and incoming dependency argument).
 - Resolved lib-target `src_path` is trim-validated; empty lib source paths now fail explicitly as metadata inconsistency.
 - If resolve graph points to a package id missing from `metadata.packages`, resolver now errors instead of silently falling back.
