@@ -4553,6 +4553,17 @@ mod tests {
     }
 
     #[test]
+    fn format_registry_metadata_resolution_error_does_not_add_network_hint_for_non_network_errors()
+    {
+        let rendered = RustFfiProcessor::format_registry_metadata_resolution_error(
+            "libm",
+            "error: failed to parse manifest at `/tmp/Cargo.toml`\n",
+        );
+        assert!(rendered.contains("failed to parse manifest"));
+        assert!(!rendered.contains("network access to crates.io appears unavailable"));
+    }
+
+    #[test]
     fn resolve_interface_path_auto_prefers_clri() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
