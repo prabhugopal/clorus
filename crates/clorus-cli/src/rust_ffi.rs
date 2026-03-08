@@ -4826,6 +4826,18 @@ mod tests {
     }
 
     #[test]
+    fn with_dependency_context_whitespace_prefixed_registry_no_ffi_message_is_idempotent() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "   Rust dependency 'demo-lib' resolved from registry source /tmp/registry/demo-lib/src/lib.rs, but no FFI-compatible functions were discovered in its lib target.".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib' resolved from registry source /tmp/registry/demo-lib/src/lib.rs, but no FFI-compatible functions were discovered in its lib target."
+        );
+    }
+
+    #[test]
     fn with_dependency_context_whitespace_prefixed_other_label_is_still_wrapped() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
