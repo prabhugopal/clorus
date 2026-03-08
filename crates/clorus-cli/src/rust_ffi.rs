@@ -354,9 +354,11 @@ impl RustFfiProcessor {
         msg.push('\n');
         msg.push_str(trimmed);
 
-        if trimmed.contains("Could not resolve host")
-            || trimmed.contains("failed to download from")
-            || trimmed.contains("spurious network error")
+        let normalized = trimmed.to_ascii_lowercase();
+        if normalized.contains("could not resolve host")
+            || normalized.contains("couldn't resolve host")
+            || normalized.contains("failed to download from")
+            || normalized.contains("spurious network error")
         {
             msg.push_str(
                 "\nHint: network access to crates.io appears unavailable; retry online, or use a local bridge crate / explicit interface path.",
@@ -4540,6 +4542,16 @@ mod tests {
             "Failed to resolve registry dependency 'libm' via cargo metadata:"
         ));
         assert!(rendered.contains("spurious network error"));
+        assert!(rendered.contains("network access to crates.io appears unavailable"));
+    }
+
+    #[test]
+    fn format_registry_metadata_resolution_error_adds_hint_for_case_variant_resolve_host_error() {
+        let rendered = RustFfiProcessor::format_registry_metadata_resolution_error(
+            "libm",
+            "error: Could Not Resolve Host: index.crates.io\n",
+        );
+        assert!(rendered.contains("Could Not Resolve Host"));
         assert!(rendered.contains("network access to crates.io appears unavailable"));
     }
 
