@@ -168,6 +168,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path dependency + `.clri` auto interface + extended numeric signatures
 - local path dependency + `.clri` auto interface + narrow integer signatures (`i8/u8/i16/u16`)
 - local path dependency + `.clri` auto interface + bool/string signatures
+- local path dependency + `.clri` auto interface + bool/string signatures (including `:str`/`&str` wrapper conversion assertions)
 - local path dependency + `.clri` `:rust` override for impl/associated methods
 - Rust wrapper export symbols are dependency-scoped (e.g., `clorus_<dep>__<fn>`) to avoid collisions with core runtime FFI names
 - scoped export symbol generation normalizes punctuation consistently in both wrapper generation and codegen lookup

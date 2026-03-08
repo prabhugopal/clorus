@@ -5368,6 +5368,35 @@ demo-text = { path = "demo-text", interface = true }
         assert_eq!(lib.functions[2].return_type, "&str");
         assert_eq!(lib.functions[2].params[0].type_name, "&str");
 
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("demo_text_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src)
+            .unwrap_or_else(|e| panic!("read generated wrapper {}: {}", wrapper_src.display(), e));
+        assert!(
+            generated.contains("let s_rust_owned = unsafe { CStr::from_ptr(s as *const c_char).to_string_lossy().to_string() };"),
+            "expected :str/&str param conversion in interface wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("let s_rust = s_rust_owned.as_str();"),
+            "expected :str/&str borrowed binding handoff in interface wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("let result = echo_str(s_rust);"),
+            "expected :rust default symbol call for echo-str in interface wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("unsafe { CString::new(result).unwrap().into_raw() }"),
+            "expected :str/&str return conversion in interface wrapper:\n{}",
+            generated
+        );
+
         let _ = std::fs::remove_dir_all(&root);
     }
 
