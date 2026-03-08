@@ -6174,6 +6174,32 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
         assert_eq!(id_const_ptr.params[0].type_name, "*const u8");
         assert_eq!(id_const_ptr.return_type, "*const u8");
 
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("auto_parse_mixed_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src)
+            .unwrap_or_else(|e| panic!("read generated wrapper {}: {}", wrapper_src.display(), e));
+        assert!(
+            generated.contains(
+                "let s_rust_owned = unsafe { CStr::from_ptr(s as *const c_char).to_string_lossy().to_string() };"
+            ),
+            "expected borrowed-str param conversion in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("let s_rust = s_rust_owned.as_str();"),
+            "expected borrowed-str binding handoff in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("unsafe { CString::new(result).unwrap().into_raw() }"),
+            "expected borrowed-str return conversion in generated wrapper:\n{}",
+            generated
+        );
+
         let _ = std::fs::remove_dir_all(&root);
     }
 
