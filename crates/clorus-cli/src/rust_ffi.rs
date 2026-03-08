@@ -570,8 +570,9 @@ impl RustFfiProcessor {
 
         if generator.functions.is_empty() && !unsupported_details.is_empty() {
             let mut error = format!(
-                "Rust dependency '{}' has public functions, but none are FFI-compatible after signature filtering.",
-                name
+                "Rust dependency '{}' has public functions in {}, but none are FFI-compatible after signature filtering.",
+                name,
+                lib_src.display()
             );
             error.push_str(&Self::format_unsupported_examples(&unsupported_details, 5));
             error.push_str(
@@ -5641,6 +5642,7 @@ auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
 
         assert!(err.contains("Rust dependency 'auto-parse-none-supported-lib'"));
         assert!(err.contains("none are FFI-compatible after signature filtering"));
+        assert!(err.contains("auto-parse-none-supported-lib/src/lib.rs"));
         assert!(err.contains("unsupported param"));
         assert!(err.contains("unsupported return type"));
         assert!(err.contains("*mut i32"));
@@ -6296,6 +6298,7 @@ auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
             "expected unsupported-signature filtering failure, got: {}",
             err
         );
+        assert!(err.contains("auto-parse-bad-ptr-lib/src/lib.rs"));
         assert!(
             err.contains("unsupported param `p` type `*mut i32`"),
             "expected concrete unsupported pointer signature detail, got: {}",

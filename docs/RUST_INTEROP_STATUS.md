@@ -100,6 +100,7 @@ Notes:
 - Unsupported signatures now report concrete examples in build errors.
 - Unsupported-signature example blocks are bounded (max 5 examples) and now include `... and N more` when truncated.
 - Unsupported-signature auto-parse failures now include direct interface-file guidance (`interfaces/<dep>.clri`) in addition to pointer-carrier hints.
+- Unsupported-signature auto-parse failures include concrete source-path context (`<dep>/src/lib.rs`) to speed triage.
 - Local path auto-discovery now fails explicitly when no top-level `pub fn` are discoverable, with impl-method guidance and interface-file guidance.
 - Registry auto-discovery now also fails explicitly when no top-level `pub fn` are discoverable, with interface-file guidance.
 - Interface parse errors now include file path + line/column token context.
