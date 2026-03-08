@@ -590,7 +590,7 @@ impl RustFfiProcessor {
                 name,
                 &lib_src.display().to_string(),
                 likely_impl_only,
-                false,
+                true,
             ));
         } else if verbose {
             println!("      Found {} public functions", generator.functions.len());
@@ -5713,6 +5713,7 @@ auto-parse-impl-only-lib = { path = "auto-parse-impl-only-lib" }
         assert!(err.contains("no auto-discoverable top-level `pub fn`"));
         assert!(err.contains("Common cause: API is primarily impl/associated methods"));
         assert!(err.contains("Recommendation: provide bridge free functions"));
+        assert!(err.contains("interfaces/auto-parse-impl-only-lib.clri"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
