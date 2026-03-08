@@ -4564,6 +4564,16 @@ mod tests {
     }
 
     #[test]
+    fn format_registry_metadata_resolution_error_trims_stderr_whitespace() {
+        let rendered = RustFfiProcessor::format_registry_metadata_resolution_error(
+            "libm",
+            "\n   error: failed to select a version for the requirement\n\n",
+        );
+        assert!(rendered.contains("error: failed to select a version for the requirement"));
+        assert!(!rendered.contains("\n\n\n"));
+    }
+
+    #[test]
     fn resolve_interface_path_auto_prefers_clri() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

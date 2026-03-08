@@ -103,7 +103,7 @@ Notes:
 - Unsupported-signature auto-parse failures include concrete source-path context (`<dep>/src/lib.rs`) to speed triage.
 - Registry unsupported-signature failures include concrete resolved registry source-path context for faster triage.
 - Registry unsupported-signature failures also include the same raw-pointer carrier hint used in local auto-parse diagnostics.
-- Registry metadata-resolution failures now normalize stderr (including empty stderr handling) and add explicit network-unavailable guidance for crates.io DNS/download failures (without adding that hint for non-network errors).
+- Registry metadata-resolution failures now normalize stderr (including whitespace and empty-stderr handling) and add explicit network-unavailable guidance for crates.io DNS/download failures (without adding that hint for non-network errors).
 - Local path auto-discovery now fails explicitly when no top-level `pub fn` are discoverable, with impl-method guidance and interface-file guidance.
 - Local path no-`pub fn` failures include concrete source-path context (`<dep>/src/lib.rs`) for faster triage.
 - Registry auto-discovery now also fails explicitly when no top-level `pub fn` are discoverable, with interface-file guidance.
