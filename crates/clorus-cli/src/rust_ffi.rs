@@ -4295,6 +4295,32 @@ mod tests {
     }
 
     #[test]
+    fn collect_unsupported_signature_details_reports_concrete_type_names() {
+        let functions = vec![
+            FunctionInfo {
+                name: "bad_opt_param".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "maybe".to_string(),
+                    type_name: "Option<i32>".to_string(),
+                }],
+                return_type: "()".to_string(),
+            },
+            FunctionInfo {
+                name: "bad_result_ret".to_string(),
+                params: vec![],
+                return_type: "Result<i32, String>".to_string(),
+            },
+        ];
+
+        let details = RustFfiProcessor::collect_unsupported_signature_details(&functions);
+        assert_eq!(details.len(), 2);
+        assert!(details.iter().any(|d| d.contains("Option<i32>")));
+        assert!(details
+            .iter()
+            .any(|d| d.contains("Result<i32, String>")));
+    }
+
+    #[test]
     fn resolve_interface_path_auto_prefers_clri() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
