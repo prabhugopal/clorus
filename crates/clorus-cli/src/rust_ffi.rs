@@ -340,6 +340,32 @@ impl RustFfiProcessor {
         error
     }
 
+    fn format_registry_metadata_resolution_error(dep_name: &str, stderr: &str) -> String {
+        let trimmed = stderr.trim();
+        let mut msg = format!(
+            "Failed to resolve registry dependency '{}' via cargo metadata:",
+            dep_name
+        );
+        if trimmed.is_empty() {
+            msg.push_str("\n<no stderr output>");
+            return msg;
+        }
+
+        msg.push('\n');
+        msg.push_str(trimmed);
+
+        if trimmed.contains("Could not resolve host")
+            || trimmed.contains("failed to download from")
+            || trimmed.contains("spurious network error")
+        {
+            msg.push_str(
+                "\nHint: network access to crates.io appears unavailable; retry online, or use a local bridge crate / explicit interface path.",
+            );
+        }
+
+        msg
+    }
+
     fn likely_impl_method_only_api(src_path: &Path) -> bool {
         let Ok(source) = fs::read_to_string(src_path) else {
             return false;
@@ -725,10 +751,9 @@ impl RustFfiProcessor {
             .map_err(|e| format!("Failed to run cargo metadata for '{}': {}", dep_name, e))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!(
-                "Failed to resolve registry dependency '{}' via cargo metadata:\n{}",
-                dep_name, stderr
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            return Err(Self::format_registry_metadata_resolution_error(
+                dep_name, &stderr,
             ));
         }
 
@@ -4503,6 +4528,28 @@ mod tests {
 
         assert!(rendered.contains("Unsupported signature examples:"));
         assert!(rendered.contains("... and 2 more"));
+    }
+
+    #[test]
+    fn format_registry_metadata_resolution_error_adds_network_hint() {
+        let rendered = RustFfiProcessor::format_registry_metadata_resolution_error(
+            "libm",
+            "warning: spurious network error (1 try remaining): [6] Couldn't resolve host name\n",
+        );
+        assert!(rendered.contains(
+            "Failed to resolve registry dependency 'libm' via cargo metadata:"
+        ));
+        assert!(rendered.contains("spurious network error"));
+        assert!(rendered.contains("network access to crates.io appears unavailable"));
+    }
+
+    #[test]
+    fn format_registry_metadata_resolution_error_handles_empty_stderr() {
+        let rendered = RustFfiProcessor::format_registry_metadata_resolution_error("libm", "  ");
+        assert!(rendered.contains(
+            "Failed to resolve registry dependency 'libm' via cargo metadata:"
+        ));
+        assert!(rendered.contains("<no stderr output>"));
     }
 
     #[test]
