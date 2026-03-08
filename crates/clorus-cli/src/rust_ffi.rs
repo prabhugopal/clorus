@@ -5624,6 +5624,11 @@ auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
         assert!(err.contains("unsupported return type"));
         assert!(err.contains("*mut i32"));
         assert!(err.contains("`*mut u8` or `*const u8`"));
+        assert!(
+            err.contains("interfaces/auto-parse-none-supported-lib.clri"),
+            "expected interface-path hint, got: {}",
+            err
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
