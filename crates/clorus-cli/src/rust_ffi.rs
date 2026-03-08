@@ -741,6 +741,10 @@ Re-run cargo metadata and check dependency graph consistency.",
             Ok(version.to_string())
         };
         let resolved_lib_src = |package: &CargoPackage, dep_name: &str| -> Result<PathBuf, String> {
+            let resolved_version = {
+                let trimmed = package.version.trim();
+                if trimmed.is_empty() { "<unknown>" } else { trimmed }
+            };
             let Some(lib_target) = package
                 .targets
                 .iter()
@@ -753,7 +757,7 @@ Available target kinds for resolved package: [{}]. \
 Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
 an explicit interface for a bridge exposing extern \"C\" functions.",
                     dep_name,
-                    package.version,
+                    resolved_version,
                     resolved_kinds
                 ));
             };
@@ -763,7 +767,7 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
                 return Err(format!(
                     "Registry dependency '{}' (resolved {}) reported an empty lib src_path in cargo metadata. \
 Re-run cargo metadata and check dependency graph consistency.",
-                    dep_name, package.version
+                    dep_name, resolved_version
                 ));
             }
             Ok(PathBuf::from(src))
@@ -915,7 +919,7 @@ Available target kinds for resolved package: [{}]. \
 Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
 an explicit interface for a bridge exposing extern \"C\" functions.",
             dep_name,
-            resolved_pkg.version,
+            top_version,
             resolved_kinds
         ))
     }
@@ -1625,7 +1629,7 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
-                    id: String::new(),
+                    id: "path+file:///tmp/demo-math#0.1.0".to_string(),
                     name: "demo-math".to_string(),
                     version: "0.1.0".to_string(),
                     source: Some("path+file:///tmp/demo-math".to_string()),
@@ -1635,7 +1639,8 @@ mod tests {
                     }],
                 },
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "0.2.0".to_string(),
                     source: Some(
@@ -1661,7 +1666,8 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.10.0"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "0.10.0".to_string(),
                     source: Some(
@@ -1673,7 +1679,8 @@ mod tests {
                     }],
                 },
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.2"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "0.9.2".to_string(),
                     source: Some(
@@ -1699,7 +1706,8 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.10.0"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "0.10.0".to_string(),
                     source: Some(
@@ -1711,7 +1719,8 @@ mod tests {
                     }],
                 },
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.9.2"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "0.9.2".to_string(),
                     source: Some(
@@ -1854,7 +1863,8 @@ mod tests {
         let metadata = CargoMetadata {
             packages: vec![
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@1.2.3-alpha.2"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "1.2.3-alpha.2".to_string(),
                     source: Some(
@@ -1866,7 +1876,8 @@ mod tests {
                     }],
                 },
                 CargoPackage {
-                    id: String::new(),
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@1.2.3"
+                        .to_string(),
                     name: "demo-math".to_string(),
                     version: "1.2.3".to_string(),
                     source: Some(
@@ -3390,7 +3401,8 @@ mod tests {
     fn resolve_registry_lib_src_errors_when_registry_package_has_no_lib_target() {
         let metadata = CargoMetadata {
             packages: vec![CargoPackage {
-                id: String::new(),
+                id: "demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)"
+                    .to_string(),
                 name: "demo-math".to_string(),
                 version: "0.3.0".to_string(),
                 source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
@@ -3411,10 +3423,34 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_trims_version_in_no_lib_diagnostic() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)"
+                    .to_string(),
+                name: "demo-math".to_string(),
+                version: " 0.3.0 ".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["bin".to_string()],
+                    src_path: "/tmp/registry/src/main.rs".to_string(),
+                }],
+            }],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when registry package has no lib target");
+        assert!(err.contains("resolved 0.3.0"));
+        assert!(!err.contains("resolved  0.3.0 "));
+    }
+
+    #[test]
     fn resolve_registry_lib_src_errors_when_no_lib_target_kinds_are_whitespace_wrapped() {
         let metadata = CargoMetadata {
             packages: vec![CargoPackage {
-                id: String::new(),
+                id: "demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)"
+                    .to_string(),
                 name: "demo-math".to_string(),
                 version: "0.3.0".to_string(),
                 source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
@@ -3441,7 +3477,8 @@ mod tests {
     fn resolve_registry_lib_src_errors_when_no_lib_target_kinds_are_effectively_empty() {
         let metadata = CargoMetadata {
             packages: vec![CargoPackage {
-                id: String::new(),
+                id: "demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)"
+                    .to_string(),
                 name: "demo-math".to_string(),
                 version: "0.3.0".to_string(),
                 source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
