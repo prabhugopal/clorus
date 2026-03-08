@@ -769,8 +769,9 @@ an explicit interface for a bridge exposing extern \"C\" functions.",
             if src.is_empty() {
                 return Err(format!(
                     "Registry dependency '{}' (resolved {}) reported an empty lib src_path in cargo metadata. \
+Resolved package id: {}. \
 Re-run cargo metadata and check dependency graph consistency.",
-                    dep_name, resolved_version
+                    dep_name, resolved_version, resolved_pkg_id
                 ));
             }
             Ok(PathBuf::from(src))
@@ -2109,6 +2110,60 @@ mod tests {
             .expect_err("should fail when resolved lib target has empty src_path");
         assert!(err.contains("reported an empty lib src_path"));
         assert!(err.contains("resolved 0.2.0"));
+        assert!(
+            err.contains(
+                "Resolved package id: registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0."
+            )
+        );
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_normalizes_pkg_id_in_empty_lib_src_path_diagnostic() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    name: "demo_wrapper".to_string(),
+                    version: "0.1.0".to_string(),
+                    source: None,
+                    targets: vec![],
+                },
+                CargoPackage {
+                    id: "  registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0  "
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some(
+                        "registry+https://github.com/rust-lang/crates.io-index".to_string(),
+                    ),
+                    targets: vec![CargoTarget {
+                        kind: vec!["lib".to_string()],
+                        src_path: "   ".to_string(),
+                    }],
+                },
+            ],
+            resolve: Some(CargoResolve {
+                root: Some("path+file:///tmp/wrapper#0.1.0".to_string()),
+                nodes: vec![CargoResolveNode {
+                    id: "path+file:///tmp/wrapper#0.1.0".to_string(),
+                    deps: vec![CargoResolveDep {
+                        name: "demo-math".to_string(),
+                        pkg:
+                            "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                                .to_string(),
+                    }],
+                }],
+            }),
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when resolved lib target has empty src_path");
+        assert!(
+            err.contains(
+                "Resolved package id: registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0."
+            )
+        );
+        assert!(!err.contains("Resolved package id:   registry+https://"));
     }
 
     #[test]
