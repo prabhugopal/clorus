@@ -4556,6 +4556,16 @@ mod tests {
     }
 
     #[test]
+    fn format_registry_metadata_resolution_error_adds_hint_for_case_variant_download_error() {
+        let rendered = RustFfiProcessor::format_registry_metadata_resolution_error(
+            "libm",
+            "Caused by:\n  Failed To Download From `https://index.crates.io/config.json`\n",
+        );
+        assert!(rendered.contains("Failed To Download From"));
+        assert!(rendered.contains("network access to crates.io appears unavailable"));
+    }
+
+    #[test]
     fn format_registry_metadata_resolution_error_handles_empty_stderr() {
         let rendered = RustFfiProcessor::format_registry_metadata_resolution_error("libm", "  ");
         assert!(rendered.contains(
