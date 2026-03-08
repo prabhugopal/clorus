@@ -2065,6 +2065,9 @@ mod tests {
             .expect_err("should fail when direct root dependency has no lib target");
         assert!(err.contains("Registry dependency 'demo-math' (resolved 0.2.0) has no lib target"));
         assert!(err.contains("Available target kinds for resolved package: [bin]"));
+        assert!(err.contains(
+            "Resolved package id: registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0."
+        ));
     }
 
     #[test]
