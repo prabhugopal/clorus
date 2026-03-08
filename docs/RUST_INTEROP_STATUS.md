@@ -152,6 +152,7 @@ Today, reliable production path is:
 - Scoped-symbol collision/parity slice: **closed** (wrapper + codegen + namespace-variant regressions in place)
 - Resolver edge-case closure slice: **closed** (root/fallback no-lib + empty-version/empty-id precedence and normalization regressions in place)
 - Post-resolver diagnostics hardening slice: **closed** (unsupported-signature detail coverage + bounded examples + deterministic first-unsupported-param reporting)
+- Auto-discovery no-`pub fn` and unsupported-signature guidance slice: **closed** (local+registry explicit no-`pub fn` diagnostics, impl-method guidance, interface-path hints, and context-label idempotence regressions)
 
 ## Current E2E Coverage
 
