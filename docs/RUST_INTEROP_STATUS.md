@@ -178,6 +178,7 @@ The CLI/rust-ffi integration tests now cover:
 - codegen regression covers both hyphen and underscore forms of fully-prefixed rust namespace (`rust.<lib>/<fn>`) resolving to the same scoped symbol
 - local path auto-parse with unsupported-signature filtering
 - local path auto-parse explicitly rejects dependencies where all discovered public functions are unsupported after signature filtering (with concrete unsupported-signature examples)
+- local path auto-parse explicitly rejects dependencies with no top-level `pub fn` even when impl methods are absent, and still provides interface guidance
 - local path auto-parse preserves raw-pointer mutability/pointee in signature analysis (e.g. `*const u8` vs `*mut i32`)
 - local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
 - local path auto-parse with const-pointer signatures (`*const u8`) is covered and accepted via pointer-carrier mapping

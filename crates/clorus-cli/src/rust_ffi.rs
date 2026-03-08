@@ -5719,6 +5719,66 @@ auto-parse-impl-only-lib = { path = "auto-parse-impl-only-lib" }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_rejects_no_pub_fn_without_impl_hint() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_autoparse_no_pub_fn_{}",
+            unique
+        ));
+        let dep_dir = root.join("auto-parse-no-pub-fn-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-no-pub-fn-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+const ANSWER: i32 = 42;
+fn hidden_add(a: i32, b: i32) -> i32 { a + b }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-no-pub-fn-lib = { path = "auto-parse-no-pub-fn-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected no-pub-fn rejection"),
+            Err(e) => e,
+        };
+
+        assert!(err.contains("Rust dependency 'auto-parse-no-pub-fn-lib'"));
+        assert!(err.contains("no auto-discoverable top-level `pub fn`"));
+        assert!(err.contains("interfaces/auto-parse-no-pub-fn-lib.clri"));
+        assert!(!err.contains("Common cause: API is primarily impl/associated methods"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_parse_limits_unsupported_examples_to_five() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
