@@ -4487,6 +4487,21 @@ mod tests {
     }
 
     #[test]
+    fn format_registry_no_ffi_compatible_error_truncates_example_remainder() {
+        let details: Vec<String> = (0..7)
+            .map(|i| format!("f{}: unsupported param `a` type `Vec<u8>`", i))
+            .collect();
+        let rendered = RustFfiProcessor::format_registry_no_ffi_compatible_error(
+            "demo-lib",
+            "/tmp/registry/demo-lib/src/lib.rs",
+            &details,
+        );
+
+        assert!(rendered.contains("Unsupported signature examples:"));
+        assert!(rendered.contains("... and 2 more"));
+    }
+
+    #[test]
     fn resolve_interface_path_auto_prefers_clri() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -4732,11 +4747,11 @@ mod tests {
     fn with_dependency_context_does_not_duplicate_existing_dependency_label() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
-            "Rust dependency 'demo-lib' resolved from registry but no FFI-compatible functions were discovered".to_string(),
+            "Rust dependency 'demo-lib' resolved from registry source /tmp/registry/demo-lib/src/lib.rs, but no FFI-compatible functions were discovered in its lib target.".to_string(),
         );
         assert_eq!(
             out,
-            "Rust dependency 'demo-lib' resolved from registry but no FFI-compatible functions were discovered"
+            "Rust dependency 'demo-lib' resolved from registry source /tmp/registry/demo-lib/src/lib.rs, but no FFI-compatible functions were discovered in its lib target."
         );
     }
 
