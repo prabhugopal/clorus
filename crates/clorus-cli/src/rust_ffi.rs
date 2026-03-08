@@ -8247,6 +8247,53 @@ libm = { version = "0.2", interface = true }
     }
 
     #[test]
+    fn process_dependencies_registry_interface_false_ignores_interface_file() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_registry_interface_false_ignores_iface_{}",
+            unique
+        ));
+        let interfaces_dir = root.join("interfaces");
+        std::fs::create_dir_all(&interfaces_dir).expect("create interfaces dir");
+        std::fs::write(
+            interfaces_dir.join("libm.clri"),
+            "(interface libm\n  (fn bad [] :void))\nINTENTIONAL_INTERFACE_SHOULD_BE_IGNORED\n",
+        )
+        .expect("write ignored interface file");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+libm = { version = "0.2", interface = false }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected registry auto-parse rejection for libm"),
+            Err(e) => e,
+        });
+
+        assert!(err.contains("Rust dependency 'libm':"));
+        assert!(
+            err.contains("resolved from registry source")
+                || err.contains("Failed to resolve registry dependency 'libm' via cargo metadata")
+        );
+        assert!(!err.contains("INTENTIONAL_INTERFACE_SHOULD_BE_IGNORED"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_reports_dependency_name_for_unsupported_interface_extension() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
