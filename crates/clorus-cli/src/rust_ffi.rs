@@ -289,6 +289,33 @@ impl RustFfiProcessor {
         out
     }
 
+    fn format_no_auto_discoverable_pub_fn_error(
+        name: &str,
+        source_path_display: &str,
+        likely_impl_only: bool,
+        include_interface_hint: bool,
+    ) -> String {
+        let mut error = format!(
+            "Rust dependency '{}' has no auto-discoverable top-level `pub fn` in {}.",
+            name, source_path_display
+        );
+        if likely_impl_only {
+            error.push_str(
+                "\nCommon cause: API is primarily impl/associated methods; auto-discovery currently targets top-level pub fn.",
+            );
+            error.push_str(
+                "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
+            );
+        }
+        if include_interface_hint {
+            error.push_str(&format!(
+                "\nHint: add an interface file (interfaces/{}.clri) or use a local bridge crate.",
+                name
+            ));
+        }
+        error
+    }
+
     fn likely_impl_method_only_api(src_path: &Path) -> bool {
         let Ok(source) = fs::read_to_string(src_path) else {
             return false;
@@ -553,20 +580,13 @@ impl RustFfiProcessor {
         }
 
         if generator.functions.is_empty() {
-            let mut error = format!(
-                "Rust dependency '{}' has no auto-discoverable top-level `pub fn` in {}.",
+            let likely_impl_only = Self::likely_impl_method_only_api(&lib_src);
+            return Err(Self::format_no_auto_discoverable_pub_fn_error(
                 name,
-                lib_src.display()
-            );
-            if Self::likely_impl_method_only_api(&lib_src) {
-                error.push_str(
-                    "\nCommon cause: API is primarily impl/associated methods; auto-discovery currently targets top-level pub fn.",
-                );
-                error.push_str(
-                    "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
-                );
-            }
-            return Err(error);
+                &lib_src.display().to_string(),
+                likely_impl_only,
+                false,
+            ));
         } else if verbose {
             println!("      Found {} public functions", generator.functions.len());
         }
@@ -626,9 +646,19 @@ impl RustFfiProcessor {
             &RustDepSource::Version(version_req.to_string()),
         )?;
 
-        let discovered = Self::discover_registry_functions(&wrapper_dir, name, verbose)?;
+        let (resolved_src_path, discovered) =
+            Self::discover_registry_functions(&wrapper_dir, name, verbose)?;
         let unsupported_details = Self::collect_unsupported_signature_details(&discovered);
-        let functions = Self::retain_supported_ffi_functions(discovered, verbose);
+        let functions = Self::retain_supported_ffi_functions(discovered.clone(), verbose);
+        if discovered.is_empty() {
+            let likely_impl_only = Self::likely_impl_method_only_api(&resolved_src_path);
+            return Err(Self::format_no_auto_discoverable_pub_fn_error(
+                name,
+                &resolved_src_path.display().to_string(),
+                likely_impl_only,
+                true,
+            ));
+        }
         if functions.is_empty() {
             let mut error = format!(
                 "Rust dependency '{}' resolved from registry but no FFI-compatible functions were discovered in its lib target. Add an interface file (interfaces/{}.clri) or use a local bridge crate.",
@@ -664,7 +694,7 @@ impl RustFfiProcessor {
         wrapper_dir: &Path,
         dep_name: &str,
         verbose: bool,
-    ) -> Result<Vec<FunctionInfo>, String> {
+    ) -> Result<(PathBuf, Vec<FunctionInfo>), String> {
         let output = Command::new("cargo")
             .arg("metadata")
             .arg("--format-version")
@@ -703,7 +733,7 @@ impl RustFfiProcessor {
 
         let mut generator = FfiGenerator::new();
         generator.parse_file(&src_path)?;
-        Ok(generator.functions)
+        Ok((src_path, generator.functions))
     }
 
     fn resolve_registry_lib_src(
@@ -4379,6 +4409,34 @@ mod tests {
         assert!(rendered.contains("Unsupported signature examples:"));
         assert_eq!(rendered.matches("\n  - ").count(), 5);
         assert!(rendered.contains("... and 2 more"));
+    }
+
+    #[test]
+    fn format_no_auto_discoverable_pub_fn_error_with_interface_hint() {
+        let rendered = RustFfiProcessor::format_no_auto_discoverable_pub_fn_error(
+            "demo-lib",
+            "/tmp/demo/src/lib.rs",
+            true,
+            true,
+        );
+
+        assert!(rendered.contains("no auto-discoverable top-level `pub fn`"));
+        assert!(rendered.contains("Common cause: API is primarily impl/associated methods"));
+        assert!(rendered.contains("interfaces/demo-lib.clri"));
+    }
+
+    #[test]
+    fn format_no_auto_discoverable_pub_fn_error_without_interface_hint() {
+        let rendered = RustFfiProcessor::format_no_auto_discoverable_pub_fn_error(
+            "demo-lib",
+            "/tmp/demo/src/lib.rs",
+            false,
+            false,
+        );
+
+        assert!(rendered.contains("Rust dependency 'demo-lib' has no auto-discoverable top-level `pub fn`"));
+        assert!(!rendered.contains("interfaces/demo-lib.clri"));
+        assert!(!rendered.contains("Common cause: API is primarily impl/associated methods"));
     }
 
     #[test]

@@ -100,6 +100,7 @@ Notes:
 - Unsupported signatures now report concrete examples in build errors.
 - Unsupported-signature example blocks are bounded (max 5 examples) and now include `... and N more` when truncated.
 - Local path auto-discovery now fails explicitly when no top-level `pub fn` are discoverable, with impl-method guidance when applicable.
+- Registry auto-discovery now also fails explicitly when no top-level `pub fn` are discoverable, with interface-file guidance.
 - Interface parse errors now include file path + line/column token context.
 
 ## Current Limits
