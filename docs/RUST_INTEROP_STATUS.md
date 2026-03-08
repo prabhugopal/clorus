@@ -223,6 +223,7 @@ The CLI/rust-ffi integration tests now cover:
 - dependency-context idempotence is regression-covered for no-`pub fn` diagnostics (no duplicate labels; mismatched labels are still wrapped)
 - dependency-context prefixing preserves existing dependency-labeled diagnostics (no double-labeling)
 - dependency-context prefixing still wraps diagnostics labeled for a different dependency name
+- dependency-context label detection is whitespace-tolerant (`"   Rust dependency ..."` is normalized before idempotence checks)
 - dependency-context wrapping normalizes leading error whitespace and avoids trailing filler for blank errors
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
 - explicit interface-path acceptance for both supported extensions (`.clri`, `.clorus-ffi`) is unit-covered

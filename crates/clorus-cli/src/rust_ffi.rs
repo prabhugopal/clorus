@@ -101,10 +101,10 @@ impl RustFfiProcessor {
     fn with_dependency_context(dep_name: &str, err: String) -> String {
         let dep_label = format!("Rust dependency '{}'", dep_name);
         let prefix = format!("{}:", dep_label);
-        if err.starts_with(&prefix) || err.starts_with(&dep_label) {
-            err
+        let normalized = err.trim_start();
+        if normalized.starts_with(&prefix) || normalized.starts_with(&dep_label) {
+            normalized.to_string()
         } else {
-            let normalized = err.trim_start();
             if normalized.is_empty() {
                 prefix
             } else {
@@ -4741,6 +4741,27 @@ mod tests {
             "   path not found: missing".to_string(),
         );
         assert_eq!(out, "Rust dependency 'demo-lib': path not found: missing");
+    }
+
+    #[test]
+    fn with_dependency_context_whitespace_prefixed_label_remains_idempotent() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "   Rust dependency 'demo-lib': already prefixed".to_string(),
+        );
+        assert_eq!(out, "Rust dependency 'demo-lib': already prefixed");
+    }
+
+    #[test]
+    fn with_dependency_context_whitespace_prefixed_other_label_is_still_wrapped() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "   Rust dependency 'other-lib': path not found".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib': Rust dependency 'other-lib': path not found"
+        );
     }
 
     #[test]
