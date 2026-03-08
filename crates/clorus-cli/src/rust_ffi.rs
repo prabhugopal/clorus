@@ -2264,6 +2264,28 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_errors_on_empty_pkg_id_before_empty_lib_src_path() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "   ".to_string(),
+                name: "demo-math".to_string(),
+                version: "0.2.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["lib".to_string()],
+                    src_path: "   ".to_string(),
+                }],
+            }],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail on empty pkg id before empty src-path validation");
+        assert!(err.contains("included an empty package id"));
+        assert!(err.contains("top-version '0.2.0'"));
+    }
+
+    #[test]
     fn resolve_registry_lib_src_uses_unique_resolve_edge_when_root_missing() {
         let metadata = CargoMetadata {
             packages: vec![
