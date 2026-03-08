@@ -4321,6 +4321,33 @@ mod tests {
     }
 
     #[test]
+    fn collect_unsupported_signature_details_reports_first_unsupported_param_per_function() {
+        let functions = vec![FunctionInfo {
+            name: "multi_bad_params".to_string(),
+            params: vec![
+                clorus_ffi_gen::ParamInfo {
+                    name: "ok".to_string(),
+                    type_name: "i32".to_string(),
+                },
+                clorus_ffi_gen::ParamInfo {
+                    name: "first_bad".to_string(),
+                    type_name: "Option<i32>".to_string(),
+                },
+                clorus_ffi_gen::ParamInfo {
+                    name: "second_bad".to_string(),
+                    type_name: "Vec<u8>".to_string(),
+                },
+            ],
+            return_type: "()".to_string(),
+        }];
+
+        let details = RustFfiProcessor::collect_unsupported_signature_details(&functions);
+        assert_eq!(details.len(), 1);
+        assert!(details[0].contains("unsupported param `first_bad` type `Option<i32>`"));
+        assert!(!details[0].contains("second_bad"));
+    }
+
+    #[test]
     fn resolve_interface_path_auto_prefers_clri() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
