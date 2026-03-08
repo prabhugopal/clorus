@@ -745,6 +745,7 @@ Re-run cargo metadata and check dependency graph consistency.",
                 let trimmed = package.version.trim();
                 if trimmed.is_empty() { "<unknown>" } else { trimmed }
             };
+            let resolved_pkg_id = normalized_pkg_id(&package.id);
             let Some(lib_target) = package
                 .targets
                 .iter()
@@ -754,11 +755,13 @@ Re-run cargo metadata and check dependency graph consistency.",
                 return Err(format!(
                     "Registry dependency '{}' (resolved {}) has no lib target. \
 Available target kinds for resolved package: [{}]. \
+Resolved package id: {}. \
 Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
 an explicit interface for a bridge exposing extern \"C\" functions.",
                     dep_name,
                     resolved_version,
-                    resolved_kinds
+                    resolved_kinds,
+                    resolved_pkg_id
                 ));
             };
 
@@ -913,14 +916,17 @@ Re-run cargo metadata and inspect dependency graph consistency.",
         }
         let resolved_pkg = top_candidates[0];
         let resolved_kinds = normalized_target_kinds(resolved_pkg);
+        let resolved_pkg_id = normalized_pkg_id(&resolved_pkg.id);
         Err(format!(
             "Registry dependency '{}' (resolved {}) has no lib target. \
 Available target kinds for resolved package: [{}]. \
+Resolved package id: {}. \
 Only library crates can be auto-wrapped from registry sources; use a local bridge crate or provide \
 an explicit interface for a bridge exposing extern \"C\" functions.",
             dep_name,
             top_version,
-            resolved_kinds
+            resolved_kinds,
+            resolved_pkg_id
         ))
     }
 
@@ -3458,6 +3464,7 @@ mod tests {
             .expect_err("should fail when registry package has no lib target");
         assert!(err.contains("Registry dependency 'demo-math' (resolved 0.3.0) has no lib target"));
         assert!(err.contains("Available target kinds for resolved package: [bin]"));
+        assert!(err.contains("Resolved package id: demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)."));
         assert!(err.contains("Only library crates can be auto-wrapped"));
         assert!(err.contains("use a local bridge crate"));
     }
@@ -3482,6 +3489,7 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when registry package has no lib target");
         assert!(err.contains("resolved 0.3.0"));
+        assert!(err.contains("Resolved package id: demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)."));
         assert!(!err.contains("resolved  0.3.0 "));
     }
 
@@ -3511,6 +3519,31 @@ mod tests {
         let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
             .expect_err("should fail when registry package has no lib target");
         assert!(err.contains("Available target kinds for resolved package: [bin, test]"));
+    }
+
+    #[test]
+    fn resolve_registry_lib_src_normalizes_pkg_id_in_no_lib_diagnostic() {
+        let metadata = CargoMetadata {
+            packages: vec![CargoPackage {
+                id: "  demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)  "
+                    .to_string(),
+                name: "demo-math".to_string(),
+                version: "0.3.0".to_string(),
+                source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                targets: vec![CargoTarget {
+                    kind: vec!["bin".to_string()],
+                    src_path: "/tmp/registry/src/main.rs".to_string(),
+                }],
+            }],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail when registry package has no lib target");
+        assert!(err.contains(
+            "Resolved package id: demo-math 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)."
+        ));
+        assert!(!err.contains("Resolved package id:   demo-math"));
     }
 
     #[test]

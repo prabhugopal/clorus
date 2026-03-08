@@ -50,6 +50,7 @@ Notes:
 - No-lib-target diagnostics render empty/whitespace-only kind sets as `<none>`.
 - Top-version no-lib fallback candidates now validate package-id consistency (empty/ambiguous/duplicate entries fail explicitly).
 - No-lib diagnostics also normalize displayed resolved versions (trimmed; unknown if empty).
+- No-lib diagnostics now include the resolved package id (trim-normalized) to speed registry-candidate triage.
 - If the resolve graph points the dependency to a non-registry source (path/patch), resolver now fails explicitly instead of silently picking a different registry package.
 - Non-registry resolution diagnostics include the resolved package id to speed patch/replace triage.
 - Non-registry failures are covered for both root-edge resolution and unique-edge resolution when `resolve.root` is missing.
