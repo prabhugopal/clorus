@@ -229,6 +229,7 @@ The CLI/rust-ffi integration tests now cover:
 - dependency-context prefixing preserves existing dependency-labeled diagnostics (no double-labeling)
 - dependency-context prefixing still wraps diagnostics labeled for a different dependency name
 - dependency-context label detection is whitespace-tolerant (`"   Rust dependency ..."` is normalized before idempotence checks)
+- local auto-parse rejection diagnostics are regression-covered for non-duplicated dependency labels across unsupported-signature and no-`pub fn` paths
 - dependency-context wrapping normalizes leading error whitespace and avoids trailing filler for blank errors
 - explicit interface-path validation for empty/unsupported extensions (must be `.clri` or `.clorus-ffi`)
 - explicit interface-path acceptance for both supported extensions (`.clri`, `.clorus-ffi`) is unit-covered
