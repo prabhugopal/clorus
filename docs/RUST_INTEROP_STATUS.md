@@ -146,6 +146,7 @@ Today, reliable production path is:
 - Production for selected APIs: **usable**
 - Full seamless Rust interop: **in progress**
 - Scoped-symbol collision/parity slice: **closed** (wrapper + codegen + namespace-variant regressions in place)
+- Resolver edge-case closure slice: **closed** (root/fallback no-lib + empty-version/empty-id precedence and normalization regressions in place)
 
 ## Current E2E Coverage
 

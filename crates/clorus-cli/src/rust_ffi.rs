@@ -3882,6 +3882,44 @@ mod tests {
     }
 
     #[test]
+    fn resolve_registry_lib_src_reports_top_candidate_id_in_fallback_no_lib_diagnostic() {
+        let metadata = CargoMetadata {
+            packages: vec![
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.3.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.3.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bin".to_string()],
+                        src_path: "/tmp/registry/a/src/main.rs".to_string(),
+                    }],
+                },
+                CargoPackage {
+                    id: "registry+https://github.com/rust-lang/crates.io-index#demo-math@0.2.0"
+                        .to_string(),
+                    name: "demo-math".to_string(),
+                    version: "0.2.0".to_string(),
+                    source: Some("registry+https://github.com/rust-lang/crates.io-index".to_string()),
+                    targets: vec![CargoTarget {
+                        kind: vec!["bin".to_string()],
+                        src_path: "/tmp/registry/b/src/main.rs".to_string(),
+                    }],
+                },
+            ],
+            resolve: None,
+        };
+
+        let err = RustFfiProcessor::resolve_registry_lib_src(&metadata, "demo-math")
+            .expect_err("should fail with fallback no-lib diagnostic");
+        assert!(err.contains("resolved 0.3.0"));
+        assert!(err.contains(
+            "Resolved package id: registry+https://github.com/rust-lang/crates.io-index#demo-math@0.3.0."
+        ));
+    }
+
+    #[test]
     fn resolve_registry_lib_src_errors_on_ambiguous_top_no_lib_candidates() {
         let metadata = CargoMetadata {
             packages: vec![
