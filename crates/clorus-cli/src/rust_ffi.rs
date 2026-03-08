@@ -4885,6 +4885,18 @@ mod tests {
     }
 
     #[test]
+    fn with_dependency_context_whitespace_prefixed_registry_metadata_error_is_idempotent() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "   Rust dependency 'demo-lib': Failed to resolve registry dependency 'demo-lib' via cargo metadata:\nwarning: spurious network error".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib': Failed to resolve registry dependency 'demo-lib' via cargo metadata:\nwarning: spurious network error"
+        );
+    }
+
+    #[test]
     fn with_dependency_context_whitespace_prefixed_other_label_is_still_wrapped() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
