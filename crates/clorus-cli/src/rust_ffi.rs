@@ -5773,6 +5773,7 @@ auto-parse-impl-only-lib = { path = "auto-parse-impl-only-lib" }
 
         assert!(err.contains("Rust dependency 'auto-parse-impl-only-lib'"));
         assert!(err.contains("no auto-discoverable top-level `pub fn`"));
+        assert!(err.contains("auto-parse-impl-only-lib/src/lib.rs"));
         assert!(err.contains("Common cause: API is primarily impl/associated methods"));
         assert!(err.contains("Recommendation: provide bridge free functions"));
         assert!(err.contains("interfaces/auto-parse-impl-only-lib.clri"));
@@ -5834,6 +5835,7 @@ auto-parse-no-pub-fn-lib = { path = "auto-parse-no-pub-fn-lib" }
 
         assert!(err.contains("Rust dependency 'auto-parse-no-pub-fn-lib'"));
         assert!(err.contains("no auto-discoverable top-level `pub fn`"));
+        assert!(err.contains("auto-parse-no-pub-fn-lib/src/lib.rs"));
         assert!(err.contains("interfaces/auto-parse-no-pub-fn-lib.clri"));
         assert!(!err.contains("Common cause: API is primarily impl/associated methods"));
 

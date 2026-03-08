@@ -104,6 +104,7 @@ Notes:
 - Registry unsupported-signature failures include concrete resolved registry source-path context for faster triage.
 - Registry unsupported-signature failures also include the same raw-pointer carrier hint used in local auto-parse diagnostics.
 - Local path auto-discovery now fails explicitly when no top-level `pub fn` are discoverable, with impl-method guidance and interface-file guidance.
+- Local path no-`pub fn` failures include concrete source-path context (`<dep>/src/lib.rs`) for faster triage.
 - Registry auto-discovery now also fails explicitly when no top-level `pub fn` are discoverable, with interface-file guidance.
 - Interface parse errors now include file path + line/column token context.
 
