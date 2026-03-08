@@ -84,6 +84,8 @@ Notes:
 - In `.clri` files, pointer keywords support both forms:
   `:*mut-u8` / `:*const-u8` and `:*mut u8` / `:*const u8`
   (all map to `*mut u8` / `*const u8`).
+- In `.clri` files, `:str` maps to borrowed Rust string type `&str`
+  (while `:string` maps to owned `String`).
 
 ## What Works Today
 

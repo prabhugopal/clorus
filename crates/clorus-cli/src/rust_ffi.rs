@@ -5324,6 +5324,7 @@ edition = "2021"
             r#"
 pub fn flip_bool(x: bool) -> bool { !x }
 pub fn echo_string(s: String) -> String { s }
+pub fn echo_str(s: &str) -> &str { s }
 "#,
         )
         .expect("write dep lib");
@@ -5333,6 +5334,7 @@ pub fn echo_string(s: String) -> String { s }
             r#"(interface demo-text
   (fn flip-bool [x :bool] :bool)
   (fn echo-string [s :string] :string)
+  (fn echo-str [s :str] :str)
 )"#,
         )
         .expect("write interface");
@@ -5359,10 +5361,12 @@ demo-text = { path = "demo-text", interface = true }
         assert_eq!(processed.libraries.len(), 1);
         let lib = &processed.libraries[0];
         assert_eq!(lib.name, "demo_text_ffi");
-        assert_eq!(lib.functions.len(), 2);
+        assert_eq!(lib.functions.len(), 3);
         assert_eq!(lib.functions[0].return_type, "bool");
         assert_eq!(lib.functions[1].return_type, "String");
         assert_eq!(lib.functions[1].params[0].type_name, "String");
+        assert_eq!(lib.functions[2].return_type, "&str");
+        assert_eq!(lib.functions[2].params[0].type_name, "&str");
 
         let _ = std::fs::remove_dir_all(&root);
     }

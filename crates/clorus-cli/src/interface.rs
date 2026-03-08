@@ -308,6 +308,7 @@ fn map_type_keyword(keyword: &str) -> String {
         "f32" => "f32".to_string(),
         "bool" => "bool".to_string(),
         "string" => "String".to_string(),
+        "str" => "&str".to_string(),
         "unit" => "()".to_string(),
         "*mut u8" => "*mut u8".to_string(),
         "*const u8" => "*const u8".to_string(),
@@ -370,6 +371,24 @@ mod tests {
         let f = &interface.functions[0];
         assert_eq!(f.name, "new-point");
         assert_eq!(f.rust_symbol.as_deref(), Some("Point::new"));
+    }
+
+    #[test]
+    fn test_parse_interface_maps_str_keyword_to_borrowed_str() {
+        let source = r#"
+(interface demo
+  (fn echo [s :str] :str))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let interface = parse_interface_file(file.path()).expect("parse interface");
+        assert_eq!(interface.functions.len(), 1);
+        let f = &interface.functions[0];
+        assert_eq!(f.params[0].type_name, "&str");
+        assert_eq!(f.return_type, "&str");
     }
 
     #[test]
