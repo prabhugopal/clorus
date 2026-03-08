@@ -99,6 +99,7 @@ Notes:
   - others: `bool`, `String`, `()`, `*mut u8`, `*const u8`
 - Unsupported signatures now report concrete examples in build errors.
 - Unsupported-signature example blocks are bounded (max 5 examples) and now include `... and N more` when truncated.
+- Local path auto-discovery now fails explicitly when no top-level `pub fn` are discoverable, with impl-method guidance when applicable.
 - Interface parse errors now include file path + line/column token context.
 
 ## Current Limits

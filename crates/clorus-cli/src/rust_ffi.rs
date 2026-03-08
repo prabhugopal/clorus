@@ -553,14 +553,20 @@ impl RustFfiProcessor {
         }
 
         if generator.functions.is_empty() {
-            if verbose {
-                println!("      No public functions found - creating empty wrapper");
-                if Self::likely_impl_method_only_api(&lib_src) {
-                    println!(
-                        "      Hint: impl methods are not auto-discovered. Expose free bridge functions or use an interface + bridge API."
-                    );
-                }
+            let mut error = format!(
+                "Rust dependency '{}' has no auto-discoverable top-level `pub fn` in {}.",
+                name,
+                lib_src.display()
+            );
+            if Self::likely_impl_method_only_api(&lib_src) {
+                error.push_str(
+                    "\nCommon cause: API is primarily impl/associated methods; auto-discovery currently targets top-level pub fn.",
+                );
+                error.push_str(
+                    "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
+                );
             }
+            return Err(error);
         } else if verbose {
             println!("      Found {} public functions", generator.functions.len());
         }
@@ -5531,6 +5537,69 @@ auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
         assert!(err.contains("unsupported return type"));
         assert!(err.contains("*mut i32"));
         assert!(err.contains("`*mut u8` or `*const u8`"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_rejects_impl_only_api() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_autoparse_impl_only_{}",
+            unique
+        ));
+        let dep_dir = root.join("auto-parse-impl-only-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-impl-only-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Counter(i32);
+impl Counter {
+    pub fn new(v: i32) -> Self { Self(v) }
+    pub fn inc(&mut self) { self.0 += 1; }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-impl-only-lib = { path = "auto-parse-impl-only-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected impl-only API rejection"),
+            Err(e) => e,
+        };
+
+        assert!(err.contains("Rust dependency 'auto-parse-impl-only-lib'"));
+        assert!(err.contains("no auto-discoverable top-level `pub fn`"));
+        assert!(err.contains("Common cause: API is primarily impl/associated methods"));
+        assert!(err.contains("Recommendation: provide bridge free functions"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
