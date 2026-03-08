@@ -4694,6 +4694,18 @@ mod tests {
     }
 
     #[test]
+    fn with_dependency_context_does_not_duplicate_no_pub_fn_diagnostic_label() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Rust dependency 'demo-lib' has no auto-discoverable top-level `pub fn` in /tmp/demo/src/lib.rs.".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib' has no auto-discoverable top-level `pub fn` in /tmp/demo/src/lib.rs."
+        );
+    }
+
+    #[test]
     fn with_dependency_context_prefixes_when_existing_label_is_for_other_dependency() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
@@ -4702,6 +4714,18 @@ mod tests {
         assert_eq!(
             out,
             "Rust dependency 'demo-lib': Rust dependency 'other-lib': path not found"
+        );
+    }
+
+    #[test]
+    fn with_dependency_context_prefixes_no_pub_fn_diagnostic_for_other_dependency() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Rust dependency 'other-lib' has no auto-discoverable top-level `pub fn` in /tmp/other/src/lib.rs.".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib': Rust dependency 'other-lib' has no auto-discoverable top-level `pub fn` in /tmp/other/src/lib.rs."
         );
     }
 
