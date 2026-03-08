@@ -333,6 +333,9 @@ impl RustFfiProcessor {
         );
         if !unsupported_details.is_empty() {
             error.push_str(&Self::format_unsupported_examples(unsupported_details, 5));
+            error.push_str(
+                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`.",
+            );
         }
         error
     }
@@ -4484,6 +4487,7 @@ mod tests {
         assert!(rendered.contains("Unsupported signature examples:"));
         assert!(rendered.contains("f0: unsupported param"));
         assert!(rendered.contains("f1: unsupported return type"));
+        assert!(rendered.contains("`*mut u8` or `*const u8`"));
     }
 
     #[test]

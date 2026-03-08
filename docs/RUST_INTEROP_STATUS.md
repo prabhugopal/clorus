@@ -102,6 +102,7 @@ Notes:
 - Unsupported-signature auto-parse failures now include direct interface-file guidance (`interfaces/<dep>.clri`) in addition to pointer-carrier hints.
 - Unsupported-signature auto-parse failures include concrete source-path context (`<dep>/src/lib.rs`) to speed triage.
 - Registry unsupported-signature failures include concrete resolved registry source-path context for faster triage.
+- Registry unsupported-signature failures also include the same raw-pointer carrier hint used in local auto-parse diagnostics.
 - Local path auto-discovery now fails explicitly when no top-level `pub fn` are discoverable, with impl-method guidance and interface-file guidance.
 - Registry auto-discovery now also fails explicitly when no top-level `pub fn` are discoverable, with interface-file guidance.
 - Interface parse errors now include file path + line/column token context.
