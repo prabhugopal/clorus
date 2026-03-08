@@ -64,6 +64,7 @@ Notes:
 - Resolve node ids and package source strings from cargo metadata are trim-normalized before root resolution / registry-source checks.
 - Non-registry source diagnostics normalize source strings (trimmed; blank -> `<unknown>`).
 - Non-registry source diagnostics also normalize package id display (trimmed; blank -> `<unknown>`).
+- Non-registry source diagnostics normalize displayed resolved versions (trimmed).
 - Resolver dependency-name matching is trim-normalized (metadata edge names, package names, and incoming dependency argument).
 - Resolved lib-target `src_path` is trim-validated; empty lib source paths now fail explicitly as metadata inconsistency.
 - Lib-target kind detection is trim-normalized (`" lib "` is treated as `lib`).
