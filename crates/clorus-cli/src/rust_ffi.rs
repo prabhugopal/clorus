@@ -570,12 +570,17 @@ impl RustFfiProcessor {
 
         if generator.functions.is_empty() && !unsupported_details.is_empty() {
             let mut error = format!(
-                "has public functions, but none are FFI-compatible after signature filtering."
+                "Rust dependency '{}' has public functions, but none are FFI-compatible after signature filtering.",
+                name
             );
             error.push_str(&Self::format_unsupported_examples(&unsupported_details, 5));
             error.push_str(
                 "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`.",
             );
+            error.push_str(&format!(
+                "\nHint: add an interface file (interfaces/{}.clri) or provide free bridge functions.",
+                name
+            ));
             return Err(error);
         }
 
@@ -5613,7 +5618,7 @@ auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
             Err(e) => e,
         };
 
-        assert!(err.contains("Rust dependency 'auto-parse-none-supported-lib':"));
+        assert!(err.contains("Rust dependency 'auto-parse-none-supported-lib'"));
         assert!(err.contains("none are FFI-compatible after signature filtering"));
         assert!(err.contains("unsupported param"));
         assert!(err.contains("unsupported return type"));
@@ -6198,7 +6203,7 @@ auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
             Ok(_) => panic!("expected unsupported pointer signature rejection"),
             Err(e) => e,
         });
-        assert!(err.contains("Rust dependency 'auto-parse-bad-ptr-lib':"));
+        assert!(err.contains("Rust dependency 'auto-parse-bad-ptr-lib'"));
         assert!(
             err.contains("none are FFI-compatible after signature filtering"),
             "expected unsupported-signature filtering failure, got: {}",
@@ -6212,6 +6217,11 @@ auto-parse-bad-ptr-lib = { path = "auto-parse-bad-ptr-lib" }
         assert!(
             err.contains("supports raw pointers only as `*mut u8` or `*const u8`"),
             "expected pointer support hint, got: {}",
+            err
+        );
+        assert!(
+            err.contains("interfaces/auto-parse-bad-ptr-lib.clri"),
+            "expected interface-path hint, got: {}",
             err
         );
 
