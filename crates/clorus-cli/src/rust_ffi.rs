@@ -5481,6 +5481,74 @@ auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
     }
 
     #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_limits_unsupported_examples_to_five() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_autoparse_example_limit_{}",
+            unique
+        ));
+        let dep_dir = root.join("auto-parse-example-limit-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "auto-parse-example-limit-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn bad0(v: Vec<u8>) -> Vec<u8> { v }
+pub fn bad1(v: Vec<u8>) -> Vec<u8> { v }
+pub fn bad2(v: Vec<u8>) -> Vec<u8> { v }
+pub fn bad3(v: Vec<u8>) -> Vec<u8> { v }
+pub fn bad4(v: Vec<u8>) -> Vec<u8> { v }
+pub fn bad5(v: Vec<u8>) -> Vec<u8> { v }
+pub fn bad6(v: Vec<u8>) -> Vec<u8> { v }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+auto-parse-example-limit-lib = { path = "auto-parse-example-limit-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let result = with_cwd(&root, || RustFfiProcessor::process_dependencies(&manifest, false));
+        let err = match result {
+            Ok(_) => panic!("expected no-supported-functions rejection"),
+            Err(e) => e,
+        };
+
+        assert!(err.contains("Unsupported signature examples:"));
+        let bullet_count = err.matches("\n  - ").count();
+        assert_eq!(
+            bullet_count, 5,
+            "expected exactly 5 unsupported-signature examples, got {}\n{}",
+            bullet_count, err
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_local_path_auto_parse_supports_bool_string_and_pointer() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
