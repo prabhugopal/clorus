@@ -316,6 +316,27 @@ impl RustFfiProcessor {
         error
     }
 
+    fn format_registry_no_ffi_compatible_error(
+        name: &str,
+        source_path_display: &str,
+        unsupported_details: &[String],
+    ) -> String {
+        let mut error = format!(
+            "Rust dependency '{}' resolved from registry source {}, but no FFI-compatible functions were discovered in its lib target. Add an interface file (interfaces/{}.clri) or use a local bridge crate.",
+            name, source_path_display, name
+        );
+        error.push_str(
+            "\nCommon cause: API is primarily impl/associated methods; auto-discovery currently targets top-level pub fn.",
+        );
+        error.push_str(
+            "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
+        );
+        if !unsupported_details.is_empty() {
+            error.push_str(&Self::format_unsupported_examples(unsupported_details, 5));
+        }
+        error
+    }
+
     fn likely_impl_method_only_api(src_path: &Path) -> bool {
         let Ok(source) = fs::read_to_string(src_path) else {
             return false;
@@ -666,20 +687,11 @@ impl RustFfiProcessor {
             ));
         }
         if functions.is_empty() {
-            let mut error = format!(
-                "Rust dependency '{}' resolved from registry but no FFI-compatible functions were discovered in its lib target. Add an interface file (interfaces/{}.clri) or use a local bridge crate.",
-                name, name
-            );
-            error.push_str(
-                "\nCommon cause: API is primarily impl/associated methods; auto-discovery currently targets top-level pub fn.",
-            );
-            error.push_str(
-                "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
-            );
-            if !unsupported_details.is_empty() {
-                error.push_str(&Self::format_unsupported_examples(&unsupported_details, 5));
-            }
-            return Err(error);
+            return Err(Self::format_registry_no_ffi_compatible_error(
+                name,
+                &resolved_src_path.display().to_string(),
+                &unsupported_details,
+            ));
         }
 
         if verbose {
@@ -4443,6 +4455,35 @@ mod tests {
         assert!(rendered.contains("Rust dependency 'demo-lib' has no auto-discoverable top-level `pub fn`"));
         assert!(!rendered.contains("interfaces/demo-lib.clri"));
         assert!(!rendered.contains("Common cause: API is primarily impl/associated methods"));
+    }
+
+    #[test]
+    fn format_registry_no_ffi_compatible_error_includes_registry_source_path() {
+        let rendered = RustFfiProcessor::format_registry_no_ffi_compatible_error(
+            "demo-lib",
+            "/tmp/registry/demo-lib/src/lib.rs",
+            &[],
+        );
+
+        assert!(rendered.contains("resolved from registry source /tmp/registry/demo-lib/src/lib.rs"));
+        assert!(rendered.contains("interfaces/demo-lib.clri"));
+    }
+
+    #[test]
+    fn format_registry_no_ffi_compatible_error_includes_unsupported_examples() {
+        let details = vec![
+            "f0: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f1: unsupported return type `Result<i32, String>`".to_string(),
+        ];
+        let rendered = RustFfiProcessor::format_registry_no_ffi_compatible_error(
+            "demo-lib",
+            "/tmp/registry/demo-lib/src/lib.rs",
+            &details,
+        );
+
+        assert!(rendered.contains("Unsupported signature examples:"));
+        assert!(rendered.contains("f0: unsupported param"));
+        assert!(rendered.contains("f1: unsupported return type"));
     }
 
     #[test]
