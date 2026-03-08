@@ -4814,6 +4814,18 @@ mod tests {
     }
 
     #[test]
+    fn with_dependency_context_whitespace_prefixed_multiline_label_remains_idempotent() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "   Rust dependency 'demo-lib': head\n  - detail one\n  - detail two".to_string(),
+        );
+        assert_eq!(
+            out,
+            "Rust dependency 'demo-lib': head\n  - detail one\n  - detail two"
+        );
+    }
+
+    #[test]
     fn with_dependency_context_whitespace_prefixed_other_label_is_still_wrapped() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
