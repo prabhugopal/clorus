@@ -4930,6 +4930,15 @@ mod tests {
     }
 
     #[test]
+    fn with_dependency_context_prefixes_registry_metadata_error_for_other_dependency() {
+        let out = RustFfiProcessor::with_dependency_context(
+            "demo-lib",
+            "Rust dependency 'other-lib': Failed to resolve registry dependency 'other-lib' via cargo metadata:\nerror: Could not resolve host".to_string(),
+        );
+        assert!(out.starts_with("Rust dependency 'demo-lib': Rust dependency 'other-lib': Failed to resolve registry dependency"));
+    }
+
+    #[test]
     fn with_dependency_context_whitespace_prefixed_other_label_is_still_wrapped() {
         let out = RustFfiProcessor::with_dependency_context(
             "demo-lib",
