@@ -98,7 +98,7 @@ Notes:
   - unsigned ints: `u8`, `u16`, `u32`, `u64`, `usize`
   - others: `bool`, `String`, `()`, `*mut u8`, `*const u8`
 - Unsupported signatures now report concrete examples in build errors.
-- Unsupported-signature example blocks are bounded (max 5 examples) to keep diagnostics readable.
+- Unsupported-signature example blocks are bounded (max 5 examples) and now include `... and N more` when truncated.
 - Interface parse errors now include file path + line/column token context.
 
 ## Current Limits

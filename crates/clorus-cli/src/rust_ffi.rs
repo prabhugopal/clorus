@@ -273,6 +273,22 @@ impl RustFfiProcessor {
             .collect()
     }
 
+    fn format_unsupported_examples(details: &[String], max_examples: usize) -> String {
+        if details.is_empty() || max_examples == 0 {
+            return String::new();
+        }
+        let shown = details.len().min(max_examples);
+        let mut out = String::from("\nUnsupported signature examples:");
+        for detail in details.iter().take(max_examples) {
+            out.push_str(&format!("\n  - {}", detail));
+        }
+        let remaining = details.len().saturating_sub(shown);
+        if remaining > 0 {
+            out.push_str(&format!("\n  ... and {} more", remaining));
+        }
+        out
+    }
+
     fn likely_impl_method_only_api(src_path: &Path) -> bool {
         let Ok(source) = fs::read_to_string(src_path) else {
             return false;
@@ -529,10 +545,7 @@ impl RustFfiProcessor {
             let mut error = format!(
                 "has public functions, but none are FFI-compatible after signature filtering."
             );
-            error.push_str("\nUnsupported signature examples:");
-            for detail in unsupported_details.iter().take(5) {
-                error.push_str(&format!("\n  - {}", detail));
-            }
+            error.push_str(&Self::format_unsupported_examples(&unsupported_details, 5));
             error.push_str(
                 "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`.",
             );
@@ -622,10 +635,7 @@ impl RustFfiProcessor {
                 "\nRecommendation: provide bridge free functions and bind them via .clri interface.",
             );
             if !unsupported_details.is_empty() {
-                error.push_str("\nUnsupported signature examples:");
-                for detail in unsupported_details.iter().take(5) {
-                    error.push_str(&format!("\n  - {}", detail));
-                }
+                error.push_str(&Self::format_unsupported_examples(&unsupported_details, 5));
             }
             return Err(error);
         }
@@ -4348,6 +4358,24 @@ mod tests {
     }
 
     #[test]
+    fn format_unsupported_examples_reports_remaining_count_when_truncated() {
+        let details = vec![
+            "f0: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f1: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f2: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f3: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f4: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f5: unsupported param `a` type `Vec<u8>`".to_string(),
+            "f6: unsupported param `a` type `Vec<u8>`".to_string(),
+        ];
+
+        let rendered = RustFfiProcessor::format_unsupported_examples(&details, 5);
+        assert!(rendered.contains("Unsupported signature examples:"));
+        assert_eq!(rendered.matches("\n  - ").count(), 5);
+        assert!(rendered.contains("... and 2 more"));
+    }
+
+    #[test]
     fn resolve_interface_path_auto_prefers_clri() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -5571,6 +5599,7 @@ auto-parse-example-limit-lib = { path = "auto-parse-example-limit-lib" }
             "expected exactly 5 unsupported-signature examples, got {}\n{}",
             bullet_count, err
         );
+        assert!(err.contains("... and 2 more"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
