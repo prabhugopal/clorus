@@ -114,6 +114,18 @@ impl FfiGenerator {
                 .last()
                 .map(|seg| seg.ident.to_string())
                 .unwrap_or_else(|| "unknown".to_string()),
+            Type::Reference(reference) => {
+                let pointee = reference
+                    .elem
+                    .to_token_stream()
+                    .to_string()
+                    .replace(' ', "");
+                if reference.mutability.is_none() && pointee == "str" {
+                    "&str".to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            }
             Type::Ptr(ptr) => {
                 // Preserve pointer mutability and pointee so unsupported pointer
                 // signatures can be rejected with specific diagnostics upstream.
@@ -199,6 +211,7 @@ impl FfiGenerator {
             "usize" => "u64".to_string(),
             "bool" => "bool".to_string(),
             "String" => "*mut c_char".to_string(), // CString::into_raw() returns *mut c_char
+            "&str" => "*mut c_char".to_string(),
             "()" => "()".to_string(),
             "*mut u8" => "*mut u8".to_string(),   // Pointer types pass through as-is
             "*const u8" => "*mut u8".to_string(), // C carrier for const raw pointer
@@ -229,6 +242,10 @@ impl FfiGenerator {
                 "    let {}_rust = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};",
                 name, name
             ),
+            "&str" => format!(
+                "    let {}_rust_owned = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};\n    let {}_rust = {}_rust_owned.as_str();",
+                name, name, name, name
+            ),
             _ => format!("    let {}_rust = {};", name, name),
         }
     }
@@ -253,6 +270,10 @@ impl FfiGenerator {
             "isize" => format!("    {} as i64", name),
             "usize" => format!("    {} as u64", name),
             "String" => format!(
+                "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
+                name
+            ),
+            "&str" => format!(
                 "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
                 name
             ),
@@ -466,5 +487,45 @@ mod tests {
         assert!(wrappers.contains("pub extern \"C\" fn clorus_demo(a: i8, b: u16, p: *mut u8) -> *mut u8"));
         assert!(wrappers.contains("let p_rust = p as *const u8;"));
         assert!(wrappers.contains("result as *mut u8"));
+    }
+
+    #[test]
+    fn test_parse_borrowed_str_signature() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_file = format!("/tmp/test_borrowed_str_{}.rs", unique);
+        let mut file = std::fs::File::create(&temp_file).unwrap();
+        file.write_all(b"pub fn echo_str(s: &str) -> &str { s }").unwrap();
+
+        let mut generator = FfiGenerator::new();
+        generator.parse_file(Path::new(&temp_file)).unwrap();
+
+        assert_eq!(generator.functions.len(), 1);
+        assert_eq!(generator.functions[0].name, "echo_str");
+        assert_eq!(generator.functions[0].params[0].type_name, "&str");
+        assert_eq!(generator.functions[0].return_type, "&str");
+
+        let _ = std::fs::remove_file(&temp_file);
+    }
+
+    #[test]
+    fn test_generate_wrapper_supports_borrowed_str() {
+        let mut generator = FfiGenerator::new();
+        generator.functions.push(FunctionInfo {
+            name: "echo_str".to_string(),
+            params: vec![ParamInfo {
+                name: "s".to_string(),
+                type_name: "&str".to_string(),
+            }],
+            return_type: "&str".to_string(),
+        });
+
+        let wrappers = generator.generate_c_wrappers();
+        assert!(wrappers.contains("pub extern \"C\" fn clorus_echo_str(s: *mut c_char) -> *mut c_char"));
+        assert!(wrappers.contains("let s_rust_owned = unsafe { CStr::from_ptr(s as *const c_char).to_string_lossy().to_string() };"));
+        assert!(wrappers.contains("let s_rust = s_rust_owned.as_str();"));
+        assert!(wrappers.contains("unsafe { CString::new(result).unwrap().into_raw() }"));
     }
 }

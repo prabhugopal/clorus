@@ -240,6 +240,7 @@ impl RustFfiProcessor {
                 | "usize"
                 | "bool"
                 | "String"
+                | "&str"
                 | "()"
                 | "*mut u8"
                 | "*const u8"
@@ -334,7 +335,7 @@ impl RustFfiProcessor {
         if !unsupported_details.is_empty() {
             error.push_str(&Self::format_unsupported_examples(unsupported_details, 5));
             error.push_str(
-                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`.",
+                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`; string carriers include `String` and `&str`.",
             );
         }
         error
@@ -628,7 +629,7 @@ impl RustFfiProcessor {
             );
             error.push_str(&Self::format_unsupported_examples(&unsupported_details, 5));
             error.push_str(
-                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`.",
+                "\nHint: auto-discovery supports raw pointers only as `*mut u8` or `*const u8`; string carriers include `String` and `&str`.",
             );
             error.push_str(&format!(
                 "\nHint: add an interface file (interfaces/{}.clri) or provide free bridge functions.",
@@ -1305,6 +1306,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             "usize" => "u64".to_string(),
             "bool" => "bool".to_string(),
             "String" => "*mut c_char".to_string(),
+            "&str" => "*mut c_char".to_string(),
             "()" => "()".to_string(),
             "*mut u8" => "*mut u8".to_string(),
             "*const u8" => "*mut u8".to_string(),
@@ -1325,6 +1327,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 "    let {}_rust = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};",
                 name, name
             ),
+            "&str" => format!(
+                "    let {}_rust_owned = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};\n    let {}_rust = {}_rust_owned.as_str();",
+                name, name, name, name
+            ),
             _ => format!("    let {}_rust = {};", name, name),
         }
     }
@@ -1340,6 +1346,10 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             "isize" => format!("    {} as i64", name),
             "usize" => format!("    {} as u64", name),
             "String" => format!(
+                "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
+                name
+            ),
+            "&str" => format!(
                 "    unsafe {{ CString::new({}).unwrap().into_raw() }}",
                 name
             ),
@@ -1569,14 +1579,14 @@ Use an explicit `.clri` interface with supported types or a local bridge crate."
             for param in &binding.params {
                 if !Self::is_supported_ffi_type(&param.type_name) {
                     return Err(format!(
-                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8,*const u8",
+                        "Interface '{}' function '{}' has unsupported param type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,&str,(),*mut u8,*const u8",
                         interface_path, binding.exposed_name, param.type_name
                     ));
                 }
             }
             if !Self::is_supported_ffi_type(&binding.return_type) {
                 return Err(format!(
-                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,(),*mut u8,*const u8",
+                    "Interface '{}' function '{}' has unsupported return type '{}'. Supported types: f32,f64,i8,u8,i16,u16,i32,u32,i64,u64,isize,usize,bool,String,&str,(),*mut u8,*const u8",
                     interface_path, binding.exposed_name, binding.return_type
                 ));
             }
@@ -4345,6 +4355,14 @@ mod tests {
                 return_type: "String".to_string(),
             },
             FunctionInfo {
+                name: "ok_borrowed_str".to_string(),
+                params: vec![clorus_ffi_gen::ParamInfo {
+                    name: "s".to_string(),
+                    type_name: "&str".to_string(),
+                }],
+                return_type: "&str".to_string(),
+            },
+            FunctionInfo {
                 name: "ok_ptr".to_string(),
                 params: vec![],
                 return_type: "*mut u8".to_string(),
@@ -4361,7 +4379,10 @@ mod tests {
 
         let filtered = RustFfiProcessor::retain_supported_ffi_functions(functions, false);
         let names: Vec<String> = filtered.into_iter().map(|f| f.name).collect();
-        assert_eq!(names, vec!["ok_bool", "ok_string", "ok_ptr", "ok_void"]);
+        assert_eq!(
+            names,
+            vec!["ok_bool", "ok_string", "ok_borrowed_str", "ok_ptr", "ok_void"]
+        );
     }
 
     #[test]
@@ -6082,6 +6103,7 @@ edition = "2021"
             r#"
 pub fn flip_bool(x: bool) -> bool { !x }
 pub fn id_string(s: String) -> String { s }
+pub fn id_borrowed_str(s: &str) -> &str { s }
 pub fn id_ptr(p: *mut u8) -> *mut u8 { p }
 pub fn id_const_ptr(p: *const u8) -> *const u8 { p }
 pub fn unsupported_vec(xs: Vec<u8>) -> Vec<u8> { xs }
@@ -6115,6 +6137,7 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
         let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
         assert!(names.contains(&"flip_bool"));
         assert!(names.contains(&"id_string"));
+        assert!(names.contains(&"id_borrowed_str"));
         assert!(names.contains(&"id_ptr"));
         assert!(names.contains(&"id_const_ptr"));
         assert!(!names.contains(&"unsupported_vec"));
@@ -6126,6 +6149,14 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
             .expect("id_string function should exist");
         assert_eq!(id_string.params[0].type_name, "String");
         assert_eq!(id_string.return_type, "String");
+
+        let id_borrowed_str = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "id_borrowed_str")
+            .expect("id_borrowed_str function should exist");
+        assert_eq!(id_borrowed_str.params[0].type_name, "&str");
+        assert_eq!(id_borrowed_str.return_type, "&str");
 
         let id_ptr = lib
             .functions

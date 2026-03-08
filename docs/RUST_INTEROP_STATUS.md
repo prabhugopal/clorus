@@ -96,7 +96,7 @@ Notes:
   - floats: `f32`, `f64`
   - signed ints: `i8`, `i16`, `i32`, `i64`, `isize`
   - unsigned ints: `u8`, `u16`, `u32`, `u64`, `usize`
-  - others: `bool`, `String`, `()`, `*mut u8`, `*const u8`
+  - others: `bool`, `String`, `&str`, `()`, `*mut u8`, `*const u8`
 - Unsupported signatures now report concrete examples in build errors.
 - Unsupported-signature example blocks are bounded (max 5 examples) and now include `... and N more` when truncated.
 - Unsupported-signature auto-parse failures now include direct interface-file guidance (`interfaces/<dep>.clri`) in addition to pointer-carrier hints.
@@ -185,7 +185,7 @@ The CLI/rust-ffi integration tests now cover:
 - local path auto-parse explicitly rejects dependencies where all discovered public functions are unsupported after signature filtering (with concrete unsupported-signature examples)
 - local path auto-parse explicitly rejects dependencies with no top-level `pub fn` even when impl methods are absent, and still provides interface guidance
 - local path auto-parse preserves raw-pointer mutability/pointee in signature analysis (e.g. `*const u8` vs `*mut i32`)
-- local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `*mut u8`)
+- local path auto-parse with supported bool/string/pointer signatures (`bool`, `String`, `&str`, `*mut u8`)
 - local path auto-parse with const-pointer signatures (`*const u8`) is covered and accepted via pointer-carrier mapping
 - local path `interface = false` is covered and behaves like omitted interface (auto-parse path flow)
 - local path auto-parse pointer-mismatch rejection happens during signature filtering (before wrapper build) and includes explicit hint (`*mut u8` and `*const u8` are the only auto-supported raw pointer carriers)
