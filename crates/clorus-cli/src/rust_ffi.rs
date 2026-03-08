@@ -5724,6 +5724,11 @@ auto-parse-none-supported-lib = { path = "auto-parse-none-supported-lib" }
             "expected interface-path hint, got: {}",
             err
         );
+        assert!(
+            !err.contains("Rust dependency 'auto-parse-none-supported-lib': Rust dependency 'auto-parse-none-supported-lib'"),
+            "expected no duplicated dependency prefix, got: {}",
+            err
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -5789,6 +5794,11 @@ auto-parse-impl-only-lib = { path = "auto-parse-impl-only-lib" }
         assert!(err.contains("Common cause: API is primarily impl/associated methods"));
         assert!(err.contains("Recommendation: provide bridge free functions"));
         assert!(err.contains("interfaces/auto-parse-impl-only-lib.clri"));
+        assert!(
+            !err.contains("Rust dependency 'auto-parse-impl-only-lib': Rust dependency 'auto-parse-impl-only-lib'"),
+            "expected no duplicated dependency prefix, got: {}",
+            err
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
