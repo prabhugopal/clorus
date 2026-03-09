@@ -7040,6 +7040,112 @@ legacy-str-lib = { path = "legacy-str-lib", interface = "interfaces/legacy-str-l
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_legacy_supports_string_and_str_keywords_distinctly() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_explicit_legacy_string_and_str_{}",
+            unique
+        ));
+        let dep_dir = root.join("explicit-legacy-string-str-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "explicit-legacy-string-str-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn echo_string(s: String) -> String { s }
+pub fn echo_str(s: &str) -> &str { s }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("explicit-legacy-string-str-lib.clorus-ffi"),
+            r#"(interface explicit-legacy-string-str-lib
+  (fn echo-string [s :string] :string :rust "echo_string")
+  (fn echo-str [s :str] :str :rust "echo_str")
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+explicit-legacy-string-str-lib = { path = "explicit-legacy-string-str-lib", interface = "interfaces/explicit-legacy-string-str-lib.clorus-ffi" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        let echo_string = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "echo_string")
+            .expect("echo_string function should exist");
+        assert_eq!(echo_string.params[0].type_name, "String");
+        assert_eq!(echo_string.return_type, "String");
+
+        let echo_str = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "echo_str")
+            .expect("echo_str function should exist");
+        assert_eq!(echo_str.params[0].type_name, "&str");
+        assert_eq!(echo_str.return_type, "&str");
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("explicit_legacy_string_str_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(
+            generated.contains("let result = echo_string(s_rust);"),
+            "expected :string wrapper callsite in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("let s_rust = s_rust_owned.as_str();"),
+            "expected :str borrowed handoff in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("let result = echo_str(s_rust);"),
+            "expected :str wrapper callsite in generated wrapper:\n{}",
+            generated
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_explicit_legacy_str_with_rust_symbol_override() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
