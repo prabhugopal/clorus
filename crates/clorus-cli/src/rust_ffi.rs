@@ -8538,6 +8538,11 @@ unsupported-pointer-lib = { path = "unsupported-pointer-lib", interface = "inter
             err
         );
         assert!(
+            err.contains("Supported types:") && err.contains("*mut u8") && err.contains("*const u8"),
+            "expected supported-type list to include pointer carrier types, got: {}",
+            err
+        );
+        assert!(
             err.contains("ptr-i32"),
             "expected unsupported pointer-ish type context, got: {}",
             err
