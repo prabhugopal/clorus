@@ -8631,6 +8631,85 @@ unsupported-legacy-pointer-lib = { path = "unsupported-legacy-pointer-lib", inte
     }
 
     #[test]
+    fn process_dependencies_e2e_rejects_unsupported_legacy_interface_return_type() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_reject_unsupported_legacy_return_type_{}",
+            unique
+        ));
+        let dep_dir = root.join("unsupported-legacy-return-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "unsupported-legacy-return-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn make_bytes() -> Vec<u8> { vec![1, 2, 3] }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("unsupported-legacy-return-lib.clorus-ffi"),
+            r#"(interface unsupported-legacy-return-lib
+  (fn make-bytes [] :Vec<u8> :rust "make_bytes")
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+unsupported-legacy-return-lib = { path = "unsupported-legacy-return-lib", interface = "interfaces/unsupported-legacy-return-lib.clorus-ffi" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let err = with_cwd(&root, || match RustFfiProcessor::process_dependencies(&manifest, false) {
+            Ok(_) => panic!("expected unsupported legacy interface return-type rejection"),
+            Err(e) => e,
+        });
+        assert!(err.contains("Rust dependency 'unsupported-legacy-return-lib':"));
+        assert!(
+            err.contains("unsupported return type 'Vec<u8>'"),
+            "expected unsupported return-type rejection, got: {}",
+            err
+        );
+        assert!(
+            err.contains("unsupported-legacy-return-lib.clorus-ffi"),
+            "expected legacy interface path context, got: {}",
+            err
+        );
+        assert!(
+            err.contains("Supported types:") && err.contains("String,&str"),
+            "expected supported-type list to include borrowed string support, got: {}",
+            err
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_reports_interface_context_on_wrapper_compile_failure() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
