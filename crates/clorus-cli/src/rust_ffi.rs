@@ -7639,6 +7639,70 @@ trimmed-iface-lib = { path = "trimmed-iface-lib", interface = "   interfaces/tri
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_legacy_interface_path_trims_whitespace() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_explicit_legacy_iface_trim_{}",
+            unique
+        ));
+        let dep_dir = root.join("trimmed-legacy-iface-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "trimmed-legacy-iface-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(dep_dir.join("src/lib.rs"), "pub fn ping() -> i32 { 99 }\n")
+            .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("trimmed-legacy-iface-lib.clorus-ffi"),
+            r#"(interface trimmed-legacy-iface-lib
+  (fn ping [] :i32)
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+trimmed-legacy-iface-lib = { path = "trimmed-legacy-iface-lib", interface = "   interfaces/trimmed-legacy-iface-lib.clorus-ffi   " }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "trimmed_legacy_iface_lib_ffi");
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"ping"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_explicit_clri_with_rust_symbol_override() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

@@ -210,6 +210,7 @@ The CLI/rust-ffi integration tests now cover:
 - `interface = false` E2E path confirms co-located interface files are ignored (auto-parse remains authoritative)
 - version dependency `interface = false` E2E path confirms co-located interface files are ignored (registry auto-parse path remains authoritative)
 - explicit interface-path values with leading/trailing whitespace are trimmed before resolution
+- explicit legacy interface-path values (`.clorus-ffi`) with leading/trailing whitespace are E2E-covered in dependency processing
 - local path dependency + explicit `.clri` interface path with `:rust` symbol override for impl/associated methods
 - empty `:rust` symbol override rejection with explicit function+interface-path diagnostics
 - duplicate normalized interface function-name rejection with explicit interface-path diagnostics
