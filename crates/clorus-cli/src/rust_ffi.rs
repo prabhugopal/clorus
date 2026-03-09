@@ -7195,6 +7195,91 @@ explicit-clri-lib = { path = "explicit-clri-lib", interface = "custom-ifaces/exp
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_clri_supports_str_keyword() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_explicit_clri_str_{}",
+            unique
+        ));
+        let dep_dir = root.join("explicit-clri-str-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "explicit-clri-str-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub fn echo_str(s: &str) -> &str { s }
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("explicit-clri-str-lib.clri"),
+            r#"(interface explicit-clri-str-lib
+  (fn echo-str [s :str] :str :rust "echo_str")
+)"#,
+        )
+        .expect("write interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+explicit-clri-str-lib = { path = "explicit-clri-str-lib", interface = "interfaces/explicit-clri-str-lib.clri" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        let f = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "echo_str")
+            .expect("echo_str function should exist");
+        assert_eq!(f.params[0].type_name, "&str");
+        assert_eq!(f.return_type, "&str");
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("explicit_clri_str_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(generated.contains("let s_rust_owned = unsafe { CStr::from_ptr(s as *const c_char).to_string_lossy().to_string() };"));
+        assert!(generated.contains("let s_rust = s_rust_owned.as_str();"));
+        assert!(generated.contains("let result = echo_str(s_rust);"));
+        assert!(generated.contains("unsafe { CString::new(result).unwrap().into_raw() }"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_explicit_interface_path_trims_whitespace() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

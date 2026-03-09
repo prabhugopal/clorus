@@ -198,6 +198,7 @@ The CLI/rust-ffi integration tests now cover:
 - explicit legacy interface (`.clorus-ffi`) E2E coverage includes compact pointer forms (`:*const-u8`, `:*mut-u8`) with wrapper conversion assertions
 - explicit legacy interface (`.clorus-ffi`) E2E coverage includes `:str` keyword mapping to borrowed `&str` with wrapper conversion assertions
 - local path dependency + explicit `.clri` interface path
+- local path dependency + explicit `.clri` interface path (including `:str` keyword mapping to `&str` with wrapper conversion assertions)
 - local path dependency + explicit `.clri` interface path supports both compact and split pointer forms (`:*const-u8` / `:*const u8`, `:*mut-u8` / `:*mut u8`)
 - explicit `.clri` split-pointer E2E coverage validates both const and mut pointer wrappers (`*const u8`, `*mut u8`) and generated export symbols
 - explicit `.clri` compact-pointer E2E coverage validates both `:*const-u8` and `:*mut-u8` mapping and generated wrapper conversions
