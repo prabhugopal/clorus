@@ -8008,6 +8008,11 @@ unsupported-types-lib = { path = "unsupported-types-lib", interface = "interface
         assert!(err.contains("Rust dependency 'unsupported-types-lib':"));
         assert!(err.contains("unsupported param type 'Vec<u8>'"));
         assert!(err.contains("interfaces/unsupported-types-lib.clri"));
+        assert!(
+            err.contains("Supported types:") && err.contains("String,&str"),
+            "expected supported-type list to include borrowed string support, got: {}",
+            err
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -8075,6 +8080,11 @@ unsupported-return-lib = { path = "unsupported-return-lib", interface = "interfa
         assert!(err.contains("Rust dependency 'unsupported-return-lib':"));
         assert!(err.contains("unsupported return type 'Vec<u8>'"));
         assert!(err.contains("interfaces/unsupported-return-lib.clri"));
+        assert!(
+            err.contains("Supported types:") && err.contains("String,&str"),
+            "expected supported-type list to include borrowed string support, got: {}",
+            err
+        );
 
         let _ = std::fs::remove_dir_all(&root);
     }

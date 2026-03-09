@@ -247,6 +247,7 @@ The CLI/rust-ffi integration tests now cover:
 - explicit trimmed legacy-extension paths (e.g. `  interfaces/<dep>.clorus-ffi  `) are unit-covered and accepted
 - explicit interface path must be a file (directory-path misuse rejected with clear diagnostics)
 - explicit interface type-matrix validation (unsupported param and return types rejected before wrapper compile)
+- explicit interface type-matrix validation assertions include borrowed-string support presence (`String,&str`) in supported-type diagnostics
 - explicit interface pointer-type validation (non-`*mut u8` pointer signatures rejected with clear diagnostics)
 - local path dependency + `interface = true` auto interface fallback to legacy when `.clri` is absent
 - local path dependency + `interface = true` auto interface preference for `.clri` when both `.clri` and `.clorus-ffi` exist
