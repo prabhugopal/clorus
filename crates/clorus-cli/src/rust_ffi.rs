@@ -7703,6 +7703,95 @@ trimmed-legacy-iface-lib = { path = "trimmed-legacy-iface-lib", interface = "   
     }
 
     #[test]
+    fn process_dependencies_e2e_explicit_trimmed_legacy_interface_with_rust_symbol_override() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "clorus_rustffi_e2e_explicit_trimmed_legacy_override_{}",
+            unique
+        ));
+        let dep_dir = root.join("trimmed-legacy-override-lib");
+        let iface_dir = root.join("interfaces");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+        std::fs::create_dir_all(&iface_dir).expect("create interfaces dir");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "trimmed-legacy-override-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Math;
+impl Math {
+    pub fn answer() -> u64 { 42 }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        std::fs::write(
+            iface_dir.join("trimmed-legacy-override-lib.clorus-ffi"),
+            r#"(interface trimmed-legacy-override-lib
+  (fn answer [] :u64 :rust "Math::answer")
+)"#,
+        )
+        .expect("write legacy interface");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+trimmed-legacy-override-lib = { path = "trimmed-legacy-override-lib", interface = "  interfaces/trimmed-legacy-override-lib.clorus-ffi  " }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+        assert_eq!(lib.name, "trimmed_legacy_override_lib_ffi");
+        let answer_fn = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "answer")
+            .expect("answer function should exist");
+        assert_eq!(answer_fn.return_type, "u64");
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("trimmed_legacy_override_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src).expect("read wrapper source");
+        assert!(
+            generated.contains("let result = Math::answer();"),
+            "expected trimmed legacy interface :rust override callsite in generated wrapper:\n{}",
+            generated
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn process_dependencies_e2e_explicit_clri_with_rust_symbol_override() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
