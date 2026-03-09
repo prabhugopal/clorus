@@ -392,6 +392,24 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_interface_keeps_string_keyword_as_owned_string() {
+        let source = r#"
+(interface demo
+  (fn echo [s :string] :string))
+"#;
+
+        use std::io::Write;
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(source.as_bytes()).unwrap();
+
+        let interface = parse_interface_file(file.path()).expect("parse interface");
+        assert_eq!(interface.functions.len(), 1);
+        let f = &interface.functions[0];
+        assert_eq!(f.params[0].type_name, "String");
+        assert_eq!(f.return_type, "String");
+    }
+
+    #[test]
     fn test_parse_interface_reports_location_for_malformed_param_type() {
         let source = r#"
 (interface bad

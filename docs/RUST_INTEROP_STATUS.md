@@ -86,6 +86,7 @@ Notes:
   (all map to `*mut u8` / `*const u8`).
 - In `.clri` files, `:str` maps to borrowed Rust string type `&str`
   (while `:string` maps to owned `String`).
+- Parser regressions now assert `:str`/`:string` remain distinct (`&str` vs `String`).
 
 ## What Works Today
 
