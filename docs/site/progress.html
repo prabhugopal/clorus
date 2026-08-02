@@ -216,9 +216,9 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
     <div class="stats">
       <div class="stat good"><div class="num tnum">0</div><div class="label">cargo build --all-targets errors</div></div>
       <div class="stat good"><div class="num tnum">483</div><div class="label">Rust unit tests passing</div></div>
-      <div class="stat warn"><div class="num tnum">121/126</div><div class="label">.clr tests pass (full sweep, not aborted)</div></div>
+      <div class="stat good"><div class="num tnum">127/127</div><div class="label">.clr tests pass (full sweep, not aborted)</div></div>
       <div class="stat bad"><div class="num tnum">~50%</div><div class="label">clojure.core symbol coverage</div></div>
-      <div class="stat bad"><div class="num tnum">5</div><div class="label">confirmed crashes/hangs, still open</div></div>
+      <div class="stat good"><div class="num tnum">0</div><div class="label">confirmed crashes, was 5</div></div>
       <div class="stat good"><div class="num tnum">10/10</div><div class="label">mkdocs nav pages resolve</div></div>
     </div>
   </div>
@@ -303,11 +303,11 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
       <p><code class="loc">repros/codegen-bug-minimal-repro.clrs</code> — reproduced against <code>coral-gfx</code>: an FFI-held pointer (e.g. a window handle) survives an FFI call made <em>outside</em> a <code>let</code>, but SIGBUS/pointer-auth-faults when the same call sequence happens <em>inside</em> a <code>let</code> binding, even with pure-Clorus code between the calls. Root cause not yet isolated (candidates: FFI calling-convention transition, let-binding codegen, or register allocation around the FFI boundary). This is the one bug on this page with a direct, first-party downstream victim: Coral is exactly the FFI-heavy, arm64 caller this would hit.</p>
     </div>
   </div>
-  <div class="bug">
-    <div class="stripe"></div>
+  <div class="bug" style="border-color:var(--good)">
+    <div class="stripe" style="background:var(--good)"></div>
     <div class="bug-body">
-      <div class="bug-head"><span class="sev">Critical · crash</span><h4>5 still-failing tests in the checked-in suite</h4></div>
-      <p><code class="loc">tests/language/test-numeric.clr</code> panics inside JIT-compiled <code>_clorus_sub</code> ("panic in a function that cannot unwind"). <code>test-core-long-tail-3</code>, <code>test-core-sort-behavior</code>, <code>test-core-sort-error-paths</code> abort silently (SIGABRT, exit 134, no output). <code>test-core-long-tail-1</code> cascades an unhandled type error ("Cannot add Nil and Long", ~40 times) rather than crashing. None of these are edge-case fuzzing finds — they're in the existing suite, run by <code>tests/run_all_tests.sh</code>, and unaffected by the STM/vector/agent fixes below.</p>
+      <div class="bug-head"><span class="sev" style="color:var(--good)">Fixed 2026-08-02</span><h4>All 5 crashing tests — one root cause, a real use-after-free</h4></div>
+      <p>All five traced to the same bug: compiling a bare symbol read never retains (a deliberate borrow, correct for arithmetic operands). But a <code>let</code> binding whose value is a bare symbol (<code>(let [x (ensure-number "floor" x)] ...)</code>, rebinding a parameter through a passthrough call) or a function body that resolves to a bare symbol in tail position — directly, or through an <code>if</code>/<code>do</code> guard clause like <code>ensure-number</code>'s <code>(if (number? n) n (throw ...))</code> — gives that borrow an independent, unconditionally-released lifetime. The release then drops a reference the alias never owned, freeing the value out from under whoever else still held it. <code>round</code> → <code>floor</code> → <code>ensure-number</code> all do this, which is why it took a 3-deep call chain to surface as a SIGABRT inside <code>clorus_sub</code>, confirmed directly with the runtime's own <code>CLORUS_DEBUG_TAG</code> retain/release tracing. Fixed with one shared helper checked at both call sites. <code>tests/run_all_tests.sh</code>: <strong>127/127, 0 failed</strong> — genuinely green, arguably for the first time.</p>
     </div>
   </div>
   <div class="bug" style="border-color:var(--good)">
@@ -393,15 +393,15 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
 
 <section id="tests">
   <div class="section-head"><span class="section-num">06</span><h2>Test suite — what's actually verified</h2></div>
-  <p class="section-dek">You asked whether tests cover the complete language: closer than before, but not yet. The runner no longer hides failures — <code>tests/run_all_tests.sh</code> used to run under <code>set -e</code> and abort at the first failure anywhere in ~120 files, which is the direct mechanism behind docs claiming "100% pass rate." That's fixed; the numbers below are from a full, un-aborted run.</p>
+  <p class="section-dek">You asked whether tests cover the complete language: coverage breadth is still ~50% of clojure.core (see §05), but every test that exists now actually passes — genuinely, not by the runner dying before it could find out. <code>tests/run_all_tests.sh</code> used to run under <code>set -e</code> and abort at the first failure anywhere in ~120 files, which is the direct mechanism behind docs claiming "100% pass rate." That's fixed, and the 5 real crashes it was hiding are fixed too (see §03).</p>
   <div class="table-scroll">
     <table class="matrix">
       <thead><tr><th>Suite</th><th>Total</th><th>Pass</th><th>Fail / crash</th><th>Wired into any runner?</th></tr></thead>
       <tbody>
         <tr><td>Rust unit tests (<code>--lib</code> and bin)</td><td class="tnum">484</td><td class="tnum">483 <span style="color:var(--text-dim)">(1 ignored)</span></td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>cargo test --workspace</code> (full, incl. bin)</td><td class="tnum">484</td><td class="tnum">483</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
-        <tr><td><code>tests/language/</code></td><td class="tnum">80</td><td class="tnum">77</td><td class="tnum">1 crash, 2 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
-        <tr><td><code>tests/stdlib/</code></td><td class="tnum">31</td><td class="tnum">25</td><td class="tnum">4 crashes/errors, 1 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/language/</code></td><td class="tnum">81</td><td class="tnum">79</td><td class="tnum">0 crashes, 2 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/stdlib/</code></td><td class="tnum">31</td><td class="tnum">30</td><td class="tnum">0 crashes, 1 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/compiler/</code></td><td class="tnum">8</td><td class="tnum">3</td><td class="tnum">5 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/integration/</code></td><td class="tnum">4</td><td class="tnum">4</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/parity/</code> (clj-diff harness)</td><td class="tnum">11</td><td class="tnum">11</td><td class="tnum">0</td><td><span class="pill partial">optional, tiny</span></td></tr>
