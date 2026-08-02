@@ -202,7 +202,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · 2026-07-30</div>
+    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · UPDATED 2026-08-01</div>
     <h1 class="title">Clorus<span class="lang">.</span> Progress</h1>
     <p class="tagline">Clojure semantics at native speed, with Rust interop as a first-class citizen — the same bet <a href="https://jank-lang.org/progress/" target="_blank" rel="noopener">jank</a> makes with C++. This is where that bet actually stands today.</p>
     <div class="meta-row">
@@ -213,15 +213,22 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
       <span>No CI configured</span>
     </div>
     <div class="stats">
-      <div class="stat warn"><div class="num tnum">0 / 14</div><div class="label">cargo build --all-targets errors</div></div>
-      <div class="stat good"><div class="num tnum">465</div><div class="label">Rust unit tests passing</div></div>
-      <div class="stat warn"><div class="num tnum">109/122</div><div class="label">.clr tests pass (manual run)</div></div>
+      <div class="stat good"><div class="num tnum">0</div><div class="label">cargo build --all-targets errors</div></div>
+      <div class="stat good"><div class="num tnum">475</div><div class="label">Rust unit tests passing</div></div>
+      <div class="stat warn"><div class="num tnum">121/126</div><div class="label">.clr tests pass (full sweep, not aborted)</div></div>
       <div class="stat bad"><div class="num tnum">~50%</div><div class="label">clojure.core symbol coverage</div></div>
-      <div class="stat bad"><div class="num tnum">4</div><div class="label">confirmed SIGABRT crashes</div></div>
-      <div class="stat bad"><div class="num tnum">4%</div><div class="label">of docs/ actually published</div></div>
+      <div class="stat bad"><div class="num tnum">5</div><div class="label">confirmed crashes/hangs, still open</div></div>
+      <div class="stat good"><div class="num tnum">10/10</div><div class="label">mkdocs nav pages resolve</div></div>
     </div>
   </div>
 </header>
+
+<div class="wrap">
+  <div class="callout" style="margin-top:32px">
+    <h4>Since 2026-07-30</h4>
+    <p>Phase 0 landed: the broken <code>cargo test --workspace</code> build is fixed at the root cause (<code>main.rs</code> no longer double-compiles the CLI as a second crate root), the dead <code>tests/features/</code>/<code>tests/_archived/</code>/<code>stdlib/_variants/</code> trees are gone, <code>run_all_tests.sh</code> no longer aborts on the first failure, and <code>docs/generated/</code> + <code>docs/gui/</code> are committed so mkdocs actually resolves. Separately, a review of substantial pre-existing uncommitted work turned up real fixes already done: <strong>dosync now actually retries on conflict</strong> instead of silently continuing with a stale result, <strong>commute has real deferred semantics</strong> instead of being an alias for <code>alter</code>, a <strong>persistent-vector corruption bug past 1,024 elements</strong> is fixed, and <code>alter</code>/<code>send</code>/agent dispatch no longer hardcode "named top-level function, ≤2 extra args" — they go through the general first-class-function calling convention now. See §03 and §08 for what's still open.</p>
+  </div>
+</div>
 
 <nav class="jump">
   <div class="inner">
@@ -291,8 +298,22 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
   <div class="bug">
     <div class="stripe"></div>
     <div class="bug-body">
-      <div class="bug-head"><span class="sev">Critical · crash</span><h4>4 confirmed SIGABRT crashes in the test sweep</h4></div>
-      <p><code class="loc">tests/language/test-numeric.clr</code> panics inside JIT-compiled <code>_clorus_sub</code> ("panic in a function that cannot unwind"). Three more — <code>test-core-long-tail-3</code>, <code>test-core-sort-behavior</code>, <code>test-core-sort-error-paths</code> — abort silently (exit 134, no output). None of these are edge-case fuzzing finds; they're in the existing, checked-in test suite.</p>
+      <div class="bug-head"><span class="sev">Critical · crash · Apple Silicon</span><h4>FFI calls inside a <code>let</code> binding corrupt pointers on arm64</h4></div>
+      <p><code class="loc">repros/codegen-bug-minimal-repro.clrs</code> — reproduced against <code>coral-gfx</code>: an FFI-held pointer (e.g. a window handle) survives an FFI call made <em>outside</em> a <code>let</code>, but SIGBUS/pointer-auth-faults when the same call sequence happens <em>inside</em> a <code>let</code> binding, even with pure-Clorus code between the calls. Root cause not yet isolated (candidates: FFI calling-convention transition, let-binding codegen, or register allocation around the FFI boundary). This is the one bug on this page with a direct, first-party downstream victim: Coral is exactly the FFI-heavy, arm64 caller this would hit.</p>
+    </div>
+  </div>
+  <div class="bug">
+    <div class="stripe"></div>
+    <div class="bug-body">
+      <div class="bug-head"><span class="sev">Critical · crash</span><h4>5 still-failing tests in the checked-in suite</h4></div>
+      <p><code class="loc">tests/language/test-numeric.clr</code> panics inside JIT-compiled <code>_clorus_sub</code> ("panic in a function that cannot unwind"). <code>test-core-long-tail-3</code>, <code>test-core-sort-behavior</code>, <code>test-core-sort-error-paths</code> abort silently (SIGABRT, exit 134, no output). <code>test-core-long-tail-1</code> cascades an unhandled type error ("Cannot add Nil and Long", ~40 times) rather than crashing. None of these are edge-case fuzzing finds — they're in the existing suite, run by <code>tests/run_all_tests.sh</code>, and unaffected by the STM/vector/agent fixes below.</p>
+    </div>
+  </div>
+  <div class="bug" style="border-color:var(--good)">
+    <div class="stripe" style="background:var(--good)"></div>
+    <div class="bug-body">
+      <div class="bug-head"><span class="sev" style="color:var(--good)">Fixed since 2026-07-30</span><h4>STM, vector, and hardcoded-arity bugs found and resolved</h4></div>
+      <p><code>dosync</code> now actually retries the transaction body on commit conflict instead of silently continuing with a stale result (the prior TODO literally said "just continue after abort"). <code>commute</code> now has real deferred, replay-at-commit semantics instead of being an alias for <code>alter</code>. <code>PersistentVector</code> no longer corrupts <code>nth</code> past 1,024 elements (a raw leaf was being written where a subtree belonged). <code>alter</code>/<code>send</code>/agent dispatch no longer hardcode "named top-level function, ≤2 extra args" — closures, vars, and any arity now work. <code>alts!!</code> no longer busy-polls every 100μs. All verified with new passing unit tests and a clean 475/0 <code>cargo test --workspace</code> run.</p>
     </div>
   </div>
   <div class="bug warn">
@@ -371,52 +392,43 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
 
 <section id="tests">
   <div class="section-head"><span class="section-num">06</span><h2>Test suite — what's actually verified</h2></div>
-  <p class="section-dek">You asked whether tests cover the complete language: today, no — and the tooling itself has been hiding that. <code>tests/run_all_tests.sh</code> runs under <code>set -e</code>, so it aborts at the first failure anywhere in ~120 files. That's the direct mechanism behind docs claiming "100% pass rate": nobody has ever seen a complete run.</p>
+  <p class="section-dek">You asked whether tests cover the complete language: closer than before, but not yet. The runner no longer hides failures — <code>tests/run_all_tests.sh</code> used to run under <code>set -e</code> and abort at the first failure anywhere in ~120 files, which is the direct mechanism behind docs claiming "100% pass rate." That's fixed; the numbers below are from a full, un-aborted run.</p>
   <div class="table-scroll">
     <table class="matrix">
       <thead><tr><th>Suite</th><th>Total</th><th>Pass</th><th>Fail / crash</th><th>Wired into any runner?</th></tr></thead>
       <tbody>
-        <tr><td>Rust unit tests (<code>--lib</code>)</td><td class="tnum">466</td><td class="tnum">465 <span style="color:var(--text-dim)">(1 ignored)</span></td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
-        <tr><td><code>cargo test --workspace</code> (full, incl. bin)</td><td colspan="3">currently fails to build — <code>test_support</code> module wired into <code>lib.rs</code> but not <code>main.rs</code>, an in-progress uncommitted change</td><td><span class="pill broken">broken</span></td></tr>
+        <tr><td>Rust unit tests (<code>--lib</code> and bin)</td><td class="tnum">476</td><td class="tnum">475 <span style="color:var(--text-dim)">(1 ignored)</span></td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>cargo test --workspace</code> (full, incl. bin)</td><td class="tnum">476</td><td class="tnum">475</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/language/</code></td><td class="tnum">80</td><td class="tnum">77</td><td class="tnum">1 crash, 2 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
-        <tr><td><code>tests/stdlib/</code></td><td class="tnum">30</td><td class="tnum">25</td><td class="tnum">4 crashes, 1 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/stdlib/</code></td><td class="tnum">31</td><td class="tnum">25</td><td class="tnum">4 crashes/errors, 1 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/compiler/</code></td><td class="tnum">8</td><td class="tnum">3</td><td class="tnum">5 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/integration/</code></td><td class="tnum">4</td><td class="tnum">4</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
-        <tr><td><code>tests/features/</code> (~70 files)</td><td colspan="3">duplicates <code>tests/language/</code>; not referenced by any script — only by a doc describing files that don't exist on disk</td><td><span class="pill missing">dead</span></td></tr>
-        <tr><td><code>tests/_archived/</code> (7 files)</td><td colspan="3">superseded, intentionally excluded</td><td><span class="pill missing">dead</span></td></tr>
         <tr><td><code>tests/parity/</code> (clj-diff harness)</td><td class="tnum">11</td><td class="tnum">11</td><td class="tnum">0</td><td><span class="pill partial">optional, tiny</span></td></tr>
       </tbody>
     </table>
   </div>
-  <p style="margin-top:16px; color:var(--text-dim); font-size:14.5px">No <code>.github/workflows</code> exist — none of this runs automatically today. A green run is whatever the last person to run it locally saw.</p>
+  <p style="margin-top:16px; color:var(--text-dim); font-size:14.5px"><code>tests/features/</code> and <code>tests/_archived/</code> (dead, duplicate trees) are removed as of Phase 0. No <code>.github/workflows</code> exist yet — none of this runs automatically. A green run is still whatever the last person to run it locally saw; wiring up CI is on the roadmap below.</p>
 </section>
 
 <section id="repo">
   <div class="section-head"><span class="section-num">07</span><h2>Repo &amp; docs hygiene</h2></div>
-  <p class="section-dek">The intent for a single source of truth already exists in the repo — it's just unfinished and uncommitted.</p>
+  <p class="section-dek">The single-source-of-truth model this repo wanted now actually works end to end.</p>
   <div class="cards">
     <div class="card">
-      <h3>The good news</h3>
-      <p><code>docs/README.md</code> already declares a canonical-doc model: one generated status file (<code>docs/generated/PARITY_STATUS.md</code> / <code>STATUS.json</code>), built by <code>scripts/docs/build_status.py</code>, with several existing docs already reduced to one-line redirect stubs pointing at it. This is the right shape.</p>
+      <h3>Done as of Phase 0</h3>
+      <p><code>docs/generated/</code> (built by <code>scripts/docs/build_status.py</code>) and <code>docs/gui/</code> are committed; all 10 pages in <code>mkdocs.yml</code>'s nav resolve. <code>tests/features/</code>, <code>tests/_archived/</code>, and <code>stdlib/_variants/</code> (dead, unreferenced trees) are deleted. The 6 near-duplicate Feb 27 root audit docs are archived to <code>docs/archive/2026-02-27-code-audit-session/</code>. Committed build binaries, 5-month-stale generated artifacts, and a personal debug script hardcoded to an unrelated path are gone.</p>
     </div>
     <div class="card">
-      <h3>Why it doesn't work yet</h3>
-      <p><code>docs/generated/</code> is untracked — never committed. A fresh clone is missing the exact files the canonical docs point to, and 5 of 9 pages in <code>mkdocs.yml</code>'s own nav resolve to untracked files. The redirect pattern is right; it just needs finishing and committing.</p>
+      <h3>Still open</h3>
+      <p><code>docs/gui/</code> is Coral content living inside the Clorus repo — since Coral is its own sibling repo, it likely belongs there instead; not moved yet since that's a cross-repo call. A prior consolidation attempt exists, archived and forgotten: <code>docs/archive/top-level-plans/DOCS_CONSOLIDATION_PLAN.md</code> — worth reading before further doc work. Most of <code>docs/</code>'s 210 files are still outside the mkdocs nav (by design, for archive/reference material) — the nav now at least resolves everything it lists.</p>
     </div>
   </div>
   <div class="stats" style="grid-template-columns:repeat(4,1fr); margin-top:20px">
-    <div class="stat bad"><div class="num tnum">210</div><div class="label">files under docs/</div></div>
-    <div class="stat bad"><div class="num tnum">9</div><div class="label">actually in mkdocs nav</div></div>
-    <div class="stat warn"><div class="num tnum">7</div><div class="label">near-duplicate root audit docs, one dead session</div></div>
-    <div class="stat warn"><div class="num tnum">3</div><div class="label">dead stdlib "variant" files</div></div>
+    <div class="stat good"><div class="num tnum">10/10</div><div class="label">mkdocs nav pages resolve</div></div>
+    <div class="stat good"><div class="num tnum">0</div><div class="label">dead test/stdlib trees remaining</div></div>
+    <div class="stat good"><div class="num tnum">0</div><div class="label">build binaries tracked in git</div></div>
+    <div class="stat warn"><div class="num tnum">1</div><div class="label">cross-repo move still pending (docs/gui/)</div></div>
   </div>
-  <ul style="font-size:14.5px; margin-top:20px">
-    <li><strong>Root-level clutter:</strong> <code>CLORUS_CODE_ANALYSIS.md</code> / <code>CLORUS_CODE_ANALYSIS_CODE_ONLY.md</code> / <code>CODE_AUDIT_DETAILS.md</code> / <code>CODE_AUDIT_INDEX.md</code> / <code>PATCH_PLAN_TOP3_FIXES.md</code> / <code>PLAN_TOP3_FIXES.md</code> / <code>REFACTOR_PLAN_MAINTAINABILITY.md</code> — 7 files, one commit, Feb 27, never touched since. Fold anything still true into the canonical docs, archive the rest.</li>
-    <li><strong>A prior consolidation attempt already exists</strong>, archived and forgotten: <code>docs/archive/top-level-plans/DOCS_CONSOLIDATION_PLAN.md</code>. Read it before repeating the exercise.</li>
-    <li><strong><code>docs/gui/</code> is untracked Coral content</strong> living inside the Clorus repo. Since Coral is its own sibling repo, this almost certainly belongs there instead.</li>
-    <li><strong>Committed build output:</strong> <code>tests/language/test-deftype/target/</code> (a 2.7MB Mach-O binary + object file) is tracked in git despite <code>target/</code> being in <code>.gitignore</code> — it was force-added before the ignore rule existed. Needs <code>git rm --cached</code>, not a gitignore change.</li>
-    <li>Root also carries 5-month-stale generated artifacts that should be regenerated-on-demand or deleted: <code>test-metrics/</code>, <code>test-reports/</code>, <code>test_failures.log</code>, plus a personal debugging script <code>trace_double_free.sh</code> hardcoded to an unrelated external path.</li>
-  </ul>
 </section>
 
 <section id="roadmap">
@@ -425,22 +437,24 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
 
   <div class="roadmap">
     <div class="phase">
-      <div class="phase-head"><h3>Phase 0 — Stop the bleeding</h3><span class="phase-eta">1–2 weeks</span></div>
+      <div class="phase-head"><h3>Phase 0 — Stop the bleeding</h3><span class="phase-eta">done, 2026-08-01</span></div>
       <p class="goal">Make "it builds, it tests, the docs are true" actually true, before building on top of it.</p>
       <ul>
-        <li>Fix the <code>test_support</code> module mismatch blocking <code>cargo test --workspace</code> entirely (currently in-progress, uncommitted).</li>
-        <li><code>git rm --cached</code> the tracked <code>test-deftype</code> binaries; delete <code>tests/features/</code> (dead, duplicate, described-but-nonexistent), <code>tests/_archived/</code>, <code>stdlib/_variants/</code>.</li>
-        <li>Rewrite <code>tests/run_all_tests.sh</code> to accumulate failures instead of aborting on the first one — this single change is what makes every later "test coverage" number trustworthy.</li>
-        <li>Commit <code>docs/generated/</code> output (or generate it in CI); fix the 5 broken mkdocs nav links.</li>
-        <li>Archive the 7-file root audit-doc cluster and the pointer-stub docs into one canonical set: this report, plus <code>README.md</code>, <code>docs/LANGUAGE.md</code>, <code>docs/RUST_INTEROP.md</code>, <code>docs/STDLIB.md</code>.</li>
+        <li><span class="pill implemented">done</span> Fixed the <code>test_support</code> breakage at the root cause — <code>main.rs</code> was double-compiling the CLI as a second crate root; now depends on the lib crate directly.</li>
+        <li><span class="pill implemented">done</span> Removed tracked build binaries; deleted <code>tests/features/</code>, <code>tests/_archived/</code>, <code>stdlib/_variants/</code>.</li>
+        <li><span class="pill implemented">done</span> <code>tests/run_all_tests.sh</code> no longer aborts on the first failure — verified with a real full-sweep run.</li>
+        <li><span class="pill implemented">done</span> Committed <code>docs/generated/</code> and <code>docs/gui/</code>; mkdocs nav resolves 10/10.</li>
+        <li><span class="pill implemented">done</span> Archived the 7-file root audit-doc cluster.</li>
       </ul>
     </div>
     <div class="phase">
-      <div class="phase-head"><h3>Phase 1 — Correctness: no hardcoded surprises</h3><span class="phase-eta">3–6 weeks</span></div>
+      <div class="phase-head"><h3>Phase 1 — Correctness: no hardcoded surprises</h3><span class="phase-eta">in progress</span></div>
       <p class="goal">Fix the things that violate Clojure semantics or crash on existing tests, before adding anything new.</p>
       <ul>
-        <li>Replace mutate-in-place maps/sets with a real persistent HAMT (mirrors the existing vector trie's structural-sharing pattern) — the single highest-leverage fix in the codebase.</li>
-        <li>Root-cause and fix all 4 SIGABRT crashes (<code>test-numeric.clr</code>, the 3 sort/long-tail stdlib tests) — each becomes a permanent regression test in Phase 3.</li>
+        <li><span class="pill implemented">done</span> <code>dosync</code> now retries on conflict instead of silently continuing; <code>commute</code> now has real deferred semantics instead of aliasing <code>alter</code>; the vector-overflow corruption past 1,024 elements is fixed; <code>alter</code>/<code>send</code>/agent dispatch no longer hardcode arity/lookup-by-name.</li>
+        <li><span class="pill broken">next up</span> The Apple-Silicon FFI-inside-<code>let</code> pointer corruption (<code>repros/codegen-bug-minimal-repro.clrs</code>) — highest priority given it's the one bug here with a live first-party victim (Coral).</li>
+        <li>Replace mutate-in-place maps/sets with a real persistent HAMT (mirrors the existing vector trie's structural-sharing pattern) — still the single highest-leverage semantics fix remaining.</li>
+        <li>Root-cause and fix the 5 remaining failing tests (<code>test-numeric.clr</code> and 4 stdlib long-tail/sort tests) — each becomes a permanent regression test in Phase 3.</li>
         <li>Fix <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>; delete the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs.</li>
         <li>Give <code>recur</code> self-tail-calls guaranteed TCO (explicit trampoline or LLVM <code>musttail</code>) instead of hoping the optimizer cooperates.</li>
         <li>Integrate <code>lazy-seq</code> with core <code>seq</code>/<code>first</code>/<code>rest</code>/<code>map</code>/<code>filter</code> instead of a parallel <code>lazy-</code> API.</li>
