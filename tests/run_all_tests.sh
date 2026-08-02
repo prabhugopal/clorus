@@ -7,7 +7,10 @@
 #   - tests/compiler/ - Compiler-specific tests
 #   - tests/integration/ - Integration and system tests
 
-set -e  # Exit on first failure
+# NOTE: deliberately no `set -e`. Every test failure is captured via
+# PASSED/FAILED/SKIPPED counters and test_failures.log; the script must run
+# the full suite and report a complete summary, not stop at the first
+# failure it hits.
 
 # Colors for output
 RED='\033[0;31m'

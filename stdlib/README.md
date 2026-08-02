@@ -16,6 +16,5 @@ Namespace-to-file mapping for `clorus.*` modules is currently:
 
 Notes:
 
-- `_variants/` contains development snapshots and is not part of normal runtime loading.
-- `transducers.clr.disabled` is retained as a historical artifact and is not loaded.
-- REPL and CLI startup now load stdlib from these namespaced paths.
+- `transducers.clr.disabled` is a fuller transducer implementation than the active `clorus/transducers.clr` (`remove`/`drop`/`take-while`/`cat`/`mapcat`/`sequence`/`partition-by` etc.), disabled because multi-arity functions returning closures fail to compile when loaded as stdlib (works fine in user code) — see `docs/site/progress.html`. Fixing that codegen bug and re-enabling this file recovers those functions without new implementation work.
+- REPL and CLI startup load stdlib from the namespaced paths above.

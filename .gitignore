@@ -31,3 +31,6 @@ organize-repo.sh
 
 # Test metrics output
 target/test-metrics/
+/test-metrics/
+/test-reports/
+/test_failures.log

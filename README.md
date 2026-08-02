@@ -2,8 +2,8 @@
 
 A **Clojure-inspired systems programming language** that combines Clojure's elegant syntax with native performance and Rust interop, compiled via LLVM.
 
-**Version:** 0.5.0 Beta
-**Status:** ~75-80% Clojure parity - Core language complete!
+**Version:** 0.1.0 (pre-release)
+**Status:** see [docs/site/progress.html](docs/site/progress.html) for a source-verified status report — numbers below are being reconciled against it, some are currently overstated.
 **Latest:** Polymorphism system + Lazy sequences + Project-aware REPL
 
 ## Features
