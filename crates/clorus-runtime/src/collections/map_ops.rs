@@ -1,7 +1,7 @@
 use crate::value::{Value, ValueTag};
 use crate::vector::PersistentVector;
 use crate::list::PersistentList;
-use crate::map::ClorusHashMap;
+use crate::map::{release_map, ClorusHashMap};
 use crate::collections::{clorus_contains, clorus_get, clorus_nth};
 
 /// Remove a key from a map (dissoc)
@@ -19,13 +19,14 @@ pub extern "C" fn clorus_map_dissoc(map_val: *mut Value, key: *mut Value) -> *mu
 
         let map_ptr = (*map_val).as_ptr() as *mut ClorusHashMap;
 
-        // For now, create a new map without the key
-        // TODO: Use persistent data structure in Phase C
-        let new_map = ClorusHashMap::empty();
-        // Copy all entries except the one to remove
+        // Build a fresh map from every entry except the removed key. Since
+        // ClorusHashMap::assoc is persistent, this never touches map_ptr.
+        let mut new_map = ClorusHashMap::empty();
         for (k, v) in (*map_ptr).entries_iter() {
-            if !crate::value::clorus_equals(*k, key) {
-                (*new_map).assoc(*k, *v);
+            if !crate::value::clorus_equals(k, key) {
+                let next = ClorusHashMap::assoc(new_map, k, v);
+                crate::map::release_map(new_map);
+                new_map = next;
             }
         }
 
@@ -49,8 +50,7 @@ pub extern "C" fn clorus_map_keys(map_val: *mut Value) -> *mut Value {
         let mut vec = PersistentVector::empty();
 
         for (k, _) in (*map_ptr).entries_iter() {
-            vec = PersistentVector::conj(vec, *k);
-            (*(*k)).header().retain();
+            vec = PersistentVector::conj(vec, k);
         }
 
         Value::from_ptr(ValueTag::Vector, vec as *mut u8)
@@ -73,8 +73,7 @@ pub extern "C" fn clorus_map_vals(map_val: *mut Value) -> *mut Value {
         let mut vec = PersistentVector::empty();
 
         for (_, v) in (*map_ptr).entries_iter() {
-            vec = PersistentVector::conj(vec, *v);
-            (*(*v)).header().retain();
+            vec = PersistentVector::conj(vec, v);
         }
 
         Value::from_ptr(ValueTag::Vector, vec as *mut u8)
@@ -89,10 +88,11 @@ pub extern "C" fn clorus_map_merge(maps: *mut Value) -> *mut Value {
     }
 
     unsafe {
-        let result = ClorusHashMap::empty();
+        let mut result = ClorusHashMap::empty();
 
         // Maps should be a vector of maps
         if (*maps).header().tag() != ValueTag::Vector {
+            release_map(result);
             return crate::map::clorus_map_empty();
         }
 
@@ -104,10 +104,15 @@ pub extern "C" fn clorus_map_merge(maps: *mut Value) -> *mut Value {
             if !map_val.is_null() && (*map_val).header().tag() == ValueTag::HashMap {
                 let map_ptr = (*map_val).as_ptr() as *mut ClorusHashMap;
 
-                // Copy all entries from this map
+                // Copy all entries from this map (later maps' keys win, matching Clojure merge)
                 for (k, v) in (*map_ptr).entries_iter() {
-                    (*result).assoc(*k, *v);
+                    let next = ClorusHashMap::assoc(result, k, v);
+                    release_map(result);
+                    result = next;
                 }
+            }
+            if !map_val.is_null() {
+                crate::value::clorus_release(map_val);
             }
         }
 

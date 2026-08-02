@@ -81,8 +81,8 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
                 let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
                 let mut state = 0u64;
                 for (key, value) in (*map_ptr).entries_iter() {
-                    let h_key = clorus_hash(*key);
-                    let h_val = clorus_hash(*value);
+                    let h_key = clorus_hash(key);
+                    let h_val = clorus_hash(value);
                     let entry_hash = h_key ^ h_val.rotate_left(1);
                     state ^= entry_hash;
                 }

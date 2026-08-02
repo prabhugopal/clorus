@@ -123,21 +123,21 @@ impl Var {
 
             let map_ptr = (*meta_map).as_ptr() as *mut crate::map::ClorusHashMap;
             for (k, v) in (*map_ptr).entries_iter() {
-                let key_str = if (*k).is_null() {
+                let key_str = if k.is_null() {
                     None
                 } else {
-                    match (**k).tag() {
-                        ValueTag::Keyword => Some((**k).as_keyword().to_string()),
-                        ValueTag::String => Some((**k).as_string().to_string()),
+                    match (*k).tag() {
+                        ValueTag::Keyword => Some((*k).as_keyword().to_string()),
+                        ValueTag::String => Some((*k).as_string().to_string()),
                         _ => None,
                     }
                 };
 
                 if let Some(key) = key_str {
-                    if !(*v).is_null() {
-                        crate::value::clorus_retain(*v);
+                    if !v.is_null() {
+                        crate::value::clorus_retain(v);
                     }
-                    meta.insert(key, *v);
+                    meta.insert(key, v);
                 }
             }
         }

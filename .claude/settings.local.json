@@ -200,7 +200,12 @@
       "Bash(CLORUS_ENTRY_FILE=tests/stdlib/test-core-long-tail-2.clr timeout 15 ./target/release/clorus run)",
       "Bash(sed -i '' -e 's#\\\\.\\\\./\\\\.\\\\./crates/example-rust-lib#./rust-lib#g' -e 's#/crates/example-rust-lib#/examples/rust-ffi-demo/rust-lib#g' -e 's#clorus-ffi-gen crates/example-rust-lib#clorus-ffi-gen examples/rust-ffi-demo/rust-lib#g' docs/features/ffi.md docs/features/automatic-ffi.md)",
       "Bash(sed -i '' -e 's#\\\\.\\\\./\\\\.\\\\./crates/async-demo#./rust-lib#g' -e 's#// crates/async-demo/#// examples/async-demo/rust-lib/#g' docs/features/async-integration.md)",
-      "Bash(CLORUS_HOME=/Users/prabhugopal/Workspace/github/clorus timeout 60 /Users/prabhugopal/Workspace/github/clorus/target/release/clorus run)"
+      "Bash(CLORUS_HOME=/Users/prabhugopal/Workspace/github/clorus timeout 60 /Users/prabhugopal/Workspace/github/clorus/target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check2.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check3.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check4.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check5.clr timeout 15 ./target/release/clorus run)"
     ]
   }
 }

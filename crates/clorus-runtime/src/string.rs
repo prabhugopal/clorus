@@ -103,7 +103,7 @@ unsafe fn value_to_rust_string(val: *mut Value) -> String {
             let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
             let mut entries: Vec<(String, String)> = Vec::new();
             for (k, v) in (*map_ptr).entries_iter() {
-                entries.push((value_to_rust_string(*k), value_to_rust_string(*v)));
+                entries.push((value_to_rust_string(k), value_to_rust_string(v)));
             }
             entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
             let rendered: Vec<String> = entries
@@ -1134,7 +1134,7 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
             let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
             let mut entries: Vec<(String, String)> = Vec::new();
             for (k, v) in (*map_ptr).entries_iter() {
-                entries.push((value_to_pr_string(*k), value_to_pr_string(*v)));
+                entries.push((value_to_pr_string(k), value_to_pr_string(v)));
             }
             entries.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
             let rendered: Vec<String> = entries

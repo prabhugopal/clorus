@@ -1628,9 +1628,9 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                     return false;
                 }
                 for (key, value) in (*left_ptr).entries_iter() {
-                    match (*right_ptr).get_entry(*key) {
+                    match (*right_ptr).get_entry(key) {
                         Some(other_val) => {
-                            if !clorus_equals(*value, other_val) {
+                            if !clorus_equals(value, other_val) {
                                 return false;
                             }
                         }

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
-use crate::set::ClorusHashSet;
+use crate::set::{release_set, ClorusHashSet};
 use crate::value::{clorus_equals, clorus_release, Value, ValueTag};
 
 type Hierarchy = HashMap<String, HashSet<String>>;
@@ -90,10 +90,12 @@ unsafe fn keys_to_set<I>(keys: I) -> *mut Value
 where
     I: IntoIterator<Item = String>,
 {
-    let set_ptr = ClorusHashSet::empty();
+    let mut set_ptr = ClorusHashSet::empty();
     for key in keys.into_iter() {
         if let Some(v) = key_to_value(&key) {
-            (*set_ptr).conj(v);
+            let new_set = ClorusHashSet::conj(set_ptr, v);
+            release_set(set_ptr);
+            set_ptr = new_set;
             clorus_release(v);
         }
     }
