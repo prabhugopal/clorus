@@ -324,11 +324,11 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
       <p><code class="loc">clorus-codegen/src/codegen/calls.rs:16–18,203</code> — arity is hardcoded to exactly 1 argument, dispatching to a runtime function expecting a vector-of-maps. Idiomatic <code>(merge m1 m2)</code> errors; the only passing test writes <code>(merge [m1 m2])</code>. <code>keys</code>/<code>vals</code> are separately defined twice (native + shadowed stdlib) — dead code, not a bug, but exactly the kind of surprise that erodes trust in the builtin set.</p>
     </div>
   </div>
-  <div class="bug warn">
-    <div class="stripe"></div>
+  <div class="bug" style="border-color:var(--good)">
+    <div class="stripe" style="background:var(--good)"></div>
     <div class="bug-body">
-      <div class="bug-head"><span class="sev">Reliability</span><h4><code>recur</code> outside an explicit <code>loop</code> has no guaranteed TCO</h4></div>
-      <p><code class="loc">codegen/mod.rs:4200–4210</code> — self-recursive <code>recur</code> at the tail of a plain <code>fn</code> re-emits a normal call and leans on LLVM's own tail-call optimization rather than an explicit <code>musttail</code>/trampoline. It'll usually work at <code>-O</code>, and silently blow the stack when it doesn't — which is the definition of a surprise for a language whose whole pitch is Clojure-shaped recursion.</p>
+      <div class="bug-head"><span class="sev" style="color:var(--good)">Fixed 2026-08-02</span><h4><code>recur</code> at fn tail now has guaranteed O(1)-stack TCO</h4></div>
+      <p>Was: self-recursive <code>recur</code> at the tail of a plain <code>fn</code> (no enclosing <code>loop</code>) re-emitted a normal self-call and leaned on LLVM's own tail-call optimization — which never runs at JIT's default <code>OptimizationLevel::None</code>, the path <code>clorus run</code> actually uses. Confirmed by testing against the pre-fix binary directly: 1M-deep single-arity and 500k-deep variadic recursion both SIGSEGV before the fix. Now: <code>defn</code>, multi-arity <code>defn</code>, and <code>letfn</code> bodies wrap themselves in an implicit self-loop using the exact same phi-node mechanism <code>loop</code>/<code>recur</code> already uses — a real loop back-edge, not a call — including the variadic (rest-param) case, where extra <code>recur</code> args get packed into the rest vector each iteration. Verified with 1M/500k/200k-deep regression tests across all four shapes (fixed-arity, multi-arity, variadic, letfn).</p>
     </div>
   </div>
 </section>
@@ -356,7 +356,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
         <tr><td>Agents</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">737-line runtime module.</td></tr>
         <tr><td>Channels (core.async-style)</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Beyond core Clojure — a genuine extra, go-blocks + thread pool.</td></tr>
         <tr><td>try / catch / throw / ex-info</td><td><span class="pill partial">Implemented, non-native</span></td><td class="evidence">Tagged sentinel values, not LLVM unwinding — functionally complete but not structurally idiomatic.</td></tr>
-        <tr><td><code>loop</code>/<code>recur</code> TCO</td><td><span class="pill partial">Partial</span></td><td class="evidence">Guaranteed inside <code>loop</code> (phi-node backedge); not guaranteed for bare <code>fn</code> self-recursion.</td></tr>
+        <tr><td><code>loop</code>/<code>recur</code> TCO</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Guaranteed everywhere as of 2026-08-02: <code>loop</code>, bare <code>fn</code> self-recursion (fixed and variadic), multi-arity <code>defn</code>, and <code>letfn</code> all use the same phi-node loop back-edge.</td></tr>
         <tr><td>Dynamic vars / <code>binding</code></td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real thread-local binding stack.</td></tr>
         <tr><td>Multi-arity / variadic fns</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Per-arity compilation + rest params.</td></tr>
         <tr><td>Numeric tower (bigint / ratio)</td><td><span class="pill missing">Missing</span></td><td class="evidence">Long (i64) + Double only. Integer division silently promotes to float instead of an exact ratio.</td></tr>
@@ -457,7 +457,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
         <li><span class="pill implemented">done</span> Maps/sets replaced with a real persistent HAMT (mirrors the vector trie's structural-sharing pattern) — was the single highest-leverage semantics fix on this page.</li>
         <li>Root-cause and fix the 5 remaining failing tests (<code>test-numeric.clr</code> and 4 stdlib long-tail/sort tests) — each becomes a permanent regression test in Phase 3.</li>
         <li>Fix <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>; delete the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs.</li>
-        <li>Give <code>recur</code> self-tail-calls guaranteed TCO (explicit trampoline or LLVM <code>musttail</code>) instead of hoping the optimizer cooperates.</li>
+        <li><span class="pill implemented">done</span> <code>recur</code> self-tail-calls now have guaranteed TCO (implicit phi-node loop, same mechanism as <code>loop</code>) instead of hoping the optimizer cooperates — fixed-arity, multi-arity, variadic, and <code>letfn</code> all covered.</li>
         <li>Integrate <code>lazy-seq</code> with core <code>seq</code>/<code>first</code>/<code>rest</code>/<code>map</code>/<code>filter</code> instead of a parallel <code>lazy-</code> API.</li>
       </ul>
     </div>
