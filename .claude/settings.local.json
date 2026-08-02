@@ -205,7 +205,20 @@
       "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check2.clr timeout 15 ./target/release/clorus run)",
       "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check3.clr timeout 15 ./target/release/clorus run)",
       "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check4.clr timeout 15 ./target/release/clorus run)",
-      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check5.clr timeout 15 ./target/release/clorus run)"
+      "Bash(CLORUS_ENTRY_FILE=/tmp/persist_check5.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/recur_check1.clr timeout 30 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/recur_check2.clr timeout 30 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/recur_check3.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/recur_check4.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=tests/language/test-recur-fn-tail.clr timeout 30 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/tco_isolate1.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/tco_isolate2.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/diag1.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/diag2.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/diag3.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/diag4.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/diag5.clr timeout 15 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/tco_variadic.clr timeout 30 ./target/release/clorus run)"
     ]
   }
 }

@@ -2,6 +2,101 @@ use super::*;
 use clorus_syntax::ast::FunctionArity;
 
 impl<'ctx> CodeGen<'ctx> {
+    /// Wrap a function body in an implicit self-loop so that `recur` at the
+    /// tail of the body gets guaranteed O(1)-stack tail recursion -- a real
+    /// LLVM loop via phi nodes, the same mechanism `loop`/`recur` already
+    /// uses -- instead of relying on the optimizer to turn a self-call into
+    /// a tail call (which it may not do, silently blowing the stack
+    /// instead).
+    ///
+    /// Must be called right after `entry` is created and positioned, before
+    /// any parameter destructuring. Returns one value per fixed parameter
+    /// position (read from this iteration's phi node -- destructure
+    /// parameter patterns against these instead of the raw
+    /// `function.get_nth_param(i)` values), plus, when `has_rest` is true,
+    /// the current iteration's rest-vector value.
+    ///
+    /// For a variadic function, `recur`'s extra args (beyond the fixed
+    /// params) get packed into a fresh vector each iteration and fed to the
+    /// rest phi -- matching how a normal call to this function packs
+    /// trailing args, so recur's arg-count convention is unchanged from
+    /// before this loop scheme existed (see Expr::Recur's rest_phi branch).
+    pub(super) fn setup_fn_recur_loop(
+        &mut self,
+        function: FunctionValue<'ctx>,
+        entry: BasicBlock<'ctx>,
+        param_count: usize,
+        has_rest: bool,
+    ) -> (Vec<PointerValue<'ctx>>, Option<PointerValue<'ctx>>) {
+        let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+        let mut param_values = Vec::with_capacity(param_count);
+        for i in 0..param_count {
+            param_values.push(function.get_nth_param(i as u32).unwrap().into_pointer_value());
+        }
+        let rest_value = if has_rest {
+            Some(
+                function
+                    .get_nth_param(param_count as u32)
+                    .unwrap()
+                    .into_pointer_value(),
+            )
+        } else {
+            None
+        };
+
+        let loop_start = self.context.append_basic_block(function, "fn_recur_start");
+        self.builder.build_unconditional_branch(loop_start).unwrap();
+        self.builder.position_at_end(loop_start);
+
+        let mut phi_nodes = Vec::with_capacity(param_count);
+        let mut phi_values = Vec::with_capacity(param_count);
+        for (i, pv) in param_values.iter().enumerate() {
+            let phi = self
+                .builder
+                .build_phi(value_ptr_type, &format!("fn_recur_param_{}", i))
+                .unwrap();
+            phi.add_incoming(&[(pv, entry)]);
+            phi_values.push(phi.as_basic_value().into_pointer_value());
+            phi_nodes.push(phi);
+        }
+
+        let (rest_phi, rest_phi_value) = if let Some(rv) = rest_value {
+            let phi = self
+                .builder
+                .build_phi(value_ptr_type, "fn_recur_rest")
+                .unwrap();
+            phi.add_incoming(&[(&rv, entry)]);
+            (Some(phi), Some(phi.as_basic_value().into_pointer_value()))
+        } else {
+            (None, None)
+        };
+
+        // LoopContext requires a loop_end block, but a function body returns
+        // directly from wherever it ends up (see callers below) rather than
+        // routing through a value-merging exit like Expr::Loop does -- so
+        // this block is provably unreachable. Give it a terminator so LLVM's
+        // verifier is satisfied, then never target it.
+        let loop_end = self.context.append_basic_block(function, "fn_recur_unused_end");
+        let resume = self.builder.get_insert_block();
+        self.builder.position_at_end(loop_end);
+        self.builder.build_unreachable().unwrap();
+        if let Some(block) = resume {
+            self.builder.position_at_end(block);
+        }
+
+        let binding_names = (0..param_count).map(|i| format!("__fn_recur_{}", i)).collect();
+        self.loop_context = Some(LoopContext {
+            loop_start,
+            loop_end,
+            binding_names,
+            phi_nodes,
+            rest_phi,
+        });
+
+        (phi_values, rest_phi_value)
+    }
+
     pub(super) fn compile_defn_expr(
         &mut self,
         name: &str,
@@ -69,20 +164,21 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder.position_at_end(entry);
 
         // Clear variables for function scope
+        let saved_loop_context = self.loop_context.clone();
+        self.loop_context = None;
         self.variables.clear();
 
         // Bind fixed parameters to allocas (parameters are now Value*)
         // Support destructuring in function parameters
-        // Track parameter bindings for nested closures to capture
+        // Track parameter bindings for nested closures to capture.
+        //
+        // Guaranteed-TCO path: wrap the body in an implicit self-loop so
+        // recur at the tail is a real loop back-edge, not a self-call.
+        let (phi_values, rest_phi_value) =
+            self.setup_fn_recur_loop(function, entry, params.len(), rest_param.is_some());
         let mut param_bindings = Vec::new();
-        for (i, param_pattern) in params.iter().enumerate() {
-            let param_val = function
-                .get_nth_param(i as u32)
-                .unwrap()
-                .into_pointer_value();
-
-            // Destructure parameter pattern and collect bindings
-            let bindings = self.destructure_pattern(param_pattern, param_val)?;
+        for (param_pattern, phi_val) in params.iter().zip(phi_values.iter()) {
+            let bindings = self.destructure_pattern(param_pattern, *phi_val)?;
             param_bindings.extend(bindings);
         }
 
@@ -95,10 +191,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Handle rest parameter if present
         if let Some(rest_name) = rest_param {
-            let rest_vec = function
-                .get_nth_param(params.len() as u32)
-                .unwrap()
-                .into_pointer_value();
+            let rest_vec = rest_phi_value.expect("rest_phi_value set when rest_param is Some");
             let rest_alloca = self.create_entry_block_alloca(rest_name);
             self.builder.build_store(rest_alloca, rest_vec).unwrap();
             self.variables.insert(rest_name.clone(), rest_alloca);
@@ -113,6 +206,7 @@ impl<'ctx> CodeGen<'ctx> {
         });
         let result = self.compile_expr(body)?;
         self.current_recur_fn = saved_recur_ctx;
+        self.loop_context = saved_loop_context;
         self.builder.build_return(Some(&result)).unwrap();
 
         // Clear parameter context before restoring variables
@@ -424,24 +518,25 @@ impl<'ctx> CodeGen<'ctx> {
             self.builder.position_at_end(entry);
 
             // Clear variables
+            let saved_loop_context = self.loop_context.clone();
+            self.loop_context = None;
             self.variables.clear();
 
-            // Bind parameters with destructuring support
-            for (i, param_pattern) in arity.params.iter().enumerate() {
-                let param_val = function
-                    .get_nth_param(i as u32)
-                    .unwrap()
-                    .into_pointer_value();
-
-                self.destructure_pattern(param_pattern, param_val)?;
+            // Bind parameters with destructuring support.
+            // Guaranteed-TCO path: see setup_fn_recur_loop's doc comment.
+            let (phi_values, rest_phi_value) = self.setup_fn_recur_loop(
+                function,
+                entry,
+                arity.params.len(),
+                arity.rest_param.is_some(),
+            );
+            for (param_pattern, phi_val) in arity.params.iter().zip(phi_values.iter()) {
+                self.destructure_pattern(param_pattern, *phi_val)?;
             }
 
             // Handle rest parameter if present
             if let Some(rest_name) = &arity.rest_param {
-                let rest_vec = function
-                    .get_nth_param(arity.params.len() as u32)
-                    .unwrap()
-                    .into_pointer_value();
+                let rest_vec = rest_phi_value.expect("rest_phi_value set when rest_param is Some");
                 let rest_alloca = self.create_entry_block_alloca(rest_name);
                 self.builder.build_store(rest_alloca, rest_vec).unwrap();
                 self.variables.insert(rest_name.clone(), rest_alloca);
@@ -456,6 +551,7 @@ impl<'ctx> CodeGen<'ctx> {
             });
             let result = self.compile_expr(&arity.body)?;
             self.current_recur_fn = saved_recur_ctx;
+            self.loop_context = saved_loop_context;
             self.builder.build_return(Some(&result)).unwrap();
 
             // Restore state

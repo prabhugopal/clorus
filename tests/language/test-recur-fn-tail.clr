@@ -10,6 +10,33 @@
     acc
     (recur (dec n) (+ acc n))))
 
+;; Deep recursion: recur at the tail of a bare fn (no enclosing loop) must
+;; get real O(1)-stack tail-call elimination, not rely on the optimizer
+;; turning a self-call into a tail call -- at JIT's default
+;; OptimizationLevel::None, the latter never happens, so this would
+;; previously stack-overflow well before reaching a million iterations.
+(defn count-down [n]
+  (if (<= n 0)
+    :done
+    (recur (dec n))))
+
+(defn sum-to
+  ([n] (sum-to n 0))
+  ([n acc]
+   (if (<= n 0)
+     acc
+     (recur (dec n) (+ acc n)))))
+
+;; Variadic (rest-param) recur at fn tail: extra recur args beyond the
+;; fixed params get packed into a fresh rest vector each iteration, fed to
+;; a dedicated phi node -- same guarantee as the fixed-arity case above,
+;; and the same argument convention the old call-based fallback used
+;; (recur's trailing args are spread, not a single pre-collected sequence).
+(defn count-variadic [n & tail]
+  (if (<= n 0)
+    :done
+    (recur (dec n) 1 2)))
+
 (defn -main [& _args]
   (do
     (assert-eq "defn recur" (sum-down 5 0) 15)
@@ -18,4 +45,12 @@
                 acc
                 (recur (dec n) (+ acc n))))]
       (assert-eq "letfn recur" (sum-helper 5 0) 15))
+
+    (assert-eq "deep defn recur (1 param)" (count-down 1000000) :done)
+    (assert-eq "deep defn recur (multi-arity)" (sum-to 200000) 20000100000)
+    (assert-eq "deep defn recur (variadic)" (count-variadic 500000) :done)
+    (letfn [(deep-helper [n acc]
+              (if (<= n 0) acc (recur (dec n) (+ acc 1))))]
+      (assert-eq "deep letfn recur" (deep-helper 500000 0) 500000))
+
     "PASS"))

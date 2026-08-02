@@ -63,6 +63,13 @@ struct LoopContext<'ctx> {
     binding_names: Vec<String>,
     /// Phi nodes for loop parameters (for proper recur updates)
     phi_nodes: Vec<PhiValue<'ctx>>,
+    /// Set only for a variadic function's implicit self-loop (see
+    /// setup_fn_recur_loop): a phi node carrying the rest-param vector.
+    /// When present, recur may pass more args than phi_nodes.len() --
+    /// the extras get packed into a fresh vector fed to this phi, matching
+    /// how a normal call to this function packs trailing args. Real `loop`
+    /// forms never set this; their recur must match binding count exactly.
+    rest_phi: Option<PhiValue<'ctx>>,
 }
 
 #[derive(Clone)]
@@ -1433,6 +1440,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // Save current variable scope
                 let saved_vars = self.variables.clone();
                 let saved_recur_ctx = self.current_recur_fn.clone();
+                let saved_loop_context = self.loop_context.clone();
                 let mut local_vars = Vec::new();
 
                 // Step 1: Create function prototypes (declarations)
@@ -1527,20 +1535,21 @@ impl<'ctx> CodeGen<'ctx> {
                     }
 
                     // Bind fixed parameters to allocas with destructuring.
-                    for (param_idx, pattern) in params.iter().enumerate() {
-                        let param_val = function
-                            .get_nth_param(param_idx as u32)
-                            .unwrap()
-                            .into_pointer_value();
-                        self.destructure_pattern(pattern, param_val)?;
+                    // Guaranteed-TCO path: see setup_fn_recur_loop's doc comment.
+                    self.loop_context = None;
+                    let (phi_values, rest_phi_value) = self.setup_fn_recur_loop(
+                        *function,
+                        entry_block,
+                        params.len(),
+                        rest_param.is_some(),
+                    );
+                    for (pattern, phi_val) in params.iter().zip(phi_values.iter()) {
+                        self.destructure_pattern(pattern, *phi_val)?;
                     }
 
                     // Handle rest parameter if present
                     if let Some(rest_name) = rest_param {
-                        let rest_vec = function
-                            .get_nth_param(params.len() as u32)
-                            .unwrap()
-                            .into_pointer_value();
+                        let rest_vec = rest_phi_value.expect("rest_phi_value set when rest_param is Some");
                         let alloca = self.create_entry_block_alloca(rest_name);
                         self.builder.build_store(alloca, rest_vec).unwrap();
                         self.variables.insert(rest_name.clone(), alloca);
@@ -1554,6 +1563,7 @@ impl<'ctx> CodeGen<'ctx> {
                     });
                     let result = self.compile_expr(fn_body)?;
                     self.current_recur_fn = saved_recur_ctx.clone();
+                    self.loop_context = saved_loop_context.clone();
 
                     // Return the result
                     self.builder.build_return(Some(&result)).unwrap();
@@ -2580,6 +2590,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.loop_context = Some(LoopContext {
                     loop_start,
                     loop_end,
+                    rest_phi: None,
                     binding_names: binding_names.clone(),
                     phi_nodes: phi_nodes.clone(),
                 });
@@ -2666,11 +2677,24 @@ impl<'ctx> CodeGen<'ctx> {
                     return self.compile_expr(&recur_call);
                 };
 
-                // Check that arg count matches binding count
-                if args.len() != loop_ctx.binding_names.len() {
+                let fixed_count = loop_ctx.binding_names.len();
+
+                // Check that arg count matches: exact match for a real loop
+                // form, or at least the fixed count for a variadic function's
+                // implicit loop (extras get packed into the rest vector,
+                // same convention the old self-call fallback used).
+                if loop_ctx.rest_phi.is_none() {
+                    if args.len() != fixed_count {
+                        return Err(format!(
+                            "recur argument count mismatch: expected {}, got {}",
+                            fixed_count,
+                            args.len()
+                        ));
+                    }
+                } else if args.len() < fixed_count {
                     return Err(format!(
-                        "recur argument count mismatch: expected {}, got {}",
-                        loop_ctx.binding_names.len(),
+                        "recur argument count mismatch: expected at least {}, got {}",
+                        fixed_count,
                         args.len()
                     ));
                 }
@@ -2688,6 +2712,13 @@ impl<'ctx> CodeGen<'ctx> {
                 // This is the key fix - phi nodes properly merge control flow
                 for (i, phi) in loop_ctx.phi_nodes.iter().enumerate() {
                     phi.add_incoming(&[(&new_values[i], current_block)]);
+                }
+
+                // Pack any extra recur args into the rest vector's phi, same
+                // as a normal call to this function would.
+                if let Some(rest_phi) = loop_ctx.rest_phi {
+                    let rest_vec = self.build_rest_vector_from_values(&new_values[fixed_count..])?;
+                    rest_phi.add_incoming(&[(&rest_vec, current_block)]);
                 }
 
                 // Branch back to loop start
