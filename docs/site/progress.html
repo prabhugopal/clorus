@@ -203,7 +203,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · UPDATED 2026-08-01</div>
+    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · UPDATED 2026-08-02</div>
     <h1 class="title">Clorus<span class="lang">.</span> Progress</h1>
     <p class="tagline">Clojure semantics at native speed, with Rust interop as a first-class citizen — the same bet <a href="https://jank-lang.org/progress/" target="_blank" rel="noopener">jank</a> makes with C++. This is where that bet actually stands today.</p>
     <div class="meta-row">
@@ -215,7 +215,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
     </div>
     <div class="stats">
       <div class="stat good"><div class="num tnum">0</div><div class="label">cargo build --all-targets errors</div></div>
-      <div class="stat good"><div class="num tnum">475</div><div class="label">Rust unit tests passing</div></div>
+      <div class="stat good"><div class="num tnum">483</div><div class="label">Rust unit tests passing</div></div>
       <div class="stat warn"><div class="num tnum">121/126</div><div class="label">.clr tests pass (full sweep, not aborted)</div></div>
       <div class="stat bad"><div class="num tnum">~50%</div><div class="label">clojure.core symbol coverage</div></div>
       <div class="stat bad"><div class="num tnum">5</div><div class="label">confirmed crashes/hangs, still open</div></div>
@@ -289,11 +289,11 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
   <div class="section-head"><span class="section-num">03</span><h2>Correctness bugs — the "no surprises" list</h2></div>
   <p class="section-dek">Everything here was reproduced directly, not read off a doc. These are the items that most directly contradict "Clojure semantics, uncompromised."</p>
 
-  <div class="bug">
-    <div class="stripe"></div>
+  <div class="bug" style="border-color:var(--good)">
+    <div class="stripe" style="background:var(--good)"></div>
     <div class="bug-body">
-      <div class="bug-head"><span class="sev">Critical · semantics</span><h4>Maps and sets are mutated in place, not persistent</h4></div>
-      <p><code class="loc">clorus-runtime/src/map.rs:167</code> — <code>clorus_map_assoc</code> literally mutates the existing map (<code>(*map_ptr).assoc(...)</code>), self-documented as "TODO: Phase C, create a new persistent map." <code>set.rs</code> has the identical pattern. <code>(assoc m :a 1)</code> is visible through every other reference holding <code>m</code> — this is the single highest-priority fix; vectors and lists are genuinely persistent (32-way trie, structural sharing), so maps/sets are the outlier, not the norm.</p>
+      <div class="bug-head"><span class="sev" style="color:var(--good)">Fixed 2026-08-02</span><h4>Maps and sets are now a real persistent HAMT</h4></div>
+      <p>Was: <code>clorus_map_assoc</code> mutated the existing map in place (<code>(*map_ptr).assoc(...)</code>), visible through every other reference holding it — the single highest-priority correctness bug on this page. Now: <code>map.rs</code>/<code>set.rs</code> are a real hash array mapped trie (32-way branching by 5-bit hash chunks, path copying, refcounted structural sharing), the same shape as the vector's existing trie. <code>assoc</code>/<code>conj</code>/<code>dissoc</code>/<code>get-in</code>/<code>assoc-in</code>/<code>merge</code> verified end to end through real Clorus code on 100-key maps, plus new unit tests forcing branch-splitting at 200 keys. Along the way, found and fixed a real double-free/UAF bug in the first pass at this (missing retain when an old node's entry is duplicated into a new branch — reproduced as a SIGSEGV under parallel test execution) and two pre-existing memory leaks in <code>clorus_map_keys</code>/<code>clorus_map_vals</code>/<code>clorus_map_merge</code> (double-retain, and a never-released vector element respectively) unrelated to persistence.</p>
     </div>
   </div>
   <div class="bug">
@@ -342,7 +342,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
       <tbody>
         <tr><td>Reader / syntax-quote / EDN</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Full quote/unquote/splicing, fn-literal shorthand tested.</td></tr>
         <tr><td>Persistent vector &amp; list</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real 32-way trie + Okasaki list, structural sharing, refcounted.</td></tr>
-        <tr><td>Persistent map &amp; set</td><td><span class="pill broken">Not persistent</span></td><td class="evidence">Mutate-in-place — see bug list above.</td></tr>
+        <tr><td>Persistent map &amp; set</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real HAMT (32-way trie, structural sharing) as of 2026-08-02 — see fixed-bug list above.</td></tr>
         <tr><td>Destructuring</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">let/fn, map + vector patterns.</td></tr>
         <tr><td>Namespaces / require / use</td><td><span class="pill implemented">Implemented</span></td><td class="evidence"><code>import</code> and <code>in-ns</code> missing.</td></tr>
         <tr><td>Multimethods</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Dispatch tables + <code>prefer-method</code> tie-breaking.</td></tr>
@@ -398,8 +398,8 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
     <table class="matrix">
       <thead><tr><th>Suite</th><th>Total</th><th>Pass</th><th>Fail / crash</th><th>Wired into any runner?</th></tr></thead>
       <tbody>
-        <tr><td>Rust unit tests (<code>--lib</code> and bin)</td><td class="tnum">476</td><td class="tnum">475 <span style="color:var(--text-dim)">(1 ignored)</span></td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
-        <tr><td><code>cargo test --workspace</code> (full, incl. bin)</td><td class="tnum">476</td><td class="tnum">475</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td>Rust unit tests (<code>--lib</code> and bin)</td><td class="tnum">484</td><td class="tnum">483 <span style="color:var(--text-dim)">(1 ignored)</span></td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>cargo test --workspace</code> (full, incl. bin)</td><td class="tnum">484</td><td class="tnum">483</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/language/</code></td><td class="tnum">80</td><td class="tnum">77</td><td class="tnum">1 crash, 2 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/stdlib/</code></td><td class="tnum">31</td><td class="tnum">25</td><td class="tnum">4 crashes/errors, 1 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
         <tr><td><code>tests/compiler/</code></td><td class="tnum">8</td><td class="tnum">3</td><td class="tnum">5 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
@@ -454,7 +454,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
       <ul>
         <li><span class="pill implemented">done</span> <code>dosync</code> now retries on conflict instead of silently continuing; <code>commute</code> now has real deferred semantics instead of aliasing <code>alter</code>; the vector-overflow corruption past 1,024 elements is fixed; <code>alter</code>/<code>send</code>/agent dispatch no longer hardcode arity/lookup-by-name.</li>
         <li><span class="pill broken">next up</span> The Apple-Silicon FFI-inside-<code>let</code> pointer corruption (<code>repros/codegen-bug-minimal-repro.clrs</code>) — highest priority given it's the one bug here with a live first-party victim (Coral).</li>
-        <li>Replace mutate-in-place maps/sets with a real persistent HAMT (mirrors the existing vector trie's structural-sharing pattern) — still the single highest-leverage semantics fix remaining.</li>
+        <li><span class="pill implemented">done</span> Maps/sets replaced with a real persistent HAMT (mirrors the vector trie's structural-sharing pattern) — was the single highest-leverage semantics fix on this page.</li>
         <li>Root-cause and fix the 5 remaining failing tests (<code>test-numeric.clr</code> and 4 stdlib long-tail/sort tests) — each becomes a permanent regression test in Phase 3.</li>
         <li>Fix <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>; delete the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs.</li>
         <li>Give <code>recur</code> self-tail-calls guaranteed TCO (explicit trampoline or LLVM <code>musttail</code>) instead of hoping the optimizer cooperates.</li>
