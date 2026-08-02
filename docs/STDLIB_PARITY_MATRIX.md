@@ -1,8 +1,8 @@
-# Clorus Stdlib Parity Matrix (`clorus.core`)
+# Stdlib Parity Matrix
 
-Last updated: 2026-03-06
+Canonical stdlib status is tracked inside:
 
-`docs/PARITY_CHECKLIST.md` is now the **single source of truth** for parity status.
+- `docs/generated/PARITY_STATUS.md`
+- `docs/generated/STATUS.json`
 
-This file is intentionally reduced to avoid status drift. Keep detailed parity
-state, residual gaps, and execution status only in `docs/PARITY_CHECKLIST.md`.
+This file is intentionally pointer-only to avoid duplicate status drift.

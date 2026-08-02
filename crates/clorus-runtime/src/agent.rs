@@ -197,26 +197,27 @@ impl ClorusAgent {
         let tx = self.action_tx.lock().unwrap();
 
         unsafe {
-            // Retain args for async execution
-            // NOTE: func is a function pointer, not a Value*, so we don't retain it
+            // Retain function and args for async execution
+            (*func).header().retain();
             for arg in &args {
                 (*(*arg)).header().retain();
             }
         }
 
         let wrapped_args: Vec<ValuePtr> = args.into_iter().map(ValuePtr::new).collect();
-
-        let result = tx.send(Action {
+        let action = Action {
             func: ValuePtr::new(func),
             args: wrapped_args,
-        }).is_ok();
+        };
 
-        // If send failed, decrement counter
-        if !result {
-            self.pending_count.fetch_sub(1, Ordering::SeqCst);
+        match tx.send(action) {
+            Ok(()) => true,
+            Err(err) => {
+                self.pending_count.fetch_sub(1, Ordering::SeqCst);
+                drop(err.0);
+                false
+            }
         }
-
-        result
     }
 
     /// Get current error (if any)
@@ -286,40 +287,24 @@ impl ClorusAgent {
     /// Call a function with current value and arguments
     /// Returns the new value or None if call failed
     unsafe fn call_agent_function(
-        func_ptr: *mut Value,
+        func_val: *mut Value,
         current: *mut Value,
         args: &[ValuePtr],
     ) -> Option<*mut Value> {
-        // Agent functions follow the calling convention:
-        // fn(current_value: *mut Value, arg1: *mut Value, ...) -> *mut Value
+        let mut call_args: Vec<*mut Value> = Vec::with_capacity(args.len() + 1);
+        call_args.push(current);
+        call_args.extend(args.iter().map(|arg| arg.get()));
 
-        // For MVP, we support functions with 0-2 additional arguments
-        // (plus the current value as first arg)
+        let result = crate::function::clorus_function_call(
+            func_val,
+            call_args.as_ptr(),
+            call_args.len() as i32,
+        );
 
-        match args.len() {
-            0 => {
-                // Function takes only current value: fn(current) -> new_value
-                type AgentFn1 = extern "C" fn(*mut Value) -> *mut Value;
-                let func: AgentFn1 = std::mem::transmute(func_ptr);
-                Some(func(current))
-            }
-            1 => {
-                // Function takes current + 1 arg: fn(current, arg) -> new_value
-                type AgentFn2 = extern "C" fn(*mut Value, *mut Value) -> *mut Value;
-                let func: AgentFn2 = std::mem::transmute(func_ptr);
-                Some(func(current, args[0].get()))
-            }
-            2 => {
-                // Function takes current + 2 args
-                type AgentFn3 = extern "C" fn(*mut Value, *mut Value, *mut Value) -> *mut Value;
-                let func: AgentFn3 = std::mem::transmute(func_ptr);
-                Some(func(current, args[0].get(), args[1].get()))
-            }
-            _ => {
-                // For more args, we'd need variadic support or a different approach
-                // For now, return None (error)
-                None
-            }
+        if result.is_null() {
+            None
+        } else {
+            Some(result)
         }
     }
 
@@ -335,8 +320,8 @@ impl ClorusAgent {
             // Check if there's an error
             if error.read().unwrap().is_some() {
                 // Skip actions if in error state
-                // NOTE: func is a function pointer, not a Value*, so we don't release it
                 unsafe {
+                    crate::value::clorus_release(action.func.get());
                     for arg in action.args {
                         crate::value::clorus_release(arg.get());
                     }
@@ -367,7 +352,7 @@ impl ClorusAgent {
                     None => {
                         // Function call failed - store error and keep current value
                         *error.write().unwrap() = Some(AgentError {
-                            error: ValuePtr::new(crate::value::Value::string("Function call failed: too many arguments")),
+                            error: ValuePtr::new(crate::value::Value::string("Function call failed")),
                             action_name: "send".to_string(),
                         });
                         current
@@ -387,9 +372,9 @@ impl ClorusAgent {
                 }
             }
 
-            // Release args and current
-            // NOTE: func is a function pointer, not a Value*, so we don't release it
+            // Release retained inputs for this action
             unsafe {
+                crate::value::clorus_release(action.func.get());
                 for arg in action.args {
                     crate::value::clorus_release(arg.get());
                 }
@@ -600,6 +585,24 @@ mod tests {
         }
     }
 
+    extern "C" fn test_add3(current: *mut Value, a: *mut Value, b: *mut Value, c: *mut Value) -> *mut Value {
+        unsafe {
+            let base = if (*current).header().tag() == ValueTag::Double {
+                (*current).as_double()
+            } else {
+                0.0
+            };
+            let av = if (*a).header().tag() == ValueTag::Double { (*a).as_double() } else { 0.0 };
+            let bv = if (*b).header().tag() == ValueTag::Double { (*b).as_double() } else { 0.0 };
+            let cv = if (*c).header().tag() == ValueTag::Double { (*c).as_double() } else { 0.0 };
+            Value::double(base + av + bv + cv)
+        }
+    }
+
+    unsafe fn make_test_fn(func_ptr: *const u8, arity: i32) -> *mut Value {
+        crate::function::clorus_function_new(func_ptr, arity, std::ptr::null(), 0)
+    }
+
     #[test]
     fn test_agent_create_and_deref() {
         unsafe {
@@ -623,8 +626,7 @@ mod tests {
             let val = Value::double(10.0);
             let agent = clorus_agent(val);
 
-            // Use real function pointer
-            let func = test_inc as *mut Value;
+            let func = make_test_fn(test_inc as *const u8, 1);
             let args = crate::vector::clorus_vector_empty();
 
             let result = clorus_send(agent, func, args);
@@ -639,6 +641,7 @@ mod tests {
 
             crate::value::clorus_release(deref_val);
             crate::value::clorus_release(result);
+            crate::value::clorus_release(func);
             crate::value::clorus_release(agent);
         }
     }
@@ -664,7 +667,7 @@ mod tests {
             let agent = clorus_agent(val);
 
             // Send multiple actions
-            let func = test_inc as *mut Value;
+            let func = make_test_fn(test_inc as *const u8, 1);
             let args = crate::vector::clorus_vector_empty();
 
             clorus_send(agent, func, args);
@@ -679,6 +682,7 @@ mod tests {
             assert_eq!((*deref_val).as_double(), 4.0);
 
             crate::value::clorus_release(deref_val);
+            crate::value::clorus_release(func);
             crate::value::clorus_release(agent);
         }
     }
@@ -690,7 +694,7 @@ mod tests {
             let agent = clorus_agent(val);
 
             // Send action
-            let func = test_inc as *mut Value;
+            let func = make_test_fn(test_inc as *const u8, 1);
             let args = crate::vector::clorus_vector_empty();
             clorus_send(agent, func, args);
 
@@ -699,6 +703,34 @@ mod tests {
             assert_eq!((*result).as_bool(), true);
 
             crate::value::clorus_release(result);
+            crate::value::clorus_release(func);
+            crate::value::clorus_release(agent);
+        }
+    }
+
+    #[test]
+    fn test_agent_send_with_three_extra_args() {
+        unsafe {
+            let val = Value::double(10.0);
+            let agent = clorus_agent(val);
+            let func = make_test_fn(test_add3 as *const u8, 4);
+
+            let mut args = crate::vector::clorus_vector_empty();
+            args = crate::vector::clorus_vector_conj(args, Value::double(1.0));
+            args = crate::vector::clorus_vector_conj(args, Value::double(2.0));
+            args = crate::vector::clorus_vector_conj(args, Value::double(3.0));
+
+            let result = clorus_send(agent, func, args);
+            assert!(!result.is_null());
+
+            clorus_await(agent);
+
+            let deref_val = clorus_agent_deref(agent);
+            assert_eq!((*deref_val).as_double(), 16.0);
+
+            crate::value::clorus_release(deref_val);
+            crate::value::clorus_release(result);
+            crate::value::clorus_release(func);
             crate::value::clorus_release(agent);
         }
     }

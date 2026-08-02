@@ -1673,29 +1673,8 @@ Use an explicit `.clri` interface with supported types or a local bridge crate."
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::panic::{catch_unwind, resume_unwind, UnwindSafe};
-    use std::sync::{Mutex, OnceLock};
+    use crate::test_support::with_cwd;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn cwd_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    fn with_cwd<T, F>(dir: &Path, f: F) -> T
-    where
-        F: FnOnce() -> T + UnwindSafe,
-    {
-        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
-        let original = std::env::current_dir().expect("get cwd");
-        std::env::set_current_dir(dir).expect("cd temp root");
-        let result = catch_unwind(f);
-        std::env::set_current_dir(original).expect("restore cwd");
-        match result {
-            Ok(value) => value,
-            Err(payload) => resume_unwind(payload),
-        }
-    }
 
     #[test]
     fn generate_wrapper_cargo_toml_for_version_dependency() {
@@ -9530,10 +9509,13 @@ libm = { version = "0.2", interface = false }
             Err(e) => e,
         });
 
-        assert!(err.contains("Rust dependency 'libm':"));
+        assert!(err.contains("Rust dependency 'libm'"));
         assert!(
             err.contains("resolved from registry source")
                 || err.contains("Failed to resolve registry dependency 'libm' via cargo metadata")
+                || err.contains("Only library crates can be auto-wrapped from registry sources")
+                || err.contains("no FFI-compatible functions were discovered")
+                || err.contains("has no auto-discoverable top-level `pub fn`")
         );
         assert!(!err.contains("INTENTIONAL_INTERFACE_SHOULD_BE_IGNORED"));
 

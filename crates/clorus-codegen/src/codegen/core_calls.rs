@@ -1138,7 +1138,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_pointer_value())
             }
 
-            "conj" => {
+            "conj" | "__clorus_conj" => {
                 // conj takes 2 args: collection, element
                 if args.len() != 2 {
                     return Err("conj requires 2 arguments: collection, element".to_string());
@@ -1647,7 +1647,7 @@ impl<'ctx> CodeGen<'ctx> {
                                     "*" => Some("clorus_mul"),
                                     "/" => Some("clorus_div"),
                                     "mod" => Some("clorus_mod"),
-                                    "conj" => Some("clorus_conj"),
+                                    "conj" | "__clorus_conj" => Some("clorus_conj"),
                                     "disj" => Some("clorus_set_disj"),
                                     _ => None,
                                 }
@@ -1787,20 +1787,18 @@ impl<'ctx> CodeGen<'ctx> {
 
             "alter" => {
                 // alter takes 2+ args: ref, function, [args...]
-                // Simplified version: (alter ref func arg)
-                // The function application happens here, then we call clorus_alter
+                // The function is applied immediately to the current transactional value,
+                // then the resulting value is staged as a regular write.
                 if args.len() < 2 {
                     return Err("alter requires at least 2 arguments: ref, function".to_string());
                 }
 
                 let ref_val = self.compile_expr(&args[0])?;
 
-                // Get current value from ref
                 let ref_deref_fn = self
                     .module
                     .get_function("clorus_ref_deref")
                     .ok_or("clorus_ref_deref not declared")?;
-
                 let current_val = self
                     .builder
                     .build_call(ref_deref_fn, &[ref_val.into()], "alter_deref")
@@ -1810,37 +1808,65 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_pointer_value();
 
-                // Get the function to apply
-                let func_name = match &args[1] {
-                    Expr::Symbol(name) => name.clone(),
-                    _ => return Err("alter requires a function as second argument".to_string()),
-                };
+                let func_val = self.compile_expr(&args[1])?;
+                let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let function_call_fn = self
+                    .module
+                    .get_function("clorus_function_call")
+                    .ok_or("clorus_function_call not declared")?;
 
-                let function = self
-                    .functions
-                    .get(&func_name)
-                    .ok_or_else(|| format!("Function not found: {}", func_name))?
-                    .clone();
+                let mut arg_values = Vec::new();
+                arg_values.push(current_val);
+                for arg in &args[2..] {
+                    arg_values.push(self.compile_expr(arg)?);
+                }
 
-                // Apply function to current value
-                // For now, support single additional argument
-                let func_args: Vec<BasicMetadataValueEnum> = if args.len() >= 3 {
-                    let arg_val = self.compile_expr(&args[2])?;
-                    vec![current_val.into(), arg_val.into()]
+                let arg_count = arg_values.len();
+                let args_array_ptr = if arg_count > 0 {
+                    let array_type = i8_ptr_type.array_type(arg_count as u32);
+                    let array_alloca = self.builder.build_alloca(array_type, "alter_args_array").unwrap();
+                    for (i, arg_val) in arg_values.iter().enumerate() {
+                        let elem_ptr = unsafe {
+                            self.builder
+                                .build_gep(
+                                    array_type,
+                                    array_alloca,
+                                    &[
+                                        self.context.i32_type().const_zero(),
+                                        self.context.i32_type().const_int(i as u64, false),
+                                    ],
+                                    &format!("alter_arg_{}_ptr", i),
+                                )
+                                .unwrap()
+                        };
+                        self.builder.build_store(elem_ptr, *arg_val).unwrap();
+                    }
+
+                    self.builder
+                        .build_pointer_cast(
+                            array_alloca,
+                            i8_ptr_type.ptr_type(AddressSpace::default()),
+                            "alter_args_array_cast",
+                        )
+                        .unwrap()
                 } else {
-                    vec![current_val.into()]
+                    i8_ptr_type.ptr_type(AddressSpace::default()).const_null()
                 };
 
+                let arg_count_val = self.context.i32_type().const_int(arg_count as u64, false);
                 let new_val = self
                     .builder
-                    .build_call(function, &func_args, "alter_apply")
+                    .build_call(
+                        function_call_fn,
+                        &[func_val.into(), args_array_ptr.into(), arg_count_val.into()],
+                        "alter_apply",
+                    )
                     .unwrap()
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_pointer_value();
 
-                // Now set the ref to the new value
                 let alter_fn = self
                     .module
                     .get_function("clorus_alter")
@@ -1849,6 +1875,54 @@ impl<'ctx> CodeGen<'ctx> {
                 let result = self
                     .builder
                     .build_call(alter_fn, &[ref_val.into(), new_val.into()], "alter_call")
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+
+            "commute" => {
+                if args.len() < 2 {
+                    return Err("commute requires at least 2 arguments: ref, function".to_string());
+                }
+
+                let ref_val = self.compile_expr(&args[0])?;
+                let func_val = self.compile_expr(&args[1])?;
+                let extra_args: Result<Vec<_>, String> = args[2..].iter().map(|arg| self.compile_expr(arg)).collect();
+                let args_vec = self.build_rest_vector_from_values(&extra_args?)?;
+
+                let commute_fn = self
+                    .module
+                    .get_function("clorus_commute")
+                    .ok_or("clorus_commute not declared")?;
+                let result = self
+                    .builder
+                    .build_call(commute_fn, &[ref_val.into(), func_val.into(), args_vec.into()], "commute_call")
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+
+            "ensure" => {
+                if args.len() != 1 {
+                    return Err("ensure requires 1 argument: ref".to_string());
+                }
+
+                let ref_val = self.compile_expr(&args[0])?;
+                let ensure_fn = self
+                    .module
+                    .get_function("clorus_ensure")
+                    .ok_or("clorus_ensure not declared")?;
+                let result = self
+                    .builder
+                    .build_call(ensure_fn, &[ref_val.into()], "ensure_call")
                     .unwrap();
 
                 Ok(result
@@ -1891,20 +1965,9 @@ impl<'ctx> CodeGen<'ctx> {
 
                 let agent_val = self.compile_expr(&args[0])?;
 
-                // Get the function to apply
-                let func_name = match &args[1] {
-                    Expr::Symbol(name) => name.clone(),
-                    _ => return Err("send requires a function as second argument".to_string()),
-                };
-
-                let function = self
-                    .functions
-                    .get(&func_name)
-                    .ok_or_else(|| format!("Function not found: {}", func_name))?
-                    .clone();
-
-                // Convert function to pointer value
-                let func_ptr = function.as_global_value().as_pointer_value();
+                // Get the function value to apply.
+                // This supports named functions, closures, vars, and any first-class function value.
+                let func_val = self.compile_expr(&args[1])?;
 
                 // Pack remaining args into vector
                 let vector_empty_fn = self
@@ -1948,18 +2011,6 @@ impl<'ctx> CodeGen<'ctx> {
                     .module
                     .get_function("clorus_send")
                     .ok_or("clorus_send not declared")?;
-
-                // Cast func_ptr to *mut Value (i8*)
-                let func_val = self
-                    .builder
-                    .build_pointer_cast(
-                        func_ptr,
-                        self.context
-                            .i8_type()
-                            .ptr_type(inkwell::AddressSpace::default()),
-                        "func_as_value",
-                    )
-                    .unwrap();
 
                 let result = self
                     .builder
@@ -2244,8 +2295,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let free_vars = self.find_free_variables(&args[0]);
 
                 // Generate unique function name for go block
-                let go_fn_name = format!("_go_block_{}", self.lambda_counter);
-                self.lambda_counter += 1;
+                let go_fn_name = self.next_generated_name("go_block");
 
                 // Create function type: takes captures vector, returns Value*
                 let value_ptr_type = self

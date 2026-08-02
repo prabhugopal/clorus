@@ -12,6 +12,45 @@ pub enum NewTemplate {
     RustInterop,
 }
 
+#[derive(Debug, Clone)]
+struct LoadedForm {
+    origin: String,
+    form_index: usize,
+    expr: Expr,
+}
+
+fn wrap_forms(origin: impl Into<String>, exprs: Vec<Expr>) -> Vec<LoadedForm> {
+    let origin = origin.into();
+    exprs.into_iter()
+        .enumerate()
+        .map(|(form_index, expr)| LoadedForm {
+            origin: origin.clone(),
+            form_index,
+            expr,
+        })
+        .collect()
+}
+
+fn summarize_expr(expr: &Expr) -> String {
+    let mut text = format!("{:?}", expr).replace("\n", " ");
+    if text.len() > 120 {
+        text.truncate(117);
+        text.push_str("...");
+    }
+    text
+}
+
+fn compile_error_with_context(form: &LoadedForm, err: impl AsRef<str>) -> String {
+    format!(
+        "Compile error in {} form #{}: {}
+  form: {}",
+        form.origin,
+        form.form_index + 1,
+        err.as_ref(),
+        summarize_expr(&form.expr)
+    )
+}
+
 pub fn new(name: &str) -> Result<(), String> {
     new_with_template(name, NewTemplate::Basic)
 }
@@ -128,7 +167,7 @@ fn load_module_recursive(
     base_path: &Path,
     clip_namespaces: &HashSet<String>,
     debug: bool,
-) -> Result<Vec<Expr>, String> {
+) -> Result<Vec<LoadedForm>, String> {
     // Skip if already loaded
     if loaded_modules.contains(namespace) {
         return Ok(Vec::new());
@@ -154,7 +193,7 @@ fn load_module_recursive(
         .map_err(|e| format!("Parse error in {}: {}", file_path.display(), e))?;
 
     // Find all :require statements and recursively load dependencies
-    let mut all_exprs = Vec::new();
+    let mut all_forms = Vec::new();
 
     for expr in &exprs {
         // Check top-level Expr::Require
@@ -168,7 +207,7 @@ fn load_module_recursive(
                     continue;
                 }
                 let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces, debug)?;
-                all_exprs.extend(dep_exprs);
+                all_forms.extend(dep_exprs);
             }
         }
 
@@ -183,15 +222,15 @@ fn load_module_recursive(
                     continue;
                 }
                 let dep_exprs = load_module_recursive(&spec.module, loaded_modules, base_path, clip_namespaces, debug)?;
-                all_exprs.extend(dep_exprs);
+                all_forms.extend(dep_exprs);
             }
         }
     }
 
     // Add this module's expressions AFTER its dependencies
-    all_exprs.extend(exprs);
+    all_forms.extend(wrap_forms(file_path.display().to_string(), exprs));
 
-    Ok(all_exprs)
+    Ok(all_forms)
 }
 
 /// Convert namespace to file path
@@ -356,15 +395,15 @@ pub fn clean() -> Result<(), String> {
 }
 
 pub fn build() -> Result<(), String> {
-    build_internal(false, false)
+    build_internal(false, false, None)
 }
 
 pub fn build_with_debug(debug: bool) -> Result<(), String> {
-    build_internal(false, debug)
+    build_internal(false, debug, None)
 }
 
 pub fn build_lib() -> Result<(), String> {
-    build_internal(true, false)
+    build_internal(true, false, None)
 }
 
 fn get_entry_override() -> Option<String> {
@@ -374,11 +413,11 @@ fn get_entry_override() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
+fn build_internal(mut lib_mode: bool, debug: bool, explicit_entry: Option<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
     // Determine entry point: explicit entry, src/lib.clrs, lib.clrs, src/lib.clr, lib.clr, or skip
-    let entry = if let Some(override_entry) = get_entry_override() {
+    let entry = if let Some(override_entry) = explicit_entry.or_else(get_entry_override) {
         // Explicit test/runner override always targets an executable entry.
         lib_mode = false;
         override_entry
@@ -438,7 +477,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
     // Load and parse stdlib/clorus/core.clr and stdlib/clorus/transducers.clr (optional)
-    let mut all_exprs = Vec::new();
+    let mut all_forms = Vec::new();
     if manifest.build.stdlib {
         let stdlib_path = Path::new("stdlib/clorus/core.clr");
         if stdlib_path.exists() {
@@ -451,7 +490,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
             if debug {
                 println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
             }
-            all_exprs.extend(stdlib_exprs);
+            all_forms.extend(wrap_forms(stdlib_path.display().to_string(), stdlib_exprs));
         } else {
             // Try relative to compiler location
             let compiler_dir = std::env::current_exe()
@@ -467,7 +506,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                     let stdlib_exprs = clorus::parse_and_expand(&stdlib_source)
                         .map_err(|e| format!("Parse error in stdlib/clorus/core.clr: {}", e))?;
 
-                    all_exprs.extend(stdlib_exprs);
+                    all_forms.extend(wrap_forms(alt_stdlib.display().to_string(), stdlib_exprs));
                 }
             }
         }
@@ -483,7 +522,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
             if debug {
                 println!("   [DEBUG] Loaded {} expressions from stdlib/clorus/transducers.clr", transducers_exprs.len());
             }
-            all_exprs.extend(transducers_exprs);
+            all_forms.extend(wrap_forms(transducers_path.display().to_string(), transducers_exprs));
         } else {
             // Try relative to compiler location
             let compiler_dir = std::env::current_exe()
@@ -499,7 +538,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                     let transducers_exprs = clorus::parse_and_expand(&transducers_source)
                         .map_err(|e| format!("Parse error in stdlib/clorus/transducers.clr: {}", e))?;
 
-                    all_exprs.extend(transducers_exprs);
+                    all_forms.extend(wrap_forms(alt_transducers.display().to_string(), transducers_exprs));
                 }
             }
         }
@@ -520,7 +559,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
         .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
     let mut loaded_modules = HashSet::new();
-    let mut module_exprs = Vec::new();
+    let mut module_forms = Vec::new();
 
     // Build set of .clip namespace prefixes for fast lookup
     let mut clip_namespace_prefixes: HashSet<String> = HashSet::new();
@@ -582,7 +621,7 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                 }
 
                 let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes, debug)?;
-                module_exprs.extend(dep_exprs);
+                module_forms.extend(dep_exprs);
             }
         }
 
@@ -602,24 +641,26 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
                 }
 
                 let dep_exprs = load_module_recursive(&spec.module, &mut loaded_modules, &base_path, &clip_namespace_prefixes, debug)?;
-                module_exprs.extend(dep_exprs);
+                module_forms.extend(dep_exprs);
             }
         }
     }
 
     // Add module expressions (dependencies first)
-    all_exprs.extend(module_exprs);
+    all_forms.extend(module_forms);
 
     // Add entry file expressions (after dependencies)
-    all_exprs.extend(entry_exprs);
+    all_forms.extend(wrap_forms(entry_path.display().to_string(), entry_exprs));
 
     if debug {
-        println!("   [DEBUG] Total expressions to compile: {}", all_exprs.len());
+        println!("   [DEBUG] Total expressions to compile: {}", all_forms.len());
     }
 
-    if all_exprs.is_empty() {
+    if all_forms.is_empty() {
         return Err("No expressions to compile".to_string());
     }
+
+    let all_exprs: Vec<Expr> = all_forms.iter().map(|form| form.expr.clone()).collect();
 
     // Compile to LLVM IR and create executable
     use inkwell::context::Context;
@@ -667,15 +708,15 @@ fn build_internal(mut lib_mode: bool, debug: bool) -> Result<(), String> {
 
     // Compile each expression into a function
     let mut function_names = Vec::new();
-    for (i, expr) in all_exprs.iter().enumerate() {
+    for (i, form) in all_forms.iter().enumerate() {
         // For libraries, prefix expr_ names with package name to avoid conflicts
         let fn_name = if lib_mode {
             format!("{}__expr_{}", manifest.package.name.replace('-', "_"), i)
         } else {
             format!("expr_{}", i)
         };
-        codegen.wrap_in_function(expr, &fn_name)
-            .map_err(|e| format!("Compile error: {}", e))?;
+        codegen.wrap_in_function(&form.expr, &fn_name)
+            .map_err(|e| compile_error_with_context(form, e))?;
         function_names.push(fn_name);
     }
 
@@ -1291,14 +1332,28 @@ fn load_and_compile_modules<'ctx>(
 }
 
 
+fn split_run_entry_override(extra_args: Vec<String>) -> (Option<String>, Vec<String>) {
+    if let Some(first) = extra_args.first() {
+        if first.ends_with(".clr") || first.ends_with(".clrs") {
+            let mut remaining = extra_args;
+            let entry = remaining.remove(0);
+            return (Some(entry), remaining);
+        }
+    }
+
+    (None, extra_args)
+}
+
 pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), String> {
+    let (entry_override, extra_args) = split_run_entry_override(extra_args);
+
     if use_jit {
         // Default path: JIT execution.
         if debug {
             println!("   Mode: JIT execution (default)");
             println!();
         }
-        run_jit_internal(debug, extra_args)
+        run_jit_internal(debug, entry_override, extra_args)
     } else {
         // Legacy fallback path: compile + run executable
         if debug {
@@ -1307,7 +1362,7 @@ pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), St
         }
 
         // Build the project first
-        build_with_debug(debug)?;
+        build_internal(false, debug, entry_override.clone())?;
 
         // Get the manifest to know the executable name
         let manifest = Manifest::find_in_current_dir()?;
@@ -1332,12 +1387,12 @@ pub fn run(debug: bool, use_jit: bool, extra_args: Vec<String>) -> Result<(), St
 }
 
 /// JIT execution mode used by `clorus run` default and REPL flows.
-fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> {
+fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec<String>) -> Result<(), String> {
     let manifest = Manifest::find_in_current_dir()?;
 
     // For run, we need an explicit entry point (not src/lib.clrs)
     // Libraries with src/lib.clrs shouldn't be run directly
-    let entry = if let Some(override_entry) = get_entry_override() {
+    let entry = if let Some(override_entry) = explicit_entry.or_else(get_entry_override) {
         override_entry
     } else {
         match &manifest.build.entry {
@@ -1387,7 +1442,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
     println!("   Compiling {} v{}", manifest.package.name, manifest.package.version);
 
     // Load and parse stdlib/clorus/core.clr + stdlib/clorus/transducers.clr (optional)
-    let mut all_exprs = Vec::new();
+    let mut all_forms = Vec::new();
     if manifest.build.stdlib {
         let stdlib_path = Path::new("stdlib/clorus/core.clr");
         if stdlib_path.exists() {
@@ -1400,7 +1455,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
             if debug {
                 println!("   [DEBUG] Loaded {} expressions from stdlib", stdlib_exprs.len());
             }
-            all_exprs.extend(stdlib_exprs);
+            all_forms.extend(wrap_forms(stdlib_path.display().to_string(), stdlib_exprs));
         } else if debug {
             println!("   [DEBUG] stdlib/clorus/core.clr not found, stdlib functions unavailable");
         }
@@ -1416,7 +1471,7 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
             if debug {
                 println!("   [DEBUG] Loaded {} expressions from stdlib/clorus/transducers.clr", transducers_exprs.len());
             }
-            all_exprs.extend(transducers_exprs);
+            all_forms.extend(wrap_forms(transducers_path.display().to_string(), transducers_exprs));
         } else if debug {
             println!("   [DEBUG] stdlib/clorus/transducers.clr not found, transducers unavailable");
         }
@@ -1430,14 +1485,15 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
 
     // Parse and expand macros
     let exprs = clorus::parse_and_expand(&source)
-        .map_err(|e| format!("Parse error: {}", e))?;
+        .map_err(|e| format!("Parse error in {}: {}", entry, e))?;
 
-    // Add entry exprs to all_exprs
-    all_exprs.extend(exprs);
+    all_forms.extend(wrap_forms(entry_path.display().to_string(), exprs));
 
-    if all_exprs.is_empty() {
+    if all_forms.is_empty() {
         return Err("No expressions to execute".to_string());
     }
+
+    let all_exprs: Vec<Expr> = all_forms.iter().map(|form| form.expr.clone()).collect();
 
     println!("    Finished dev [unoptimized] target(s) in 0.00s");
     println!("     Running `{}`", entry);
@@ -1680,14 +1736,14 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
     };
     codegen.set_namespace(stdlib_ns);
 
-    for (i, expr) in all_exprs.iter().take(stdlib_expr_count).enumerate() {
+    for (i, form) in all_forms.iter().take(stdlib_expr_count).enumerate() {
         // Skip namespace declarations
-        if matches!(expr, Expr::Ns { .. }) {
+        if matches!(form.expr, Expr::Ns { .. }) {
             continue;
         }
 
         // Skip declare statements
-        if let Expr::Declare { names } = expr {
+        if let Expr::Declare { names } = &form.expr {
             for name in names {
                 codegen.add_forward_declaration(name);
             }
@@ -1695,8 +1751,8 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
         }
 
         let fn_name = format!("stdlib_init_{}", i);
-        codegen.wrap_in_function(expr, &fn_name)
-            .map_err(|e| format!("Compile error in stdlib: {}", e))?;
+        codegen.wrap_in_function(&form.expr, &fn_name)
+            .map_err(|e| compile_error_with_context(form, e))?;
     }
 
     if debug {
@@ -1844,10 +1900,10 @@ fn run_jit_internal(debug: bool, extra_args: Vec<String>) -> Result<(), String> 
     let mut function_names = Vec::new();
 
     // Compile all expressions
-    for (i, expr) in all_exprs.iter().enumerate() {
+    for (i, form) in all_forms.iter().enumerate() {
         let fn_name = format!("expr_{}", i);
-        codegen.wrap_in_function(expr, &fn_name)
-            .map_err(|e| format!("Compile error: {}", e))?;
+        codegen.wrap_in_function(&form.expr, &fn_name)
+            .map_err(|e| compile_error_with_context(form, e))?;
         function_names.push(fn_name);
     }
 
@@ -2615,101 +2671,121 @@ pub fn pack_workspace(output_dir: Option<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{new, new_with_template, NewTemplate};
+    use super::{compile_error_with_context, new, new_with_template, split_run_entry_override, LoadedForm, NewTemplate};
     use clorus::parse_and_expand;
-    use std::env;
+    use clorus_syntax::Expr;
+    use crate::test_support::with_cwd;
     use std::fs;
-    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
-    struct CwdGuard(std::path::PathBuf);
+    #[test]
+    fn compile_error_with_context_includes_origin_and_form_preview() {
+        let form = LoadedForm {
+            origin: "src/main.clrs".to_string(),
+            form_index: 2,
+            expr: Expr::Call {
+                func: "missing-fn".to_string(),
+                args: vec![Expr::Long(42)],
+            },
+        };
 
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = env::set_current_dir(&self.0);
-        }
+        let message = compile_error_with_context(&form, "Unknown function: missing-fn");
+        assert!(message.contains("src/main.clrs form #3"));
+        assert!(message.contains("Unknown function: missing-fn"));
+        assert!(message.contains("missing-fn"));
     }
 
-    fn cwd_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    #[test]
+    fn split_run_entry_override_detects_clr_entry() {
+        let (entry, args) = split_run_entry_override(vec![
+            "examples/demo.clr".to_string(),
+            "alpha".to_string(),
+            "beta".to_string(),
+        ]);
+
+        assert_eq!(entry.as_deref(), Some("examples/demo.clr"));
+        assert_eq!(args, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn split_run_entry_override_leaves_plain_args_untouched() {
+        let (entry, args) = split_run_entry_override(vec!["alpha".to_string(), "beta".to_string()]);
+
+        assert!(entry.is_none());
+        assert_eq!(args, vec!["alpha", "beta"]);
     }
 
     #[test]
     fn new_project_generates_modern_main_template() {
-        let _lock = cwd_lock().lock().expect("cwd lock poisoned");
         let tmp = tempdir().expect("failed to create tempdir");
-        let original_cwd = env::current_dir().expect("failed to get cwd");
-        let _cwd_guard = CwdGuard(original_cwd);
-        env::set_current_dir(tmp.path()).expect("failed to cd to tempdir");
+        with_cwd(tmp.path(), || {
+            let project_name = "sample-app";
+            new(project_name).expect("clorus new failed");
 
-        let project_name = "sample-app";
-        new(project_name).expect("clorus new failed");
+            let main_path = tmp.path().join(project_name).join("src/main.clrs");
+            let main_content = fs::read_to_string(&main_path).expect("failed to read generated main.clrs");
 
-        let main_path = tmp.path().join(project_name).join("src/main.clrs");
-        let main_content = fs::read_to_string(&main_path).expect("failed to read generated main.clrs");
+            assert!(
+                main_content.contains("(ns main)"),
+                "generated template should include namespace declaration"
+            );
+            assert!(
+                main_content.contains("(defn -main [& _args]"),
+                "generated template should include -main entrypoint"
+            );
+            assert!(
+                !main_content.contains("\n    0))"),
+                "generated basic template should not require explicit numeric exit literal"
+            );
 
-        assert!(
-            main_content.contains("(ns main)"),
-            "generated template should include namespace declaration"
-        );
-        assert!(
-            main_content.contains("(defn -main [& _args]"),
-            "generated template should include -main entrypoint"
-        );
-        assert!(
-            !main_content.contains("\n    0))"),
-            "generated basic template should not require explicit numeric exit literal"
-        );
-
-        parse_and_expand(&main_content).expect("generated basic template should parse");
+            parse_and_expand(&main_content).expect("generated basic template should parse");
+        });
 
     }
 
     #[test]
     fn new_project_rust_interop_template_includes_rust_dependency_and_ns_rust_clause() {
-        let _lock = cwd_lock().lock().expect("cwd lock poisoned");
         let tmp = tempdir().expect("failed to create tempdir");
-        let original_cwd = env::current_dir().expect("failed to get cwd");
-        let _cwd_guard = CwdGuard(original_cwd);
-        env::set_current_dir(tmp.path()).expect("failed to cd to tempdir");
+        with_cwd(tmp.path(), || {
+            let project_name = "interop-app";
+            new_with_template(project_name, NewTemplate::RustInterop).expect("clorus new failed");
 
-        let project_name = "interop-app";
-        new_with_template(project_name, NewTemplate::RustInterop).expect("clorus new failed");
+            let manifest_path = tmp.path().join(project_name).join("Clorus.toml");
+            let manifest = fs::read_to_string(&manifest_path).expect("failed to read manifest");
+            assert!(
+                manifest.contains("[rust-dependencies]"),
+                "rust interop template should include rust-dependencies section"
+            );
+            assert!(
+                manifest.contains("libm = { version = \"0.2\", interface = \"interfaces/libm.clri\" }"),
+                "rust interop template should include libm version+interface dependency"
+            );
 
-        let manifest_path = tmp.path().join(project_name).join("Clorus.toml");
-        let manifest = fs::read_to_string(&manifest_path).expect("failed to read manifest");
-        assert!(
-            manifest.contains("[rust-dependencies]"),
-            "rust interop template should include rust-dependencies section"
-        );
-        assert!(
-            manifest.contains("libm = { version = \"0.2\", interface = \"interfaces/libm.clri\" }"),
-            "rust interop template should include libm version+interface dependency"
-        );
+            let main_path = tmp.path().join(project_name).join("src/main.clrs");
+            let main_content =
+                fs::read_to_string(&main_path).expect("failed to read generated main.clrs");
+            assert!(
+                main_content.contains("(:rust [libm :as m])"),
+                "rust interop template should include :rust ns import"
+            );
+            assert!(
+                !main_content.contains("(use rust.libm)"),
+                "rust interop template should avoid redundant use rust import"
+            );
+            assert!(
+                !main_content.contains("\n    0))"),
+                "rust interop template should not include explicit numeric exit literal"
+            );
 
-        let main_path = tmp.path().join(project_name).join("src/main.clrs");
-        let main_content = fs::read_to_string(&main_path).expect("failed to read generated main.clrs");
-        assert!(
-            main_content.contains("(:rust [libm :as m])"),
-            "rust interop template should include :rust ns import"
-        );
-        assert!(
-            !main_content.contains("(use rust.libm)"),
-            "rust interop template should avoid redundant use rust import"
-        );
-        assert!(
-            !main_content.contains("\n    0))"),
-            "rust interop template should not include explicit numeric exit literal"
-        );
+            parse_and_expand(&main_content).expect("generated rust interop template should parse");
 
-        parse_and_expand(&main_content).expect("generated rust interop template should parse");
-
-        let interface_path = tmp.path().join(project_name).join("interfaces/libm.clri");
-        let interface_content = fs::read_to_string(&interface_path).expect("failed to read generated libm.clri");
-        assert!(
-            interface_content.contains("(interface libm"),
-            "rust interop template should generate libm.clri interface file"
-        );
+            let interface_path = tmp.path().join(project_name).join("interfaces/libm.clri");
+            let interface_content =
+                fs::read_to_string(&interface_path).expect("failed to read generated libm.clri");
+            assert!(
+                interface_content.contains("(interface libm"),
+                "rust interop template should generate libm.clri interface file"
+            );
+        });
     }
 }

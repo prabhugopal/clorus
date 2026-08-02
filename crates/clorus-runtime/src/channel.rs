@@ -13,7 +13,7 @@
 
 use crate::value::{Value, ValueTag};
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, Condvar};
+use std::sync::{Arc, Mutex, Condvar, OnceLock};
 use std::time::Duration;
 
 /// Channel ID type
@@ -42,6 +42,32 @@ pub struct ClorusChannel {
 
 use std::sync::atomic::{AtomicU64, Ordering};
 static CHANNEL_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn alts_wait_state() -> &'static (Mutex<u64>, Condvar) {
+    static STATE: OnceLock<(Mutex<u64>, Condvar)> = OnceLock::new();
+    STATE.get_or_init(|| (Mutex::new(0), Condvar::new()))
+}
+
+fn notify_alts_waiters() {
+    let (lock, condvar) = alts_wait_state();
+    let mut generation = lock.lock().unwrap();
+    *generation = generation.wrapping_add(1);
+    condvar.notify_all();
+}
+
+fn current_alts_generation() -> u64 {
+    let (lock, _) = alts_wait_state();
+    *lock.lock().unwrap()
+}
+
+fn wait_for_alts_activity(last_seen: u64) -> u64 {
+    let (lock, condvar) = alts_wait_state();
+    let mut generation = lock.lock().unwrap();
+    while *generation == last_seen {
+        generation = condvar.wait(generation).unwrap();
+    }
+    *generation
+}
 
 impl ClorusChannel {
     /// Create a new channel with optional capacity
@@ -98,6 +124,7 @@ impl ClorusChannel {
 
         // Notify waiting takers
         self.not_empty.notify_one();
+        notify_alts_waiters();
 
         true
     }
@@ -146,6 +173,7 @@ impl ClorusChannel {
 
         buffer.push_back(value);
         self.not_empty.notify_one();
+        notify_alts_waiters();
 
         true
     }
@@ -179,6 +207,7 @@ impl ClorusChannel {
 
         // Notify waiting putters
         self.not_full.notify_one();
+        notify_alts_waiters();
 
         value
     }
@@ -218,6 +247,7 @@ impl ClorusChannel {
             crate::value::clorus_release(value);
         }
         self.not_full.notify_one();
+        notify_alts_waiters();
 
         value
     }
@@ -231,6 +261,7 @@ impl ClorusChannel {
         // Wake all waiting threads
         self.not_full.notify_all();
         self.not_empty.notify_all();
+        notify_alts_waiters();
     }
 
     /// Check if channel is closed
@@ -391,53 +422,37 @@ pub extern "C" fn clorus_alts(channels_vec: *mut Value) -> *mut Value {
             return Value::nil();
         }
 
-        // Poll channels in a loop until one is ready
+        // Wait until one channel produces a value or all channels close.
+        let mut generation = current_alts_generation();
         loop {
-            // Try each channel
+            let mut all_closed = true;
+
             for i in 0..count {
                 let chan_val = crate::vector::clorus_vector_nth(channels_vec, i);
 
-                if chan_val.is_null() {
-                    continue;
-                }
-
-                // Check if it's a channel
-                if (*chan_val).header().tag() != ValueTag::Channel {
+                if chan_val.is_null() || (*chan_val).header().tag() != ValueTag::Channel {
                     continue;
                 }
 
                 let chan_ptr = (*chan_val).as_ptr() as *mut ClorusChannel;
 
-                // Try non-blocking take
                 if let Some(value) = (*chan_ptr).try_take() {
-                    // Create result vector [value channel]
                     let result = crate::vector::clorus_vector_empty();
                     let result = crate::vector::clorus_vector_conj(result, value);
                     let result = crate::vector::clorus_vector_conj(result, chan_val);
                     return result;
                 }
-            }
 
-            // No channel ready, sleep briefly and retry
-            std::thread::sleep(std::time::Duration::from_micros(100));
-
-            // Check if all channels are closed
-            let mut all_closed = true;
-            for i in 0..count {
-                let chan_val = crate::vector::clorus_vector_nth(channels_vec, i);
-                if !chan_val.is_null() && (*chan_val).header().tag() == ValueTag::Channel {
-                    let chan_ptr = (*chan_val).as_ptr() as *mut ClorusChannel;
-                    if !(*chan_ptr).is_closed() {
-                        all_closed = false;
-                        break;
-                    }
+                if !(*chan_ptr).is_closed() {
+                    all_closed = false;
                 }
             }
 
             if all_closed {
-                // All channels closed, return nil
                 return Value::nil();
             }
+
+            generation = wait_for_alts_activity(generation);
         }
     }
 }

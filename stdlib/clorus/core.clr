@@ -51,67 +51,136 @@
 ;; take - Take first n elements
 ;; Example: (take 3 [1 2 3 4 5]) ; => [1 2 3]
 (defn take [n coll]
-  (if (or (<= n 0) (empty? coll))
-    []
-    (concat [(first coll)] (take (dec n) (rest coll)))))
+  (if (vector? coll)
+    (let [coll-count (count coll)
+          limit (if (< n coll-count) n coll-count)]
+      (loop [i 0
+             acc []]
+        (if (>= i limit)
+          acc
+          (recur (+ i 1)
+                 (__clorus_conj acc (nth coll i))))))
+    (loop [remaining coll
+           n n
+           acc []]
+      (if (or (<= n 0) (empty? remaining))
+        acc
+        (recur (rest remaining)
+               (dec n)
+               (__clorus_conj acc (first remaining)))))))
 
 ;; drop - Drop first n elements
 ;; Example: (drop 2 [1 2 3 4 5]) ; => [3 4 5]
 (defn drop [n coll]
-  (if (or (<= n 0) (empty? coll))
-    coll
-    (drop (dec n) (rest coll))))
+  (if (vector? coll)
+    (let [len (count coll)
+          start (if (< n len) n len)]
+      (loop [i start
+             acc []]
+        (if (>= i len)
+          acc
+          (recur (+ i 1)
+                 (__clorus_conj acc (nth coll i))))))
+    (loop [remaining coll
+           n n]
+      (if (or (<= n 0) (empty? remaining))
+        remaining
+        (recur (rest remaining) (dec n))))))
 
 ;; map - Apply function to each element of collection
 ;; Example: (map inc [1 2 3]) ; => [2 3 4]
 (defn map [f coll]
-  (if (empty? coll)
-    []
-    (concat [(f (first coll))] (map f (rest coll)))))
+  (if (vector? coll)
+    (let [len (count coll)]
+      (loop [i 0
+             acc []]
+        (if (>= i len)
+          acc
+          (recur (+ i 1)
+                 (__clorus_conj acc (f (nth coll i)))))))
+    (loop [remaining coll
+           acc []]
+      (if (empty? remaining)
+        acc
+        (recur (rest remaining)
+               (__clorus_conj acc (f (first remaining))))))))
+
+;; mapv - Apply function to each element and realize into a vector
+;; Example: (mapv inc [1 2 3]) ; => [2 3 4]
+(defn mapv [f coll]
+  (reduce (fn [acc x] (conj acc (f x))) [] coll))
 
 ;; filter - Keep only elements that satisfy predicate
 ;; Example: (filter odd? [1 2 3 4]) ; => [1 3]
 (defn filter [pred coll]
-  (if (empty? coll)
-    []
-    (if (pred (first coll))
-      (concat [(first coll)] (filter pred (rest coll)))
-      (filter pred (rest coll)))))
+  (if (vector? coll)
+    (let [len (count coll)]
+      (loop [i 0
+             acc []]
+        (if (>= i len)
+          acc
+          (let [x (nth coll i)]
+            (if (pred x)
+              (recur (+ i 1) (__clorus_conj acc x))
+              (recur (+ i 1) acc))))))
+    (loop [remaining coll
+           acc []]
+      (if (empty? remaining)
+        acc
+        (let [x (first remaining)]
+          (if (pred x)
+            (recur (rest remaining) (__clorus_conj acc x))
+            (recur (rest remaining) acc)))))))
 
 ;; keep - Apply f to items and keep non-nil results
 ;; Example: (keep (fn [x] (if (odd? x) x nil)) [1 2 3]) ; => [1 3]
 (defn keep [f coll]
-  (if (empty? coll)
-    []
-    (let [v (f (first coll))
-          tail (keep f (rest coll))]
-      (if (nil? v)
-        tail
-        (concat [v] tail)))))
+  (if (vector? coll)
+    (let [len (count coll)]
+      (loop [i 0
+             acc []]
+        (if (>= i len)
+          acc
+          (let [v (f (nth coll i))]
+            (if (nil? v)
+              (recur (+ i 1) acc)
+              (recur (+ i 1) (__clorus_conj acc v)))))))
+    (loop [remaining coll
+           acc []]
+      (if (empty? remaining)
+        acc
+        (let [v (f (first remaining))]
+          (if (nil? v)
+            (recur (rest remaining) acc)
+            (recur (rest remaining) (__clorus_conj acc v))))))))
 
 ;; mapcat - Map then concatenate
 ;; Example: (mapcat (fn [x] [x x]) [1 2]) ; => [1 1 2 2]
 (defn mapcat [f coll]
-  (if (empty? coll)
-    []
-    (concat (f (first coll))
-            (mapcat f (rest coll)))))
+  (loop [remaining coll
+         acc []]
+    (if (empty? remaining)
+      acc
+      (recur (rest remaining)
+             (concat acc (f (first remaining)))))))
 
 ;; every? - True when pred is true for all elements
 (defn every? [pred coll]
-  (if (empty? coll)
-    true
-    (if (pred (first coll))
-      (every? pred (rest coll))
-      false)))
+  (loop [remaining coll]
+    (if (empty? remaining)
+      true
+      (if (pred (first remaining))
+        (recur (rest remaining))
+        false))))
 
 ;; not-any? - True when pred is false for all elements
 (defn not-any? [pred coll]
-  (if (empty? coll)
-    true
-    (if (pred (first coll))
-      false
-      (not-any? pred (rest coll)))))
+  (loop [remaining coll]
+    (if (empty? remaining)
+      true
+      (if (pred (first remaining))
+        false
+        (recur (rest remaining))))))
 
 ;; not-every? - True when at least one element fails pred
 (defn not-every? [pred coll]
@@ -229,7 +298,7 @@
 ;; Simple implementation that works with vectors
 ;; Example: (conj [1 2 3] 4) ; => [1 2 3 4]
 (defn conj [coll x]
-  (concat coll [x]))
+  (__clorus_conj coll x))
 
 ;; zipmap - Create map from keys and values vectors
 ;; Example: (zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
@@ -273,11 +342,13 @@
         coll (ensure-coll "partition" coll)]
     (if (<= n 0)
       (throw "partition expects positive n")
-      (if (< (count coll) n)
-        []
-        (let [chunk (take n coll)
-              remaining (drop n coll)]
-          (conj (partition n remaining) chunk))))))
+      (loop [remaining coll
+             acc []]
+        (if (< (count remaining) n)
+          acc
+          (let [chunk (take n remaining)]
+            (recur (drop n remaining)
+                   (__clorus_conj acc chunk))))))))
 
 ;; partition-all - Like partition but includes incomplete final chunk
 ;; Example: (partition-all 2 [1 2 3 4 5]) ; => [[1 2] [3 4] [5]]
@@ -286,11 +357,28 @@
         coll (ensure-coll "partition-all" coll)]
     (if (<= n 0)
       (throw "partition-all expects positive n")
-      (if (empty? coll)
-        []
-        (let [chunk (take n coll)
-              remaining (drop n coll)]
-          (conj (partition-all n remaining) chunk))))))
+      (if (vector? coll)
+        (let [len (count coll)]
+          (loop [i 0
+                 acc []]
+            (if (>= i len)
+              acc
+              (let [next-end (+ i n)
+                    end (if (< next-end len) next-end len)
+                    chunk (loop [j i
+                                 out []]
+                            (if (>= j end)
+                              out
+                              (recur (+ j 1)
+                                     (__clorus_conj out (nth coll j)))))]
+                (recur end (__clorus_conj acc chunk))))))
+        (loop [remaining coll
+               acc []]
+          (if (empty? remaining)
+            acc
+            (let [chunk (take n remaining)]
+              (recur (drop n remaining)
+                     (__clorus_conj acc chunk)))))))))
 
 ;; partition-by - Partition collection by consecutive runs of (f item)
 ;; Example: (partition-by odd? [1 3 2 4 5]) ; => [[1 3] [2 4] [5]]
@@ -322,23 +410,26 @@
 (defn take-while [pred coll]
   (let [pred (ensure-fn "take-while" pred)
         coll (ensure-coll "take-while" coll)]
-    (if (empty? coll)
-      []
-      (let [x (first coll)]
-        (if (pred x)
-          (conj (take-while pred (rest coll)) x)
-          [])))))
+    (loop [remaining coll
+           acc []]
+      (if (empty? remaining)
+        acc
+        (let [x (first remaining)]
+          (if (pred x)
+            (recur (rest remaining) (__clorus_conj acc x))
+            acc))))))
 
 ;; drop-while - Drop elements while predicate is true
 ;; Example: (drop-while (partial > 5) [1 2 3 6 7 1]) ; => [6 7 1]
 (defn drop-while [pred coll]
   (let [pred (ensure-fn "drop-while" pred)
         coll (ensure-coll "drop-while" coll)]
-    (if (empty? coll)
-      []
-      (if (pred (first coll))
-        (drop-while pred (rest coll))
-        coll))))
+    (loop [remaining coll]
+      (if (empty? remaining)
+        []
+        (if (pred (first remaining))
+          (recur (rest remaining))
+          remaining)))))
 
 ;; split-at - Split collection at index n
 ;; Example: (split-at 3 [1 2 3 4 5]) ; => [[1 2 3] [4 5]]
@@ -589,13 +680,15 @@
 ;; (range 2 5) => [2 3 4]
 ;; (range 0 10 2) => [0 2 4 6 8]
 (defn range-helper [start end step acc]
-  (if (> step 0)
-    (if (>= start end)
-      acc
-      (range-helper (+ start step) end step (concat acc [start])))
-    (if (<= start end)
-      acc
-      (range-helper (+ start step) end step (concat acc [start])))))
+  (loop [current start
+         acc acc]
+    (if (> step 0)
+      (if (>= current end)
+        acc
+        (recur (+ current step) (__clorus_conj acc current)))
+      (if (<= current end)
+        acc
+        (recur (+ current step) (__clorus_conj acc current))))))
 
 (defn range
   ([end]
@@ -610,32 +703,41 @@
 ;; repeat - Repeat value n times
 (defn repeat [n x]
   (let [n (ensure-number "repeat" n)]
-    (if (<= n 0)
-      []
-      (conj (repeat (dec n) x) x))))
+    (loop [n n
+           acc []]
+      (if (<= n 0)
+        acc
+        (recur (dec n) (__clorus_conj acc x))))))
 
 ;; repeatedly - Call function n times
 (defn repeatedly [n f]
   (let [n (ensure-number "repeatedly" n)
         f (ensure-fn "repeatedly" f)]
-    (if (<= n 0)
-      []
-      (conj (repeatedly (dec n) f) (f)))))
+    (loop [n n
+           acc []]
+      (if (<= n 0)
+        acc
+        (recur (dec n) (__clorus_conj acc (f)))))))
 
 ;; cycle - Cycle through collection infinitely (returns first n cycles)
 (defn cycle [n coll]
   (let [n (ensure-number "cycle" n)
         coll (ensure-coll "cycle" coll)]
-    (if (<= n 0)
-      []
-      (concat coll (cycle (dec n) coll)))))
+    (loop [n n
+           acc []]
+      (if (<= n 0)
+        acc
+        (recur (dec n) (concat acc coll))))))
 
 ;; iterate - Generate sequence by repeatedly applying function
 ;; (iterate 5 inc 0) => [0 1 2 3 4]
 (defn iterate-helper [n f x acc]
-  (if (<= n 0)
-    acc
-    (iterate-helper (dec n) f (f x) (conj acc x))))
+  (loop [n n
+         current x
+         acc acc]
+    (if (<= n 0)
+      acc
+      (recur (dec n) (f current) (__clorus_conj acc current)))))
 
 (defn iterate [n f x]
   (let [n (ensure-number "iterate" n)

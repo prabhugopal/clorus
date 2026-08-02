@@ -11,8 +11,8 @@ This is the canonical language status/spec document for Clorus.
 
 ## Canonical References
 
-- Parity baseline: `docs/LANGUAGE_PARITY.md`
-- Parity checklist: `docs/PARITY_CHECKLIST.md`
+- Generated parity status: `docs/generated/PARITY_STATUS.md`
+- Generated status inventory: `docs/generated/STATUS.json`
 - Language spec reference: `docs/reference/LANGUAGE_SPEC.md`
 
 ## Current Policy
@@ -24,7 +24,7 @@ This is the canonical language status/spec document for Clorus.
 ## Status Snapshot
 
 - Primary target: high Clojure compatibility without JVM interop.
-- Runtime/compiler parity work is tracked via `docs/PARITY_CHECKLIST.md`.
+- Runtime/compiler parity work is tracked via `docs/generated/PARITY_STATUS.md`.
 
 ## Open Work (Top Level)
 

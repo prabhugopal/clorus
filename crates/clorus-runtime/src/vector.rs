@@ -214,13 +214,16 @@ impl PersistentVector {
             let overflow = tree_count >= capacity;
 
             if overflow {
-                // Need new root level
+                // Need new root level. Child 1 must be a subtree at the previous
+                // shift depth, not a raw leaf node, otherwise nth will descend one
+                // level too far once the vector grows past 32^2 elements.
                 let new_root = VectorNode::new();
                 (*new_root).children[0] = vec_ref.root as *mut u8;
                 if !vec_ref.root.is_null() {
                     (*vec_ref.root).refcount.fetch_add(1, Ordering::Relaxed);
                 }
-                (*new_root).children[1] = Self::tail_to_node(vec_ref.tail);
+                (*new_root).children[1] =
+                    Self::push_tail(null_mut(), vec_ref.shift, tree_count, vec_ref.tail) as *mut u8;
                 new_root
             } else {
                 // Add tail to existing tree

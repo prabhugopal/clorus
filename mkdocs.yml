@@ -16,6 +16,13 @@ extra_javascript:
 nav:
   - Home: README.md
   - Language: LANGUAGE.md
+  - Status:
+    - Parity Status: generated/PARITY_STATUS.md
+    - Coverage Summary: generated/COVERAGE_SUMMARY.md
   - Compiler & Architecture: COMPILER_ARCHITECTURE.md
+  - GUI Platform:
+    - Roadmap: gui/ROADMAP.md
+    - Execution Checklist: gui/EXECUTION_CHECKLIST.md
+    - Widget Parity Matrix: gui/WIDGET_PARITY_MATRIX.md
   - Rust Interop: RUST_INTEROP.md
-  - Coverage: COVERAGE.md
+  - Coverage Pointer: COVERAGE.md

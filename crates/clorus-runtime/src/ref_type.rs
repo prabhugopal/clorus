@@ -101,6 +101,30 @@ impl ClorusRef {
     }
 }
 
+fn current_value_without_tracking(ref_ptr: *mut ClorusRef) -> *mut Value {
+    unsafe {
+        let guard = (*ref_ptr).value.lock().unwrap();
+        let value = guard.value;
+        crate::value::clorus_retain(value);
+        value
+    }
+}
+
+unsafe fn apply_commute_function(
+    base_value: *mut Value,
+    func_val: *mut Value,
+    args_vec: *mut Value,
+) -> *mut Value {
+    let extra_count = crate::vector::clorus_vector_count(args_vec) as usize;
+    let mut args: Vec<*mut Value> = Vec::with_capacity(extra_count + 1);
+    args.push(base_value);
+    for i in 0..extra_count {
+        let arg = crate::vector::clorus_vector_nth(args_vec, i as u64);
+        args.push(arg);
+    }
+    crate::function::clorus_function_call(func_val, args.as_ptr(), args.len() as i32)
+}
+
 // ============================================================================
 // FFI Functions
 // ============================================================================
@@ -128,29 +152,27 @@ pub extern "C" fn clorus_ref_deref(ref_val: *mut Value) -> *mut Value {
     }
 
     unsafe {
-        if (*ref_val).header().tag() == ValueTag::Ref {
-            let ref_ptr = (*ref_val).as_ptr() as *mut ClorusRef;
-
-            // Check if we're in a transaction and have a staged write
-            let ref_id = (*ref_ptr).id();
-            if let Some(staged_value) = crate::transaction::tx_get_write(ref_id) {
-                // Return staged write (retain before returning)
-                (*staged_value).header().retain();
-                return staged_value;
-            }
-
-            // No staged write - do normal deref and record read
-            let version = (*ref_ptr).version();
-            let value = (*ref_ptr).deref();
-
-            // Record read in transaction (if active)
-            crate::transaction::tx_record_read(ref_id, version);
-
-            value
-        } else {
-            // Not a ref - return nil
-            Value::nil()
+        if (*ref_val).header().tag() != ValueTag::Ref {
+            return Value::nil();
         }
+
+        let ref_ptr = (*ref_val).as_ptr() as *mut ClorusRef;
+        let ref_id = (*ref_ptr).id();
+
+        if let Some(staged_value) = crate::transaction::tx_get_write(ref_id) {
+            crate::value::clorus_retain(staged_value);
+            return staged_value;
+        }
+
+        if let Some(commute_value) = crate::transaction::tx_get_commute_value(ref_id) {
+            crate::value::clorus_retain(commute_value);
+            return commute_value;
+        }
+
+        let version = (*ref_ptr).version();
+        let value = (*ref_ptr).deref();
+        crate::transaction::tx_record_read(ref_id, version);
+        value
     }
 }
 
@@ -185,11 +207,9 @@ pub extern "C" fn clorus_ref_set(
         let ref_ptr = (*ref_val).as_ptr() as *mut ClorusRef;
         let ref_id = (*ref_ptr).id();
 
-        // Stage the write in the transaction
         crate::transaction::tx_stage_write(ref_id, new_value);
 
-        // Return the new value (retain before returning)
-        (*new_value).header().retain();
+        crate::value::clorus_retain(new_value);
         new_value
     }
 }
@@ -211,24 +231,58 @@ pub extern "C" fn clorus_alter(
     clorus_ref_set(ref_val, new_value)
 }
 
-/// Commute ref by applying a commutative function within a transaction
+/// Commute ref by applying a commutative function within a transaction.
 ///
 /// (commute ref func & args) => new-value
-/// Must be called within a dosync block
+/// Must be called within a dosync block.
 ///
-/// Like alter, but marks the operation as commutative, allowing it to be
-/// applied at commit time for better concurrency.
-///
-/// Note: For now, commute is implemented the same as alter.
-/// True commutative semantics (deferred application) will be added later.
+/// The function and extra arguments are recorded in the transaction and replayed
+/// at commit time against the latest committed value for the ref.
 #[no_mangle]
 pub extern "C" fn clorus_commute(
     ref_val: *mut Value,
-    new_value: *mut Value,
+    func_val: *mut Value,
+    args_vec: *mut Value,
 ) -> *mut Value {
-    // For now, commute works the same as alter
-    // TODO: Implement true commutative semantics (apply at commit time)
-    clorus_ref_set(ref_val, new_value)
+    if ref_val.is_null() || func_val.is_null() || args_vec.is_null() {
+        return Value::nil();
+    }
+
+    unsafe {
+        if (*ref_val).header().tag() != ValueTag::Ref {
+            return Value::nil();
+        }
+
+        if !crate::transaction::clorus_tx_active() {
+            return Value::nil();
+        }
+
+        let ref_ptr = (*ref_val).as_ptr() as *mut ClorusRef;
+        let ref_id = (*ref_ptr).id();
+
+        let (base_value, release_base) = if let Some(staged_value) = crate::transaction::tx_get_write(ref_id) {
+            (staged_value, false)
+        } else if let Some(commute_value) = crate::transaction::tx_get_commute_value(ref_id) {
+            (commute_value, false)
+        } else {
+            (current_value_without_tracking(ref_ptr), true)
+        };
+
+        let new_value = apply_commute_function(base_value, func_val, args_vec);
+
+        if release_base {
+            crate::value::clorus_release(base_value);
+        }
+
+        if crate::transaction::tx_has_write(ref_id) {
+            crate::transaction::tx_stage_write(ref_id, new_value);
+        } else {
+            crate::transaction::tx_stage_commute(ref_id, func_val, args_vec, new_value);
+        }
+
+        crate::value::clorus_retain(new_value);
+        new_value
+    }
 }
 
 /// Ensure ref is protected in transaction

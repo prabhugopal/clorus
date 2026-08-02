@@ -89,6 +89,8 @@ pub struct CodeGen<'ctx> {
     rust_libraries: HashMap<String, RustLibrary>,
     /// Namespace context for symbol resolution
     namespace: NamespaceContext,
+    /// Sanitized module prefix for generated internal symbols.
+    generated_symbol_prefix: String,
     /// Counter for generating unique lambda names
     lambda_counter: usize,
     /// Current loop context (for loop/recur)
@@ -471,6 +473,32 @@ impl<'ctx> CodeGen<'ctx> {
             .into_pointer_value())
     }
 
+    fn sanitize_symbol_fragment(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        for ch in input.chars() {
+            if ch.is_ascii_alphanumeric() {
+                out.push(ch);
+            } else {
+                out.push('_');
+            }
+        }
+
+        if out.is_empty() {
+            "module".to_string()
+        } else {
+            out
+        }
+    }
+
+    fn next_generated_name(&mut self, kind: &str) -> String {
+        let name = format!(
+            "__clorus_{}_{}_{}",
+            self.generated_symbol_prefix, kind, self.lambda_counter
+        );
+        self.lambda_counter += 1;
+        name
+    }
+
     pub fn new(context: &'ctx Context, module_name: &str) -> Self {
         let module = context.create_module(module_name);
         let builder = context.create_builder();
@@ -485,6 +513,7 @@ impl<'ctx> CodeGen<'ctx> {
             function_signatures: HashMap::new(),
             rust_libraries: HashMap::new(),
             namespace: NamespaceContext::default_namespace(),
+            generated_symbol_prefix: Self::sanitize_symbol_fragment(module_name),
             lambda_counter: 0,
             loop_context: None,
             current_recur_fn: None,
@@ -599,6 +628,12 @@ impl<'ctx> CodeGen<'ctx> {
             "swap!",
             "deref",
             "compare-and-set!",
+            // STM / refs
+            "ref",
+            "ref-set",
+            "alter",
+            "commute",
+            "ensure",
             // Channel operations (CSP)
             "chan",
             ">!!",
@@ -621,6 +656,7 @@ impl<'ctx> CodeGen<'ctx> {
             "replace-first",
             "compare",
             "__clorus_compare_values",
+            "__clorus_conj",
             "re-find",
             "re-matches",
             "re-seq",
@@ -932,6 +968,8 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_ref_deref", 1);
         self.declare_value_fn("clorus_ref_set", 2);
         self.declare_value_fn("clorus_alter", 2);
+        self.declare_value_fn("clorus_commute", 3);
+        self.declare_value_fn("clorus_ensure", 1);
 
         // ===== Transaction Functions =====
         self.declare_no_arg_bool_fn("clorus_tx_begin");
@@ -2087,7 +2125,7 @@ impl<'ctx> CodeGen<'ctx> {
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let val = self.builder.build_load(value_ptr_type, *ptr, name).unwrap();
                     let val_ptr = val.into_pointer_value();
-                    self.maybe_deref_var_value(val_ptr, "symbol_local")
+                    Ok(val_ptr)
                 } else if let Some(global) = self.globals.get(&resolved_name) {
                     // Load Value* from global variable (namespace-mangled)
                     let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
@@ -3374,8 +3412,7 @@ impl<'ctx> CodeGen<'ctx> {
                 body,
             } => {
                 // Generate unique lambda name
-                let lambda_name = format!("_lambda_{}", self.lambda_counter);
-                self.lambda_counter += 1;
+                let lambda_name = self.next_generated_name("lambda");
 
                 // Find free variables (captured from outer scope)
                 // Build bound set: function parameters + rest param
@@ -3599,8 +3636,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // Multi-arity anonymous function
                 // Generate one function per arity with unique lambda names
 
-                let base_lambda_name = format!("_lambda_{}", self.lambda_counter);
-                self.lambda_counter += 1;
+                let base_lambda_name = self.next_generated_name("lambda");
 
                 // Find free variables captured from outer scope (shared across all arities)
                 // Build bound set from ALL arities' parameters
@@ -3912,12 +3948,13 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Dosync { exprs } => {
-                // Transaction block: begin, execute, commit with retry
+                // Transaction block: begin, execute, commit with retry.
+                // The body is compiled once into LLVM blocks; on conflict we branch back
+                // to the retry block so the full transaction body re-executes at runtime.
                 if exprs.is_empty() {
                     return Err("dosync expression cannot be empty".to_string());
                 }
 
-                // Get transaction functions
                 let tx_begin_fn = self
                     .module
                     .get_function("clorus_tx_begin")
@@ -3930,22 +3967,40 @@ impl<'ctx> CodeGen<'ctx> {
                     .module
                     .get_function("clorus_tx_abort")
                     .ok_or("clorus_tx_abort not declared")?;
+                let release_fn = self
+                    .module
+                    .get_function("clorus_release")
+                    .ok_or("clorus_release not declared")?;
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
 
-                // Begin transaction
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .and_then(|b| b.get_parent())
+                    .ok_or("Dosync must be inside a function")?;
+
+                let retry_block = self.context.append_basic_block(current_fn, "dosync_retry");
+                let retry_cleanup_block =
+                    self.context.append_basic_block(current_fn, "dosync_retry_cleanup");
+                let continue_block = self
+                    .context
+                    .append_basic_block(current_fn, "dosync_continue");
+
+                self.builder
+                    .build_unconditional_branch(retry_block)
+                    .unwrap();
+
+                self.builder.position_at_end(retry_block);
                 self.builder
                     .build_call(tx_begin_fn, &[], "dosync_begin")
                     .unwrap();
 
-                // Compile all expressions in the transaction
                 let mut result = None;
                 for expr in exprs {
                     result = Some(self.compile_expr(expr)?);
                 }
                 let body_result = result.unwrap();
 
-                // Attempt to commit
-                // TODO: Add retry logic in future version
-                // For now, just commit once
                 let commit_success = self
                     .builder
                     .build_call(tx_commit_fn, &[], "dosync_commit")
@@ -3955,45 +4010,39 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_int_value();
 
-                // Check if commit succeeded
-                // If failed, abort transaction
-                // TODO: Add retry loop
                 let zero = self.context.bool_type().const_zero();
                 let commit_failed = self
                     .builder
                     .build_int_compare(IntPredicate::EQ, commit_success, zero, "commit_failed")
                     .unwrap();
-
-                let current_fn = self
+                let body_end_block = self
                     .builder
                     .get_insert_block()
-                    .and_then(|b| b.get_parent())
-                    .ok_or("Dosync must be inside a function")?;
-
-                let abort_block = self.context.append_basic_block(current_fn, "dosync_abort");
-                let continue_block = self
-                    .context
-                    .append_basic_block(current_fn, "dosync_continue");
+                    .ok_or("Dosync body must end in a basic block")?;
 
                 self.builder
-                    .build_conditional_branch(commit_failed, abort_block, continue_block)
+                    .build_conditional_branch(commit_failed, retry_cleanup_block, continue_block)
                     .unwrap();
 
-                // Abort block
-                self.builder.position_at_end(abort_block);
+                self.builder.position_at_end(retry_cleanup_block);
+                self.builder
+                    .build_call(release_fn, &[body_result.into()], "dosync_retry_release")
+                    .unwrap();
                 self.builder
                     .build_call(tx_abort_fn, &[], "dosync_abort_call")
                     .unwrap();
-                // TODO: In future, add retry logic here
-                // For now, just continue after abort
                 self.builder
-                    .build_unconditional_branch(continue_block)
+                    .build_unconditional_branch(retry_block)
                     .unwrap();
 
-                // Continue block
                 self.builder.position_at_end(continue_block);
+                let result_phi = self
+                    .builder
+                    .build_phi(value_ptr_type, "dosync_result")
+                    .unwrap();
+                result_phi.add_incoming(&[(&body_result, body_end_block)]);
 
-                Ok(body_result)
+                Ok(result_phi.as_basic_value().into_pointer_value())
             }
 
             Expr::Loop { bindings, body } => {
@@ -7412,7 +7461,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify a lambda function was created
-        assert!(codegen.functions.contains_key("_lambda_0"));
+        assert!(codegen.functions.keys().any(|k| k.ends_with("_lambda_0")));
     }
 
     #[test]
@@ -7428,7 +7477,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify a lambda function was created
-        assert!(codegen.functions.contains_key("_lambda_0"));
+        assert!(codegen.functions.keys().any(|k| k.ends_with("_lambda_0")));
     }
 
     #[test]
@@ -7444,7 +7493,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify a lambda function was created
-        assert!(codegen.functions.contains_key("_lambda_0"));
+        assert!(codegen.functions.keys().any(|k| k.ends_with("_lambda_0")));
     }
 
     #[test]
@@ -7826,8 +7875,8 @@ mod tests {
         assert!(result2.is_ok());
 
         // Verify two different lambda functions were created
-        assert!(codegen.functions.contains_key("_lambda_0"));
-        assert!(codegen.functions.contains_key("_lambda_1"));
+        assert!(codegen.functions.keys().any(|k| k.ends_with("_lambda_0")));
+        assert!(codegen.functions.keys().any(|k| k.ends_with("_lambda_1")));
     }
 
     #[test]
