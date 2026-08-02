@@ -207,6 +207,10 @@ impl<'ctx> CodeGen<'ctx> {
         let result = self.compile_expr(body)?;
         self.current_recur_fn = saved_recur_ctx;
         self.loop_context = saved_loop_context;
+        // See retain_if_bare_symbol_alias's doc comment: returning a
+        // parameter or other local directly (`(defn f [x] x)`) hands the
+        // caller a borrowed alias it will treat as an owned return value.
+        self.retain_if_bare_symbol_alias(body, result)?;
         self.builder.build_return(Some(&result)).unwrap();
 
         // Clear parameter context before restoring variables
@@ -552,6 +556,7 @@ impl<'ctx> CodeGen<'ctx> {
             let result = self.compile_expr(&arity.body)?;
             self.current_recur_fn = saved_recur_ctx;
             self.loop_context = saved_loop_context;
+            self.retain_if_bare_symbol_alias(&arity.body, result)?;
             self.builder.build_return(Some(&result)).unwrap();
 
             // Restore state

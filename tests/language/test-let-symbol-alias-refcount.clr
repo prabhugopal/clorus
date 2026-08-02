@@ -1,0 +1,77 @@
+(ns tests.language.test-let-symbol-alias-refcount)
+
+;; Regression test for a real use-after-free: a `let` binding whose value
+;; is a bare symbol read (e.g. `(let [x2 x] ...)`) aliases an existing,
+;; still-live value rather than creating a fresh one. Symbol reads never
+;; retain (most uses -- arithmetic operands, call arguments -- are pure
+;; borrows), but a let binding gives that alias its own independent
+;; lifetime that gets unconditionally released at scope exit. Without an
+;; explicit retain when the alias is created, that release drops a
+;; reference the binding was never entitled to, freeing the value out from
+;; under whoever else still holds it. Same bug at function-return position:
+;; `(defn f [x] x)` hands the caller a borrowed alias, including through an
+;; `if`/`do` guard clause like `(if cond n (throw ...))`.
+;;
+;; This crashed the real stdlib (round -> floor -> ensure-number, all of
+;; which rebind their own parameter through this exact pattern) with a
+;; SIGABRT inside clorus_sub; see tests/language/test-numeric.clr and
+;; tests/stdlib/test-core-sort-behavior.clr, which hit the same root cause
+;; via different call chains.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+;; Passthrough functions returning a bare symbol -- directly, and through
+;; an if/do guard clause (the ensure-number shape).
+(defn identity-fn [n] n)
+
+(defn ensure-like [label n]
+  (if (number? n)
+    n
+    (throw (str label " expects a number"))))
+
+(defn do-guard [n]
+  (do
+    (println "  checking" n)
+    n))
+
+;; A function whose own let rebinds its parameter via a passthrough call,
+;; then uses the rebound value in further arithmetic -- the exact shape
+;; that crashed `floor`.
+(defn compute [x]
+  (let [x (identity-fn x)
+        y (- x 1.0)]
+    y))
+
+;; Calling `compute` as an operand of the caller's own arithmetic on its
+;; own parameter is what exposes a premature free: if `compute`'s internal
+;; alias over-releases the shared value, the caller's second read of its
+;; own parameter reads freed memory.
+(defn outer [v]
+  (- v (compute v)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "identity-fn passthrough" (identity-fn 7.0) 7.0)
+    (assert-eq "ensure-like guard clause" (ensure-like "x" 7.0) 7.0)
+    (assert-eq "do-guard tail position" (do-guard 7.0) 7.0)
+    (assert-eq "compute (rebind + arithmetic)" (compute 3.5) 2.5)
+    (assert-eq "outer (alias survives caller's own use)" (outer 3.5) 1.0)
+
+    ;; Direct let-alias shape, no function call involved.
+    (assert-eq "let alias, different name"
+               (let [a 10.0
+                     b a
+                     c (- b 1.0)]
+                 (+ a c))
+               19.0)
+    (assert-eq "let alias, shadowed name"
+               (let [a 10.0]
+                 (let [a a
+                       c (- a 1.0)]
+                   (+ a c)))
+               19.0)
+
+    "PASS"))

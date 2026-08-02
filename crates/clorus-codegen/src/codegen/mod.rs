@@ -471,6 +471,74 @@ impl<'ctx> CodeGen<'ctx> {
             .into_pointer_value())
     }
 
+    /// True if `expr`, in tail position, might evaluate to a bare symbol
+    /// read (a *borrowed* alias of an existing binding -- see
+    /// retain_if_bare_symbol_alias) rather than a freshly-created value.
+    /// Looks through `if`/`do` tail positions (the common "validate and
+    /// return unchanged" shape, e.g. `(if (number? n) n (throw ...))`)
+    /// without trying to prove anything about non-tail positions or other
+    /// expression kinds -- conservative in the "might retain a value that
+    /// didn't strictly need it" direction, never in the direction that
+    /// misses a real alias.
+    fn expr_may_yield_bare_symbol(expr: &Expr) -> bool {
+        match expr {
+            Expr::Symbol(_) => true,
+            Expr::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                Self::expr_may_yield_bare_symbol(then_branch)
+                    || Self::expr_may_yield_bare_symbol(else_branch)
+            }
+            Expr::Do { exprs } => exprs
+                .last()
+                .map(Self::expr_may_yield_bare_symbol)
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    /// Retain `value` if `source_expr` might evaluate (in tail position) to
+    /// a bare symbol read.
+    ///
+    /// Compiling `Expr::Symbol` for a local/global never retains -- it's
+    /// just a load, a *borrowed* read (see the Expr::Symbol case above),
+    /// which is correct for most uses (arithmetic operands, call arguments,
+    /// etc.) since those don't keep the value around past the read.
+    ///
+    /// But two call sites give a borrowed read its own independent,
+    /// unconditionally-released lifetime instead of just using it in place:
+    /// a `let` binding whose value expression is a bare symbol (aliasing an
+    /// existing, still-live binding into a new name), and a function body
+    /// whose top-level expression resolves to a bare symbol (returning a
+    /// parameter or other local directly, which the caller then treats as
+    /// an owned return value) -- including through an `if`/`do` guard
+    /// clause like `ensure-number`'s `(if (number? n) n (throw ...))`. In
+    /// both cases, without retaining here first, the eventual release drops
+    /// a reference the alias was never entitled to -- which can free the
+    /// value out from under whoever else still holds it (the original
+    /// binding, or the caller's own argument). Reproduced as a crash inside
+    /// clorus_sub when the freed memory gets reused before the original
+    /// holder reads it again; see tests/language/test-numeric.clr and its
+    /// `round` -> `floor` -> `ensure-number` call chain.
+    pub(super) fn retain_if_bare_symbol_alias(
+        &mut self,
+        source_expr: &Expr,
+        value: PointerValue<'ctx>,
+    ) -> Result<(), String> {
+        if Self::expr_may_yield_bare_symbol(source_expr) {
+            let retain_fn = self
+                .module
+                .get_function("clorus_retain")
+                .ok_or("clorus_retain not declared")?;
+            self.builder
+                .build_call(retain_fn, &[value.into()], "retain_alias")
+                .unwrap();
+        }
+        Ok(())
+    }
+
     /// Set up exception handling personality function for a function
     fn set_personality_function(&self, function: FunctionValue<'ctx>) {
         let personality_fn = self
@@ -1324,6 +1392,12 @@ impl<'ctx> CodeGen<'ctx> {
                     // Compile the value
                     let value = self.compile_expr(value_expr)?;
 
+                    // See retain_if_bare_symbol_alias's doc comment: a let
+                    // binding that's a bare symbol read gives an existing,
+                    // still-live value a second independent lifetime, which
+                    // this scope's cleanup below releases unconditionally.
+                    self.retain_if_bare_symbol_alias(value_expr, value)?;
+
                     // Destructure pattern and bind variables
                     let pattern_bindings = self.destructure_pattern(pattern, value)?;
                     local_vars.extend(pattern_bindings);
@@ -1564,6 +1638,7 @@ impl<'ctx> CodeGen<'ctx> {
                     let result = self.compile_expr(fn_body)?;
                     self.current_recur_fn = saved_recur_ctx.clone();
                     self.loop_context = saved_loop_context.clone();
+                    self.retain_if_bare_symbol_alias(fn_body, result)?;
 
                     // Return the result
                     self.builder.build_return(Some(&result)).unwrap();
