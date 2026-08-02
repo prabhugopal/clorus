@@ -9,7 +9,7 @@ The **automatic FFI system successfully handles async Rust code**! 🎉
 ### 1. Async Rust Library (`async-demo`)
 
 ```rust
-// crates/async-demo/src/lib.rs
+// examples/async-demo/rust-lib/src/lib.rs
 use smol::Timer;
 use std::time::Duration;
 
@@ -47,7 +47,7 @@ name = "async-demo-test"
 version = "0.1.0"
 
 [rust-dependencies]
-async-demo = { path = "../../crates/async-demo" }
+async-demo = { path = "./rust-lib" }
 ```
 
 ```clojure
@@ -161,7 +161,7 @@ $ clorus run
    → async-demo
       Generating FFI wrappers...
       Found 4 public functions
-      Generated FFI wrappers: ../../crates/async-demo/src/ffi.rs
+      Generated FFI wrappers: ./rust-lib/src/ffi.rs
       Compiling Rust library...
       Downloading smol v2.0...
       Built: ../../target/release/libasync_demo.dylib

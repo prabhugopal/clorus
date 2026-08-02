@@ -1184,6 +1184,11 @@ name = "{}"
 version = "0.1.0"
 edition = "2021"
 
+# Generated wrapper crate: stands alone rather than joining whatever cargo
+# workspace happens to contain this project, since wrapper_dir may land
+# inside a project's own workspace tree (e.g. target/rust-ffi/...).
+[workspace]
+
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
 
@@ -1220,6 +1225,11 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 name = "{}"
 version = "0.1.0"
 edition = "2021"
+
+# Generated wrapper crate: stands alone rather than joining whatever cargo
+# workspace happens to contain this project, since wrapper_dir may land
+# inside a project's own workspace tree (e.g. target/rust-ffi/...).
+[workspace]
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

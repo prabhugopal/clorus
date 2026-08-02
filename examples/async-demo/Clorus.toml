@@ -3,4 +3,4 @@ name = "async-demo-test"
 version = "0.1.0"
 
 [rust-dependencies]
-async-demo = { path = "../../crates/async-demo" }
+async-demo = { path = "./rust-lib" }

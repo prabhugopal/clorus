@@ -192,7 +192,15 @@
       "Bash(xargs -I{} du -h {})",
       "Bash(git rm *)",
       "Bash(CLORUS_ENTRY_FILE=repros/codegen-bug-minimal-repro.clrs timeout 10 ./target/release/clorus run)",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(sed -n '923,1626p' crates/clorus-codegen/src/codegen/mod.rs)",
+      "Read(//tmp/**)",
+      "Bash(cp crates/clorus-codegen/src/codegen/mod.rs /tmp/mod.rs.bak)",
+      "Bash(sed -i '' '923,1626d' crates/clorus-codegen/src/codegen/mod.rs)",
+      "Bash(CLORUS_ENTRY_FILE=tests/stdlib/test-core-long-tail-2.clr timeout 15 ./target/release/clorus run)",
+      "Bash(sed -i '' -e 's#\\\\.\\\\./\\\\.\\\\./crates/example-rust-lib#./rust-lib#g' -e 's#/crates/example-rust-lib#/examples/rust-ffi-demo/rust-lib#g' -e 's#clorus-ffi-gen crates/example-rust-lib#clorus-ffi-gen examples/rust-ffi-demo/rust-lib#g' docs/features/ffi.md docs/features/automatic-ffi.md)",
+      "Bash(sed -i '' -e 's#\\\\.\\\\./\\\\.\\\\./crates/async-demo#./rust-lib#g' -e 's#// crates/async-demo/#// examples/async-demo/rust-lib/#g' docs/features/async-integration.md)",
+      "Bash(CLORUS_HOME=/Users/prabhugopal/Workspace/github/clorus timeout 60 /Users/prabhugopal/Workspace/github/clorus/target/release/clorus run)"
     ]
   }
 }

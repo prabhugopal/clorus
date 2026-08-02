@@ -107,9 +107,9 @@ self.module.add_function("clorus_add", add_type, None);
 - `/crates/clorus-ffi-gen/src/lib.rs` - FFI generator library
 - `/crates/clorus-ffi-gen/src/main.rs` - CLI tool
 - `/crates/clorus-ffi-gen/Cargo.toml`
-- `/crates/example-rust-lib/src/lib.rs` - Example Rust library
-- `/crates/example-rust-lib/src/ffi.rs` - Auto-generated wrappers
-- `/crates/example-rust-lib/Cargo.toml`
+- `/examples/rust-ffi-demo/rust-lib/src/lib.rs` - Example Rust library
+- `/examples/rust-ffi-demo/rust-lib/src/ffi.rs` - Auto-generated wrappers
+- `/examples/rust-ffi-demo/rust-lib/Cargo.toml`
 - `/examples/rust-ffi-demo/` - Demo Clorus project
 - `/docs/design/RUST_INTEROP_ROADMAP.md` - 5-phase roadmap
 
@@ -123,7 +123,7 @@ self.module.add_function("clorus_add", add_type, None);
 ### Using the FFI Generator
 ```bash
 # View functions
-clorus-ffi-gen crates/example-rust-lib/src/lib.rs
+clorus-ffi-gen examples/rust-ffi-demo/rust-lib/src/lib.rs
 
 # Save wrappers
 clorus-ffi-gen src/lib.rs --save-wrappers ffi_wrappers.rs

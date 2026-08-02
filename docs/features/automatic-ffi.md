@@ -13,7 +13,7 @@ name = "my-app"
 version = "0.1.0"
 
 [rust-dependencies]
-example-rust-lib = { path = "../../crates/example-rust-lib" }
+example-rust-lib = { path = "./rust-lib" }
 ```
 
 ### src/main.clrs
@@ -31,7 +31,7 @@ $ clorus run
    → example-rust-lib
       Generating FFI wrappers...
       Found 6 public functions
-      Generated FFI wrappers: ../../crates/example-rust-lib/src/ffi.rs
+      Generated FFI wrappers: ./rust-lib/src/ffi.rs
       Compiling Rust library...
       Built: ../../target/release/libexample_rust_lib.a
       Built: ../../target/release/libexample_rust_lib.dylib
@@ -49,7 +49,7 @@ $ clorus build
    → example-rust-lib
       Generating FFI wrappers...
       Found 6 public functions
-      Generated FFI wrappers: ../../crates/example-rust-lib/src/ffi.rs
+      Generated FFI wrappers: ./rust-lib/src/ffi.rs
       Compiling Rust library...
       Built: ../../target/release/libexample_rust_lib.a
       Built: ../../target/release/libexample_rust_lib.dylib
