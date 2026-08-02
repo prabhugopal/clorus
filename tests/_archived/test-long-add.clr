@@ -1,2 +1,0 @@
-;; Simple arithmetic test
-(+ 42 10)

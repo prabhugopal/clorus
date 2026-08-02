@@ -1,0 +1,31 @@
+(ns tests.stdlib.test-core-large-collections)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(defn -main []
+  (let [xs (range 1300)
+        ys (map inc xs)
+        evens (filter even? xs)
+        prefix (take 650 xs)
+        suffix (drop 650 xs)
+        reps (repeat 1300 :x)
+        parts (partition-all 128 xs)]
+    (assert-eq "range count" (count xs) 1300)
+    (assert-eq "map count" (count ys) 1300)
+    (assert-eq "map first" (first ys) 1)
+    (assert-eq "map last" (last ys) 1300)
+    (assert-eq "filter count" (count evens) 650)
+    (assert-eq "take count" (count prefix) 650)
+    (assert-eq "take last" (last prefix) 649)
+    (assert-eq "drop count" (count suffix) 650)
+    (assert-eq "drop first" (first suffix) 650)
+    (assert-eq "repeat count" (count reps) 1300)
+    (assert-eq "repeat sample" (first reps) :x)
+    (assert-eq "partition-all chunk count" (count parts) 11)
+    (assert-eq "partition-all last chunk size" (count (last parts)) 20)
+    0))
+
+(-main)

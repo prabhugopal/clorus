@@ -1,0 +1,23 @@
+(ns tests.stdlib.test-core-mapv)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "mapv simple"
+               (mapv inc [1 2 3])
+               [2 3 4])
+    (assert-eq "mapv empty"
+               (mapv inc [])
+               [])
+    (assert-eq "mapv preserves vector shape"
+               (mapv (fn [x] (* x 2)) [2 4 6])
+               [4 8 12])
+    (assert-eq "mapv with closure"
+               (let [factor 3]
+                 (mapv (fn [x] (* x factor)) [1 2 3]))
+               [3 6 9])
+    "PASS"))

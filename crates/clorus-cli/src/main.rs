@@ -1,8 +1,4 @@
-mod commands;
-mod manifest;
-mod rust_ffi;
-mod interface;
-mod pack;
+use clorus_cli::{commands, pack};
 
 use std::env;
 

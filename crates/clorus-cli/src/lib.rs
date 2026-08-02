@@ -7,3 +7,6 @@ pub mod modern_ffi;
 pub mod commands;
 pub mod interface;
 pub mod pack;
+
+#[cfg(test)]
+pub mod test_support;

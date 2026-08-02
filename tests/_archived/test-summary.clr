@@ -1,9 +1,0 @@
-(def total (atom 0))
-(def passed (atom 0))
-(reset\! total 5)
-(reset\! passed 5)
-
-(let [total-count @total
-      passed-count @passed]
-  (println (str "Total: " total-count))
-  (println (str "Passed: " passed-count)))

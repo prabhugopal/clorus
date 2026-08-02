@@ -1,0 +1,448 @@
+{
+  "features": [
+    {
+      "area": "Reader & Syntax",
+      "code_refs": [
+        "crates/clorus-syntax/src/parser.rs",
+        "crates/clorus-syntax/src/macros.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Reader macros and quoting forms",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Quote, syntax-quote, unquote, deref, var-quote, discard, and regex literal lowering are implemented.",
+      "test_refs": [
+        "tests/language/test-reader-discard.clr",
+        "tests/language/test-reader-discard-edge.clr",
+        "tests/language/test-reader-macro-forms.clr",
+        "tests/language/test-reader-regex-literal.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Reader & Syntax",
+      "code_refs": [
+        "crates/clorus-runtime/src/string.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Regex literal runtime APIs",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Reader lowering and stdlib/runtime regex helpers are present.",
+      "test_refs": [
+        "tests/stdlib/test-core-regex.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Reader & Syntax",
+      "code_refs": [],
+      "code_refs_present": true,
+      "name": "Characters and ratio literals",
+      "notes": "These remain feature gaps for closer Clojure parity.",
+      "status": "missing",
+      "summary": "Character and ratio support is not evidenced in parser/runtime.",
+      "test_refs": [],
+      "test_refs_present": true
+    },
+    {
+      "area": "Functions & Evaluation",
+      "code_refs": [
+        "crates/clorus-syntax/src/ast.rs",
+        "crates/clorus-codegen/src/codegen/mod.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Functions, closures, multi-arity, variadics",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Core function forms, closure capture, and variadic dispatch are implemented and tested.",
+      "test_refs": [
+        "tests/language/test-simple-closure.clr",
+        "tests/language/test-multi-arity-hof.clr",
+        "tests/language/test-fixed-vs-variadic-dispatch.clr",
+        "tests/language/test-variadic-rest.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Functions & Evaluation",
+      "code_refs": [
+        "crates/clorus-codegen/src/codegen/mod.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Tail-position recur in functions and loops",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Loop/recur and fn-tail recur paths are covered.",
+      "test_refs": [
+        "tests/language/test-recur-fn-tail.clr",
+        "tests/stdlib/test-loop-recur.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Macros & Metadata",
+      "code_refs": [
+        "crates/clorus-syntax/src/parser.rs",
+        "crates/clorus-syntax/src/macros.rs"
+      ],
+      "code_refs_present": true,
+      "name": "User macros and macroexpansion",
+      "notes": "",
+      "status": "implemented",
+      "summary": "defmacro, macroexpand, &env, and &form baseline behavior is present.",
+      "test_refs": [
+        "tests/language/test-macro-env-form.clr",
+        "tests/language/test-macroexpand.clr",
+        "tests/language/test-gensym.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Macros & Metadata",
+      "code_refs": [
+        "crates/clorus-syntax/src/macros.rs",
+        "crates/clorus-syntax/src/parser.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Macro hygiene edge cases",
+      "notes": "Practical baseline is in place; full Clojure macro hygiene remains broader.",
+      "status": "partial",
+      "summary": "Auto-gensym baseline exists, but deeper hygiene semantics are still treated as partial.",
+      "test_refs": [
+        "tests/language/test-macro-hygiene.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Macros & Metadata",
+      "code_refs": [
+        "crates/clorus-syntax/src/parser.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Metadata primitives and var metadata",
+      "notes": "",
+      "status": "implemented",
+      "summary": "meta, with-meta, vary-meta, def/defn metadata, and merge order behavior are covered.",
+      "test_refs": [
+        "tests/language/test-meta-contract.clr",
+        "tests/language/test-with-meta-vary-meta.clr",
+        "tests/language/test-var-metadata.clr",
+        "tests/language/test-metadata-merge-order.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Namespaces",
+      "code_refs": [
+        "crates/clorus-cli/src/commands.rs",
+        "crates/clorus-cli/src/manifest.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Require/refer/rename baseline",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Namespace resolution baseline, including refer/rename matrices and conflict detection, is covered.",
+      "test_refs": [
+        "tests/language/test-require-refer-rename.clr",
+        "tests/language/test-namespace-refer-rename-matrix.clr",
+        "tests/language/test-namespace-resolution-edge.clr",
+        "tests/compiler/test-namespace-alias-conflict.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Namespaces",
+      "code_refs": [
+        "crates/clorus-cli/src/commands.rs",
+        "crates/clorus-cli/src/manifest.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Namespace ergonomics long-tail",
+      "notes": "",
+      "status": "partial",
+      "summary": "Baseline works, but alias/import edge semantics are still tracked as partial.",
+      "test_refs": [
+        "tests/compiler/test-namespace-import-conflict.clr",
+        "tests/compiler/test-namespace-refer-conflict.clr",
+        "tests/compiler/test-namespace-rename-conflict.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Collections & Seqs",
+      "code_refs": [
+        "crates/clorus-runtime/src/value.rs",
+        "crates/clorus-runtime/src/collections/map_ops.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Core collections and nested map ops",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Vectors, maps, sets, nested get/assoc/update helpers, and many long-tail map utilities are covered.",
+      "test_refs": [
+        "tests/language/test-set.clr",
+        "tests/language/test-nested-map-ops-parity.clr",
+        "tests/stdlib/test-core-map-utils.clr",
+        "tests/stdlib/test-core-nested-access-semantics.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Collections & Seqs",
+      "code_refs": [
+        "stdlib/clorus/core.clr",
+        "crates/clorus-runtime/src/value.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Ordering, sort, compare, mapv",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Ordering semantics, sort/sort-by, and mapv are covered in stdlib tests.",
+      "test_refs": [
+        "tests/stdlib/test-core-ordering.clr",
+        "tests/stdlib/test-core-sort-behavior.clr",
+        "tests/stdlib/test-core-mapv.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Collections & Seqs",
+      "code_refs": [
+        "crates/clorus-runtime/src/collections/map_ops.rs",
+        "crates/clorus-runtime/src/value.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Persistent collection internals",
+      "notes": "Usable parity exists at API level for many cases; data-structure implementation depth is still evolving.",
+      "status": "partial",
+      "summary": "Collection semantics are usable, but internals are not yet a full persistent HAMT/vector story.",
+      "test_refs": [],
+      "test_refs_present": true
+    },
+    {
+      "area": "Exceptions & Dynamic Vars",
+      "code_refs": [
+        "crates/clorus-syntax/src/parser.rs",
+        "crates/clorus-runtime/src/value.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "throw, try/catch, ex-info, ex-data",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Throw/catch syntax and exception data propagation are covered.",
+      "test_refs": [
+        "tests/language/test-try-catch-typed.clr",
+        "tests/language/test-ex-info.clr",
+        "tests/language/test-exception-data-propagation.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Exceptions & Dynamic Vars",
+      "code_refs": [
+        "crates/clorus-runtime/src/var.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Dynamic vars, binding, set!",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Dynamic var binding, restoration, and throw-path coverage are present.",
+      "test_refs": [
+        "tests/language/test-binding-edge.clr",
+        "tests/language/test-dynamic-var-restoration.clr",
+        "tests/language/test-dynamic-var-throw-paths.clr",
+        "tests/language/test-set-bang.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Exceptions & Dynamic Vars",
+      "code_refs": [
+        "crates/clorus-runtime/src/ref_type.rs",
+        "crates/clorus-runtime/src/transaction.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Deep STM-grade ref semantics",
+      "notes": "This is one of the remaining bigger parity gaps.",
+      "status": "partial",
+      "summary": "Refs/dosync/alter surface exists, but full retry semantics and production confidence are not complete.",
+      "test_refs": [
+        "tests/language/test-alter-reset-meta.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Polymorphism",
+      "code_refs": [
+        "crates/clorus-syntax/src/parser.rs",
+        "crates/clorus-runtime/src/protocols.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Protocols, satisfies?, introspection",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Protocol definition, dispatch, and introspection helpers are implemented and tested.",
+      "test_refs": [
+        "tests/language/test-protocol-introspection.clr",
+        "tests/language/test-satisfies.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Polymorphism",
+      "code_refs": [
+        "crates/clorus-syntax/src/parser.rs",
+        "crates/clorus-runtime/src/hierarchy.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Multimethods and hierarchy",
+      "notes": "",
+      "status": "implemented",
+      "summary": "defmulti/defmethod, hierarchy, and multimethod administration/introspection are covered.",
+      "test_refs": [
+        "tests/language/test-multimethod-dispatch.clr",
+        "tests/language/test-multimethod-hierarchy.clr",
+        "tests/language/test-multimethod-admin.clr",
+        "tests/language/test-hierarchy-queries.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Interop & Tooling",
+      "code_refs": [
+        "crates/clorus-ffi-gen/src/main.rs",
+        "crates/clorus-cli/src/modern_ffi.rs",
+        "crates/clorus-cli/src/commands.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Rust interop and package workflow",
+      "notes": "Interop breadth still depends on interface coverage and bridge crates.",
+      "status": "implemented",
+      "summary": "Rust interop generation and package workflows are implemented and exercised through build paths.",
+      "test_refs": [
+        "tests/integration/basic.clr",
+        "tests/integration/stdlib-minimal.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Interop & Tooling",
+      "code_refs": [
+        "crates/clorus-cli/src/commands.rs",
+        "crates/clorus-repl/src/lib.rs"
+      ],
+      "code_refs_present": true,
+      "name": "REPL/run/build dual-engine execution",
+      "notes": "",
+      "status": "implemented",
+      "summary": "JIT and legacy execution paths both exist and are exercised by the test runner.",
+      "test_refs": [
+        "tests/run_all_tests.sh",
+        "tests/integration/binding.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Concurrency",
+      "code_refs": [
+        "crates/clorus-runtime/src/atom.rs",
+        "crates/clorus-runtime/src/channel.rs",
+        "crates/clorus-runtime/src/ref_type.rs",
+        "crates/clorus-runtime/src/go_block.rs",
+        "stdlib/clorus/core.clr"
+      ],
+      "code_refs_present": true,
+      "name": "Atoms, refs, channels baseline",
+      "notes": "This is the main gap for Brave Clojure-style concurrency chapter parity.",
+      "status": "partial",
+      "summary": "Concurrency primitives exist, but parity and hardening for full Clojure semantics remain open.",
+      "test_refs": [],
+      "test_refs_present": true
+    },
+    {
+      "area": "Concurrency",
+      "code_refs": [],
+      "code_refs_present": true,
+      "name": "core.async-style go/alts/parking semantics",
+      "notes": "Channels/go-style pieces exist, but not the full API/semantic contract.",
+      "status": "missing",
+      "summary": "No complete, code-evidenced core.async-compatible runtime model is present yet.",
+      "test_refs": [],
+      "test_refs_present": true
+    },
+    {
+      "area": "Host Scope",
+      "code_refs": [],
+      "code_refs_present": true,
+      "name": "JVM / Java interop",
+      "notes": "",
+      "status": "out_of_scope",
+      "summary": "Java host interop is not a target for Clorus.",
+      "test_refs": [],
+      "test_refs_present": true
+    }
+  ],
+  "generated_from": "scripts/docs/build_status.py",
+  "summary": {
+    "by_area": {
+      "Collections & Seqs": {
+        "implemented": 2,
+        "partial": 1
+      },
+      "Concurrency": {
+        "missing": 1,
+        "partial": 1
+      },
+      "Exceptions & Dynamic Vars": {
+        "implemented": 2,
+        "partial": 1
+      },
+      "Functions & Evaluation": {
+        "implemented": 2
+      },
+      "Host Scope": {
+        "out_of_scope": 1
+      },
+      "Interop & Tooling": {
+        "implemented": 2
+      },
+      "Macros & Metadata": {
+        "implemented": 2,
+        "partial": 1
+      },
+      "Namespaces": {
+        "implemented": 1,
+        "partial": 1
+      },
+      "Polymorphism": {
+        "implemented": 2
+      },
+      "Reader & Syntax": {
+        "implemented": 2,
+        "missing": 1
+      }
+    },
+    "overall": {
+      "implemented": 15,
+      "missing": 2,
+      "out_of_scope": 1,
+      "partial": 5
+    },
+    "test_inventory": {
+      "compiler": 5,
+      "integration": 4,
+      "language": 79,
+      "parity_harness": 3,
+      "stdlib": 30
+    }
+  }
+}

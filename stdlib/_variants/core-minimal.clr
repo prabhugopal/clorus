@@ -1,7 +1,0 @@
-;; Minimal stdlib for testing
-
-(defn identity [x] x)
-
-(defn inc [x] (+ x 1))
-
-(defn dec [x] (- x 1))

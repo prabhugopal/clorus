@@ -1,0 +1,33 @@
+(ns test-agents)
+
+(defn inc-agent [state]
+  (+ state 1))
+
+(defn add3-agent [state a b c]
+  (+ state a b c))
+
+(println "Testing agents...")
+
+(def a (agent 10))
+(send a inc-agent)
+(await a)
+(println "Agent after inc:" @a)
+(if (= @a 11)
+  (println "Test 1 PASS")
+  (throw "agent increment failed"))
+
+(def b (agent 10))
+(send b add3-agent 1 2 3)
+(await b)
+(println "Agent after add3:" @b)
+(if (= @b 16)
+  (println "Test 2 PASS")
+  (throw "agent variadic send failed"))
+
+(def c (agent 5))
+(send c inc-agent)
+(if (= (await-for c 1000) true)
+  (println "Test 3 PASS")
+  (throw "agent await-for failed"))
+
+(println "All agent tests passed!")

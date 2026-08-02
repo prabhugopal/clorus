@@ -1,0 +1,35 @@
+(ns tests.language.test-refs-stm)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    nil
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(defn inc1 [x] (+ x 1))
+
+(let [counter (ref 0)]
+  (assert-eq "initial" @counter 0)
+  (dosync (ref-set counter 10))
+  (assert-eq "ref-set" @counter 10)
+  (dosync (alter counter inc1))
+  (assert-eq "alter symbol" @counter 11)
+  (dosync (alter counter (fn [x] (+ x 9))))
+  (assert-eq "alter inline fn" @counter 20)
+  (let [delta 2
+        add-delta (fn [x] (+ x delta))]
+    (dosync (alter counter add-delta)))
+  (assert-eq "alter closure" @counter 22)
+  (dosync
+    (ensure counter)
+    (commute counter (fn [x] (+ x 3))))
+  (assert-eq "ensure+commute" @counter 25))
+
+(let [a (ref 100)
+      b (ref 50)]
+  (dosync
+    (alter a (fn [x] (- x 10)))
+    (alter b (fn [x] (+ x 10))))
+  (assert-eq "transfer a" @a 90)
+  (assert-eq "transfer b" @b 60))
+
+0

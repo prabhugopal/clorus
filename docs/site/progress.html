@@ -1,0 +1,498 @@
+<title>Clorus — Progress Report</title>
+<meta name="description" content="Ground-truth status of the Clorus compiler, runtime, stdlib and Rust interop, verified against source." />
+<style>
+:root{
+  --bg:#f3f2ee;
+  --surface:#ffffff;
+  --surface-2:#ebe9e3;
+  --text:#1b1a17;
+  --text-dim:#6b675e;
+  --border:#dcd8cd;
+  --accent:#b1531f;
+  --accent-soft:#f0ded0;
+  --accent2:#2f5d62;
+  --accent2-soft:#dfe9e8;
+  --good:#2e7d46;
+  --good-soft:#e1efe3;
+  --warn:#a8730a;
+  --warn-soft:#f5e9d2;
+  --bad:#af3a2c;
+  --bad-soft:#f6e0dc;
+  --neutral:#7a7568;
+  --neutral-soft:#eae8e1;
+  --font-display:ui-monospace,"JetBrains Mono","SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+  --font-body:Charter,"Iowan Old Style","Palatino Linotype","Book Antiqua",Georgia,serif;
+  --shadow:0 1px 2px rgba(30,25,15,.06),0 8px 24px -12px rgba(30,25,15,.15);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#15141a; --surface:#1d1b21; --surface-2:#25232a;
+    --text:#eae6dd; --text-dim:#9c968a; --border:#34313a;
+    --accent:#e2895a; --accent-soft:#3a2a22;
+    --accent2:#7fbdc0; --accent2-soft:#22323330;
+    --good:#6fcf82; --good-soft:#1e3324;
+    --warn:#e5b45a; --warn-soft:#3a2f18;
+    --bad:#ec7565; --bad-soft:#3a201c;
+    --neutral:#948e80; --neutral-soft:#28262c;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#15141a; --surface:#1d1b21; --surface-2:#25232a;
+  --text:#eae6dd; --text-dim:#9c968a; --border:#34313a;
+  --accent:#e2895a; --accent-soft:#3a2a22;
+  --accent2:#7fbdc0; --accent2-soft:#22323330;
+  --good:#6fcf82; --good-soft:#1e3324;
+  --warn:#e5b45a; --warn-soft:#3a2f18;
+  --bad:#ec7565; --bad-soft:#3a201c;
+  --neutral:#948e80; --neutral-soft:#28262c;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px -12px rgba(0,0,0,.5);
+}
+:root[data-theme="light"]{
+  --bg:#f3f2ee; --surface:#ffffff; --surface-2:#ebe9e3;
+  --text:#1b1a17; --text-dim:#6b675e; --border:#dcd8cd;
+  --accent:#b1531f; --accent-soft:#f0ded0;
+  --accent2:#2f5d62; --accent2-soft:#dfe9e8;
+  --good:#2e7d46; --good-soft:#e1efe3;
+  --warn:#a8730a; --warn-soft:#f5e9d2;
+  --bad:#af3a2c; --bad-soft:#f6e0dc;
+  --neutral:#7a7568; --neutral-soft:#eae8e1;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--font-body); font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--accent-soft)}
+a{color:var(--accent)}
+.wrap{max-width:920px; margin:0 auto; padding:0 24px 120px}
+h1,h2,h3{font-family:var(--font-display); text-wrap:balance; letter-spacing:-0.01em; font-weight:600}
+code,.mono,.tnum{font-family:var(--font-display); font-variant-numeric:tabular-nums}
+
+/* Masthead */
+header.masthead{
+  border-bottom:1px solid var(--border);
+  padding:56px 0 32px;
+  background:
+    linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+}
+.eyebrow{
+  font-family:var(--font-display); font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--accent); display:flex; align-items:center; gap:8px; margin-bottom:14px;
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+h1.title{font-size:40px; margin:0 0 10px; line-height:1.05}
+h1.title .lang{color:var(--accent)}
+.tagline{font-size:19px; color:var(--text-dim); max-width:58ch; margin:0 0 28px}
+.meta-row{display:flex; flex-wrap:wrap; gap:10px; font-family:var(--font-display); font-size:12.5px; color:var(--text-dim)}
+.meta-row span{background:var(--surface-2); border:1px solid var(--border); border-radius:5px; padding:5px 10px}
+
+/* Stat strip */
+.stats{
+  display:grid; grid-template-columns:repeat(6,1fr); gap:1px;
+  background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden;
+  margin:32px 0 0; box-shadow:var(--shadow);
+}
+.stat{background:var(--surface); padding:18px 14px}
+.stat .num{font-family:var(--font-display); font-size:26px; font-weight:600; font-variant-numeric:tabular-nums}
+.stat .label{font-size:11.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.06em; margin-top:4px}
+.stat.good .num{color:var(--good)} .stat.warn .num{color:var(--warn)} .stat.bad .num{color:var(--bad)}
+@media (max-width:760px){.stats{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:460px){.stats{grid-template-columns:repeat(2,1fr)}}
+
+nav.jump{
+  position:sticky; top:0; z-index:5; background:var(--bg);
+  border-bottom:1px solid var(--border); backdrop-filter:blur(6px);
+}
+nav.jump .inner{max-width:920px; margin:0 auto; padding:10px 24px; display:flex; gap:18px; overflow-x:auto; font-family:var(--font-display); font-size:12.5px}
+nav.jump a{color:var(--text-dim); text-decoration:none; white-space:nowrap; padding:4px 0; border-bottom:2px solid transparent}
+nav.jump a:hover{color:var(--text); border-color:var(--accent)}
+
+section{padding:52px 0; border-bottom:1px solid var(--border)}
+section:last-of-type{border-bottom:none}
+.section-head{display:flex; align-items:baseline; gap:12px; margin-bottom:6px}
+.section-num{font-family:var(--font-display); color:var(--accent2); font-size:13px}
+h2{font-size:26px; margin:0}
+.section-dek{color:var(--text-dim); max-width:66ch; margin:8px 0 28px}
+
+/* Pills / badges */
+.pill{
+  display:inline-flex; align-items:center; gap:6px; font-family:var(--font-display); font-size:11.5px;
+  padding:3px 9px; border-radius:20px; font-weight:600; letter-spacing:.02em; white-space:nowrap;
+}
+.pill.implemented{background:var(--good-soft); color:var(--good)}
+.pill.partial{background:var(--warn-soft); color:var(--warn)}
+.pill.missing{background:var(--neutral-soft); color:var(--neutral)}
+.pill.broken{background:var(--bad-soft); color:var(--bad)}
+
+/* Cards */
+.cards{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+@media (max-width:700px){.cards{grid-template-columns:1fr}}
+.card{background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:22px; box-shadow:var(--shadow)}
+.card h3{font-size:15px; margin:0 0 4px; display:flex; align-items:center; gap:8px}
+.card .sub{font-size:12.5px; color:var(--text-dim); font-family:var(--font-display); margin-bottom:12px}
+.card p{margin:0 0 10px; font-size:15px}
+.card p:last-child{margin-bottom:0}
+.card ul{margin:10px 0 0; padding-left:18px; font-size:14.5px}
+.card li{margin-bottom:5px}
+
+/* Feature matrix */
+.matrix{width:100%; border-collapse:collapse; font-size:14.5px}
+.matrix caption{caption-side:top; text-align:left; font-family:var(--font-display); font-size:12px; color:var(--text-dim); margin-bottom:8px}
+.matrix th{text-align:left; font-family:var(--font-display); font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--text-dim); border-bottom:1px solid var(--border); padding:8px 10px}
+.matrix td{padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:top}
+.matrix tr:last-child td{border-bottom:none}
+.matrix td.evidence{color:var(--text-dim); font-size:13px}
+.table-scroll{overflow-x:auto; border:1px solid var(--border); border-radius:10px; background:var(--surface); box-shadow:var(--shadow)}
+.table-scroll .matrix{margin:0}
+.table-scroll .matrix th:first-child,.table-scroll .matrix td:first-child{padding-left:16px}
+
+/* Coverage bars */
+.cov-item{display:grid; grid-template-columns:150px 1fr 64px; align-items:center; column-gap:14px; row-gap:4px; padding:9px 0; border-bottom:1px solid var(--border)}
+.cov-item:last-child{border-bottom:none}
+.cov-item .name{font-family:var(--font-display); font-size:13.5px}
+.cov-track{height:9px; background:var(--surface-2); border-radius:5px; overflow:hidden; border:1px solid var(--border)}
+.cov-fill{height:100%; background:linear-gradient(90deg,var(--accent2),var(--accent))}
+.cov-pct{font-family:var(--font-display); font-size:13px; text-align:right; color:var(--text-dim); font-variant-numeric:tabular-nums; white-space:nowrap}
+.cov-note{grid-column:2/3; font-size:12.5px; color:var(--text-dim); font-family:var(--font-body); font-style:italic}
+@media (max-width:560px){
+  .cov-item{grid-template-columns:96px 1fr 46px; column-gap:10px}
+  .cov-note{grid-column:1/4}
+}
+
+/* Bug callouts */
+.bug{
+  display:grid; grid-template-columns:5px 1fr; gap:16px; background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; margin-bottom:14px; box-shadow:var(--shadow); overflow:hidden;
+}
+.bug .stripe{background:var(--bad)}
+.bug.warn .stripe{background:var(--warn)}
+.bug-body{padding:16px 18px 16px 4px}
+.bug-head{display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap}
+.bug-head .sev{font-family:var(--font-display); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--bad); font-weight:700}
+.bug.warn .bug-head .sev{color:var(--warn)}
+.bug-head h4{margin:0; font-size:16px; font-family:var(--font-body); font-weight:700}
+.bug code.loc{font-size:12px; color:var(--text-dim); background:var(--surface-2); padding:2px 6px; border-radius:4px}
+.bug p{margin:6px 0 0; font-size:14.5px}
+
+/* Roadmap */
+.roadmap{border-left:2px solid var(--border); margin-left:6px}
+.phase{position:relative; padding:0 0 40px 30px}
+.phase:last-child{padding-bottom:4px}
+.phase::before{content:"";position:absolute; left:-7px; top:2px; width:12px; height:12px; border-radius:50%; background:var(--accent); border:3px solid var(--bg)}
+.phase-head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:8px}
+.phase-head h3{margin:0; font-size:17px}
+.phase-eta{font-family:var(--font-display); font-size:12px; color:var(--accent2); background:var(--accent2-soft); padding:3px 9px; border-radius:20px}
+.phase p.goal{color:var(--text-dim); margin:0 0 10px; font-size:15px}
+.phase ul{margin:0; padding-left:18px; font-size:14.5px}
+.phase li{margin-bottom:6px}
+
+.callout{background:var(--accent2-soft); border:1px solid var(--accent2); border-radius:10px; padding:18px 20px; margin:24px 0}
+.callout h4{margin:0 0 6px; font-family:var(--font-display); font-size:13px; color:var(--accent2); text-transform:uppercase; letter-spacing:.04em}
+.callout p{margin:0; font-size:14.5px}
+
+footer{padding:40px 0 10px; color:var(--text-dim); font-size:13px}
+footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px}
+
+@media (prefers-reduced-motion:no-preference){
+  .cov-fill{transition:width .6s ease}
+}
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · 2026-07-30</div>
+    <h1 class="title">Clorus<span class="lang">.</span> Progress</h1>
+    <p class="tagline">Clojure semantics at native speed, with Rust interop as a first-class citizen — the same bet <a href="https://jank-lang.org/progress/" target="_blank" rel="noopener">jank</a> makes with C++. This is where that bet actually stands today.</p>
+    <div class="meta-row">
+      <span>v0.1.0 · pre-release</span>
+      <span>LLVM 18 (inkwell)</span>
+      <span>AOT + JIT, both real, both required</span>
+      <span>Consumed by Coral (GUI toolkit)</span>
+      <span>No CI configured</span>
+    </div>
+    <div class="stats">
+      <div class="stat warn"><div class="num tnum">0 / 14</div><div class="label">cargo build --all-targets errors</div></div>
+      <div class="stat good"><div class="num tnum">465</div><div class="label">Rust unit tests passing</div></div>
+      <div class="stat warn"><div class="num tnum">109/122</div><div class="label">.clr tests pass (manual run)</div></div>
+      <div class="stat bad"><div class="num tnum">~50%</div><div class="label">clojure.core symbol coverage</div></div>
+      <div class="stat bad"><div class="num tnum">4</div><div class="label">confirmed SIGABRT crashes</div></div>
+      <div class="stat bad"><div class="num tnum">4%</div><div class="label">of docs/ actually published</div></div>
+    </div>
+  </div>
+</header>
+
+<nav class="jump">
+  <div class="inner">
+    <a href="#engine">Execution engine</a>
+    <a href="#interop">Rust interop</a>
+    <a href="#bugs">Correctness bugs</a>
+    <a href="#language">Language matrix</a>
+    <a href="#stdlib">Stdlib coverage</a>
+    <a href="#tests">Test reality</a>
+    <a href="#repo">Repo &amp; docs hygiene</a>
+    <a href="#roadmap">Roadmap</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<section id="engine">
+  <div class="section-head"><span class="section-num">01</span><h2>Execution engine</h2></div>
+  <p class="section-dek">Confirmed by reading <code>clorus-codegen</code> and the LLVM linkage in <code>clorus-cli</code>: this is not an interpreter or a bytecode VM. It's a real LLVM 18 compiler with two genuine, independent front doors — and both stay, per direction: Coral (the GUI toolkit at <code>~/Workspace/github/coral</code>) is a live downstream consumer of both.</p>
+  <div class="cards">
+    <div class="card">
+      <h3>⚙ AOT — <code>clorus build</code></h3>
+      <div class="sub">commands.rs:876–897, pack.rs:65</div>
+      <p>Emits real object code via <code>TargetMachine::write_to_file(..., FileType::Object, ...)</code>, then shells to <code>cc</code> to link against <code>libclorus_runtime.a</code> plus any FFI static libs. Produces a genuine native executable.</p>
+    </div>
+    <div class="card">
+      <h3>⚡ JIT — <code>clorus run</code> (default)</h3>
+      <div class="sub">commands.rs:1347, 1912</div>
+      <p><code>create_jit_execution_engine</code> at <code>OptimizationLevel::None</code>, with a legacy compile-link-run path as fallback. This is the path used for the language-level test sweep below.</p>
+    </div>
+  </div>
+  <div class="callout">
+    <h4>Constraint, not a decision to revisit</h4>
+    <p>Both modes share one codegen path (<code>CodeGen&lt;'ctx&gt;</code> walking the AST straight to LLVM IR — no separate bytecode layer), so keeping both costs nothing architecturally. Any roadmap item below that touches codegen must ship for both AOT and JIT, verified against Coral's actual usage before merging.</p>
+  </div>
+</section>
+
+<section id="interop">
+  <div class="section-head"><span class="section-num">02</span><h2>Rust interop — the actual differentiator</h2></div>
+  <p class="section-dek">Real and working end-to-end, not stubbed — but narrower than "seamless" implies today. The mechanism is a source-scraping analyzer (<code>clorus-ffi-gen</code>, built on <code>syn</code>), not an attribute-macro system.</p>
+  <div class="table-scroll">
+    <table class="matrix">
+      <thead><tr><th>Capability</th><th>Status</th><th>Detail</th></tr></thead>
+      <tbody>
+        <tr><td>Clorus → Rust, primitive types</td><td><span class="pill implemented">WORKS</span></td><td class="evidence">Numeric/bool/pointer args are direct <code>extern "C"</code> calls — genuinely zero-cost. Verified working example: <code>crates/example-rust-lib</code> + <code>examples/rust-ffi-demo</code>.</td></tr>
+        <tr><td>Clorus → Rust, <code>String</code>/<code>&amp;str</code></td><td><span class="pill partial">WORKS, NOT ZERO-COST</span></td><td class="evidence">Every call heap-allocates via <code>CString</code>/<code>CStr::to_string()</code> (<code>clorus-ffi-gen/src/lib.rs:241–283</code>).</td></tr>
+        <tr><td>Discovery scope</td><td><span class="pill partial">TOP-LEVEL <code>pub fn</code> ONLY</span></td><td class="evidence"><code>rust_ffi.rs:305,330,372–379</code> explicitly detects and rejects impl-block/associated-method-only crates.</td></tr>
+        <tr><td>Structs, enums, generics, trait objects</td><td><span class="pill missing">UNSUPPORTED</span></td><td class="evidence"><code>analyzer.rs:228–233</code> — hard <code>TypeError::UnsupportedType</code>. Whitelist is f32/f64/i8..u64/isize/usize/bool/String/&amp;str/()/raw pointers only.</td></tr>
+        <tr><td>Rust → Clorus (embedding)</td><td><span class="pill missing">NOT FOUND</span></td><td class="evidence">No API located for a Rust host to call Clorus values. Worth confirming directly against what Coral actually does today — see roadmap Phase 4.</td></tr>
+        <tr><td>Arbitrary existing crates ("any Rust crate")</td><td><span class="pill missing">NOT YET</span></td><td class="evidence">Only crates whose public surface is primitive-typed top-level functions, or that ship a hand-written <code>.clri</code> interface file.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="bugs">
+  <div class="section-head"><span class="section-num">03</span><h2>Correctness bugs — the "no surprises" list</h2></div>
+  <p class="section-dek">Everything here was reproduced directly, not read off a doc. These are the items that most directly contradict "Clojure semantics, uncompromised."</p>
+
+  <div class="bug">
+    <div class="stripe"></div>
+    <div class="bug-body">
+      <div class="bug-head"><span class="sev">Critical · semantics</span><h4>Maps and sets are mutated in place, not persistent</h4></div>
+      <p><code class="loc">clorus-runtime/src/map.rs:167</code> — <code>clorus_map_assoc</code> literally mutates the existing map (<code>(*map_ptr).assoc(...)</code>), self-documented as "TODO: Phase C, create a new persistent map." <code>set.rs</code> has the identical pattern. <code>(assoc m :a 1)</code> is visible through every other reference holding <code>m</code> — this is the single highest-priority fix; vectors and lists are genuinely persistent (32-way trie, structural sharing), so maps/sets are the outlier, not the norm.</p>
+    </div>
+  </div>
+  <div class="bug">
+    <div class="stripe"></div>
+    <div class="bug-body">
+      <div class="bug-head"><span class="sev">Critical · crash</span><h4>4 confirmed SIGABRT crashes in the test sweep</h4></div>
+      <p><code class="loc">tests/language/test-numeric.clr</code> panics inside JIT-compiled <code>_clorus_sub</code> ("panic in a function that cannot unwind"). Three more — <code>test-core-long-tail-3</code>, <code>test-core-sort-behavior</code>, <code>test-core-sort-error-paths</code> — abort silently (exit 134, no output). None of these are edge-case fuzzing finds; they're in the existing, checked-in test suite.</p>
+    </div>
+  </div>
+  <div class="bug warn">
+    <div class="stripe"></div>
+    <div class="bug-body">
+      <div class="bug-head"><span class="sev">Correctness · hardcoded</span><h4><code>merge</code> silently requires args wrapped in a vector</h4></div>
+      <p><code class="loc">clorus-codegen/src/codegen/calls.rs:16–18,203</code> — arity is hardcoded to exactly 1 argument, dispatching to a runtime function expecting a vector-of-maps. Idiomatic <code>(merge m1 m2)</code> errors; the only passing test writes <code>(merge [m1 m2])</code>. <code>keys</code>/<code>vals</code> are separately defined twice (native + shadowed stdlib) — dead code, not a bug, but exactly the kind of surprise that erodes trust in the builtin set.</p>
+    </div>
+  </div>
+  <div class="bug warn">
+    <div class="stripe"></div>
+    <div class="bug-body">
+      <div class="bug-head"><span class="sev">Reliability</span><h4><code>recur</code> outside an explicit <code>loop</code> has no guaranteed TCO</h4></div>
+      <p><code class="loc">codegen/mod.rs:4200–4210</code> — self-recursive <code>recur</code> at the tail of a plain <code>fn</code> re-emits a normal call and leans on LLVM's own tail-call optimization rather than an explicit <code>musttail</code>/trampoline. It'll usually work at <code>-O</code>, and silently blow the stack when it doesn't — which is the definition of a surprise for a language whose whole pitch is Clojure-shaped recursion.</p>
+    </div>
+  </div>
+</section>
+
+<section id="language">
+  <div class="section-head"><span class="section-num">04</span><h2>Language feature matrix</h2></div>
+  <p class="section-dek">Everything below is graded against actual compiler/runtime behavior, not doc claims — several docs in the repo assert things (e.g. a richer numeric system, 100% test pass rate) that the code doesn't back up.</p>
+  <div class="table-scroll">
+    <table class="matrix">
+      <thead><tr><th>Feature</th><th>Status</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td>Reader / syntax-quote / EDN</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Full quote/unquote/splicing, fn-literal shorthand tested.</td></tr>
+        <tr><td>Persistent vector &amp; list</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real 32-way trie + Okasaki list, structural sharing, refcounted.</td></tr>
+        <tr><td>Persistent map &amp; set</td><td><span class="pill broken">Not persistent</span></td><td class="evidence">Mutate-in-place — see bug list above.</td></tr>
+        <tr><td>Destructuring</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">let/fn, map + vector patterns.</td></tr>
+        <tr><td>Namespaces / require / use</td><td><span class="pill implemented">Implemented</span></td><td class="evidence"><code>import</code> and <code>in-ns</code> missing.</td></tr>
+        <tr><td>Multimethods</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Dispatch tables + <code>prefer-method</code> tie-breaking.</td></tr>
+        <tr><td>Protocols / deftype / defrecord</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real method mangling &amp; dispatch.</td></tr>
+        <tr><td><code>reify</code></td><td><span class="pill missing">Missing</span></td><td class="evidence">Zero occurrences anywhere in source.</td></tr>
+        <tr><td>Macros / <code>defmacro</code> / gensym</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">3,334-line macro engine, auto-gensym tested.</td></tr>
+        <tr><td>Metadata</td><td><span class="pill implemented">Implemented</span></td><td class="evidence"><code>meta</code>/<code>with-meta</code>/<code>vary-meta</code>/<code>alter-meta!</code> all present.</td></tr>
+        <tr><td>Laziness / <code>lazy-seq</code></td><td><span class="pill partial">Bolted on</span></td><td class="evidence">Userland atom-memoized library with parallel <code>lazy-first</code>/<code>lazy-map</code> API — not integrated with core <code>seq</code>/<code>map</code>/<code>filter</code>.</td></tr>
+        <tr><td>Atoms</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">CAS-based swap/reset.</td></tr>
+        <tr><td>Refs + STM</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real MVCC — versioned read/write sets, commute support.</td></tr>
+        <tr><td>Agents</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">737-line runtime module.</td></tr>
+        <tr><td>Channels (core.async-style)</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Beyond core Clojure — a genuine extra, go-blocks + thread pool.</td></tr>
+        <tr><td>try / catch / throw / ex-info</td><td><span class="pill partial">Implemented, non-native</span></td><td class="evidence">Tagged sentinel values, not LLVM unwinding — functionally complete but not structurally idiomatic.</td></tr>
+        <tr><td><code>loop</code>/<code>recur</code> TCO</td><td><span class="pill partial">Partial</span></td><td class="evidence">Guaranteed inside <code>loop</code> (phi-node backedge); not guaranteed for bare <code>fn</code> self-recursion.</td></tr>
+        <tr><td>Dynamic vars / <code>binding</code></td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real thread-local binding stack.</td></tr>
+        <tr><td>Multi-arity / variadic fns</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Per-arity compilation + rest params.</td></tr>
+        <tr><td>Numeric tower (bigint / ratio)</td><td><span class="pill missing">Missing</span></td><td class="evidence">Long (i64) + Double only. Integer division silently promotes to float instead of an exact ratio.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="stdlib">
+  <div class="section-head"><span class="section-num">05</span><h2>Stdlib coverage</h2></div>
+  <p class="section-dek">~115–125 of ~230 audited <code>clojure.core</code>-equivalent symbols exist in some form (native or <code>.clr</code>) — roughly <strong>50% raw coverage</strong>, concentrated in sequence/collection/math basics.</p>
+  <div class="card">
+    <div class="cov-item"><span class="name">Sequences</span><div class="cov-track"><div class="cov-fill" style="width:68%"></div></div><span class="cov-pct">34/50</span></div>
+    <div class="cov-item"><span class="name">Collections</span><div class="cov-track"><div class="cov-fill" style="width:76%"></div></div><span class="cov-pct">13/17</span></div>
+    <div class="cov-item"><span class="name">clojure.set</span><div class="cov-track"><div class="cov-fill" style="width:50%"></div></div><span class="cov-pct">5/10</span></div>
+    <div class="cov-item"><span class="name">Strings</span><div class="cov-track"><div class="cov-fill" style="width:65%"></div></div><span class="cov-pct">13/20</span><span class="cov-note">no <code>clojure.string</code> namespace — bare names</span></div>
+    <div class="cov-item"><span class="name">Math</span><div class="cov-track"><div class="cov-fill" style="width:80%"></div></div><span class="cov-pct">20/25</span><span class="cov-note">no bit ops</span></div>
+    <div class="cov-item"><span class="name">Predicates</span><div class="cov-track"><div class="cov-fill" style="width:79%"></div></div><span class="cov-pct">19/24</span></div>
+    <div class="cov-item"><span class="name">Functional</span><div class="cov-track"><div class="cov-fill" style="width:78%"></div></div><span class="cov-pct">7/9</span></div>
+    <div class="cov-item"><span class="name">Control flow</span><div class="cov-track"><div class="cov-fill" style="width:79%"></div></div><span class="cov-pct">15/19</span><span class="cov-note">no <code>for</code>, no <code>condp</code></span></div>
+    <div class="cov-item"><span class="name">I/O</span><div class="cov-track"><div class="cov-fill" style="width:40%"></div></div><span class="cov-pct">4/10</span></div>
+    <div class="cov-item"><span class="name">Concurrency</span><div class="cov-track"><div class="cov-fill" style="width:54%"></div></div><span class="cov-pct">7/13</span><span class="cov-note">no <code>future</code>/<code>promise</code>/<code>pmap</code></span></div>
+    <div class="cov-item"><span class="name">Namespaces/vars</span><div class="cov-track"><div class="cov-fill" style="width:70%"></div></div><span class="cov-pct">7/10</span></div>
+    <div class="cov-item"><span class="name">Metadata</span><div class="cov-track"><div class="cov-fill" style="width:100%"></div></div><span class="cov-pct">5/5</span></div>
+    <div class="cov-item"><span class="name">Errors</span><div class="cov-track"><div class="cov-fill" style="width:100%"></div></div><span class="cov-pct">7/7</span></div>
+    <div class="cov-item"><span class="name">Equality/hash</span><div class="cov-track"><div class="cov-fill" style="width:50%"></div></div><span class="cov-pct">2/4</span><span class="cov-note">no <code>hash</code>, no <code>not=</code></span></div>
+    <div class="cov-item"><span class="name">Transducers</span><div class="cov-track"><div class="cov-fill" style="width:50%"></div></div><span class="cov-pct">10/20</span><span class="cov-note">half disabled by a real compiler bug, see below</span></div>
+  </div>
+  <div class="callout">
+    <h4>Three copies of core, one compiler bug</h4>
+    <p><code>stdlib/_variants/</code> holds three dead, unreferenced snapshots of core (0 references anywhere in <code>crates/</code>). <code>stdlib/transducers.clr.disabled</code> is a fuller, better implementation than the active one — disabled because multi-arity functions returning closures fail to compile when the file is loaded as stdlib (works fine in user code). That's a real, fixable codegen scoping bug, not a design gap, and unblocking it recovers <code>remove</code>/<code>drop</code>/<code>take-while</code>/<code>cat</code>/<code>mapcat</code>/<code>sequence</code>/<code>partition-by</code> for free.</p>
+  </div>
+</section>
+
+<section id="tests">
+  <div class="section-head"><span class="section-num">06</span><h2>Test suite — what's actually verified</h2></div>
+  <p class="section-dek">You asked whether tests cover the complete language: today, no — and the tooling itself has been hiding that. <code>tests/run_all_tests.sh</code> runs under <code>set -e</code>, so it aborts at the first failure anywhere in ~120 files. That's the direct mechanism behind docs claiming "100% pass rate": nobody has ever seen a complete run.</p>
+  <div class="table-scroll">
+    <table class="matrix">
+      <thead><tr><th>Suite</th><th>Total</th><th>Pass</th><th>Fail / crash</th><th>Wired into any runner?</th></tr></thead>
+      <tbody>
+        <tr><td>Rust unit tests (<code>--lib</code>)</td><td class="tnum">466</td><td class="tnum">465 <span style="color:var(--text-dim)">(1 ignored)</span></td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>cargo test --workspace</code> (full, incl. bin)</td><td colspan="3">currently fails to build — <code>test_support</code> module wired into <code>lib.rs</code> but not <code>main.rs</code>, an in-progress uncommitted change</td><td><span class="pill broken">broken</span></td></tr>
+        <tr><td><code>tests/language/</code></td><td class="tnum">80</td><td class="tnum">77</td><td class="tnum">1 crash, 2 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/stdlib/</code></td><td class="tnum">30</td><td class="tnum">25</td><td class="tnum">4 crashes, 1 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/compiler/</code></td><td class="tnum">8</td><td class="tnum">3</td><td class="tnum">5 expected-fail</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/integration/</code></td><td class="tnum">4</td><td class="tnum">4</td><td class="tnum">0</td><td><span class="pill implemented">yes</span></td></tr>
+        <tr><td><code>tests/features/</code> (~70 files)</td><td colspan="3">duplicates <code>tests/language/</code>; not referenced by any script — only by a doc describing files that don't exist on disk</td><td><span class="pill missing">dead</span></td></tr>
+        <tr><td><code>tests/_archived/</code> (7 files)</td><td colspan="3">superseded, intentionally excluded</td><td><span class="pill missing">dead</span></td></tr>
+        <tr><td><code>tests/parity/</code> (clj-diff harness)</td><td class="tnum">11</td><td class="tnum">11</td><td class="tnum">0</td><td><span class="pill partial">optional, tiny</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:16px; color:var(--text-dim); font-size:14.5px">No <code>.github/workflows</code> exist — none of this runs automatically today. A green run is whatever the last person to run it locally saw.</p>
+</section>
+
+<section id="repo">
+  <div class="section-head"><span class="section-num">07</span><h2>Repo &amp; docs hygiene</h2></div>
+  <p class="section-dek">The intent for a single source of truth already exists in the repo — it's just unfinished and uncommitted.</p>
+  <div class="cards">
+    <div class="card">
+      <h3>The good news</h3>
+      <p><code>docs/README.md</code> already declares a canonical-doc model: one generated status file (<code>docs/generated/PARITY_STATUS.md</code> / <code>STATUS.json</code>), built by <code>scripts/docs/build_status.py</code>, with several existing docs already reduced to one-line redirect stubs pointing at it. This is the right shape.</p>
+    </div>
+    <div class="card">
+      <h3>Why it doesn't work yet</h3>
+      <p><code>docs/generated/</code> is untracked — never committed. A fresh clone is missing the exact files the canonical docs point to, and 5 of 9 pages in <code>mkdocs.yml</code>'s own nav resolve to untracked files. The redirect pattern is right; it just needs finishing and committing.</p>
+    </div>
+  </div>
+  <div class="stats" style="grid-template-columns:repeat(4,1fr); margin-top:20px">
+    <div class="stat bad"><div class="num tnum">210</div><div class="label">files under docs/</div></div>
+    <div class="stat bad"><div class="num tnum">9</div><div class="label">actually in mkdocs nav</div></div>
+    <div class="stat warn"><div class="num tnum">7</div><div class="label">near-duplicate root audit docs, one dead session</div></div>
+    <div class="stat warn"><div class="num tnum">3</div><div class="label">dead stdlib "variant" files</div></div>
+  </div>
+  <ul style="font-size:14.5px; margin-top:20px">
+    <li><strong>Root-level clutter:</strong> <code>CLORUS_CODE_ANALYSIS.md</code> / <code>CLORUS_CODE_ANALYSIS_CODE_ONLY.md</code> / <code>CODE_AUDIT_DETAILS.md</code> / <code>CODE_AUDIT_INDEX.md</code> / <code>PATCH_PLAN_TOP3_FIXES.md</code> / <code>PLAN_TOP3_FIXES.md</code> / <code>REFACTOR_PLAN_MAINTAINABILITY.md</code> — 7 files, one commit, Feb 27, never touched since. Fold anything still true into the canonical docs, archive the rest.</li>
+    <li><strong>A prior consolidation attempt already exists</strong>, archived and forgotten: <code>docs/archive/top-level-plans/DOCS_CONSOLIDATION_PLAN.md</code>. Read it before repeating the exercise.</li>
+    <li><strong><code>docs/gui/</code> is untracked Coral content</strong> living inside the Clorus repo. Since Coral is its own sibling repo, this almost certainly belongs there instead.</li>
+    <li><strong>Committed build output:</strong> <code>tests/language/test-deftype/target/</code> (a 2.7MB Mach-O binary + object file) is tracked in git despite <code>target/</code> being in <code>.gitignore</code> — it was force-added before the ignore rule existed. Needs <code>git rm --cached</code>, not a gitignore change.</li>
+    <li>Root also carries 5-month-stale generated artifacts that should be regenerated-on-demand or deleted: <code>test-metrics/</code>, <code>test-reports/</code>, <code>test_failures.log</code>, plus a personal debugging script <code>trace_double_free.sh</code> hardcoded to an unrelated external path.</li>
+  </ul>
+</section>
+
+<section id="roadmap">
+  <div class="section-head"><span class="section-num">08</span><h2>Roadmap to production</h2></div>
+  <p class="section-dek">Ordered by what would most embarrass the "Clojure semantics, uncompromised" pitch if a real user hit it first. Every phase below preserves AOT + JIT and Coral's existing FFI contract — nothing here is a green-field rewrite.</p>
+
+  <div class="roadmap">
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 0 — Stop the bleeding</h3><span class="phase-eta">1–2 weeks</span></div>
+      <p class="goal">Make "it builds, it tests, the docs are true" actually true, before building on top of it.</p>
+      <ul>
+        <li>Fix the <code>test_support</code> module mismatch blocking <code>cargo test --workspace</code> entirely (currently in-progress, uncommitted).</li>
+        <li><code>git rm --cached</code> the tracked <code>test-deftype</code> binaries; delete <code>tests/features/</code> (dead, duplicate, described-but-nonexistent), <code>tests/_archived/</code>, <code>stdlib/_variants/</code>.</li>
+        <li>Rewrite <code>tests/run_all_tests.sh</code> to accumulate failures instead of aborting on the first one — this single change is what makes every later "test coverage" number trustworthy.</li>
+        <li>Commit <code>docs/generated/</code> output (or generate it in CI); fix the 5 broken mkdocs nav links.</li>
+        <li>Archive the 7-file root audit-doc cluster and the pointer-stub docs into one canonical set: this report, plus <code>README.md</code>, <code>docs/LANGUAGE.md</code>, <code>docs/RUST_INTEROP.md</code>, <code>docs/STDLIB.md</code>.</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 1 — Correctness: no hardcoded surprises</h3><span class="phase-eta">3–6 weeks</span></div>
+      <p class="goal">Fix the things that violate Clojure semantics or crash on existing tests, before adding anything new.</p>
+      <ul>
+        <li>Replace mutate-in-place maps/sets with a real persistent HAMT (mirrors the existing vector trie's structural-sharing pattern) — the single highest-leverage fix in the codebase.</li>
+        <li>Root-cause and fix all 4 SIGABRT crashes (<code>test-numeric.clr</code>, the 3 sort/long-tail stdlib tests) — each becomes a permanent regression test in Phase 3.</li>
+        <li>Fix <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>; delete the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs.</li>
+        <li>Give <code>recur</code> self-tail-calls guaranteed TCO (explicit trampoline or LLVM <code>musttail</code>) instead of hoping the optimizer cooperates.</li>
+        <li>Integrate <code>lazy-seq</code> with core <code>seq</code>/<code>first</code>/<code>rest</code>/<code>map</code>/<code>filter</code> instead of a parallel <code>lazy-</code> API.</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 2 — Stdlib completion</h3><span class="phase-eta">4–8 weeks, parallel with Phase 3</span></div>
+      <p class="goal">Close the ~50%→~85% gap on the symbols real Clojure code reaches for constantly.</p>
+      <ul>
+        <li>Fix the stdlib-only multi-arity-closure compiler bug, re-enable the fuller <code>transducers.clr.disabled</code> implementation.</li>
+        <li>Highest-frequency gaps first: a real <code>clojure.string</code> namespace, <code>for</code>, <code>some</code>/<code>peek</code>/<code>pop</code>/<code>find</code>, <code>condp</code>/<code>as-&gt;</code>/<code>cond-&gt;</code>, <code>defn-</code>/<code>in-ns</code>/<code>import</code>, <code>future</code>/<code>promise</code>/<code>pmap</code>, <code>hash</code>/<code>identical?</code>/<code>not=</code>, bit ops, <code>format</code>/<code>pr</code>/<code>prn</code>, <code>memoize</code>/<code>fnil</code>.</li>
+        <li>Extend <code>scripts/docs/build_status.py</code> to compute stdlib coverage against a real symbol list, so the coverage numbers in this report regenerate instead of going stale like their predecessors did.</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 3 — Test coverage for the whole language</h3><span class="phase-eta">3–5 weeks, parallel with Phase 2</span></div>
+      <p class="goal">This is the direct answer to "hope it covers the complete language" — right now it doesn't, and the runner was hiding that fact.</p>
+      <ul>
+        <li>One canonical test tree (Phase 0 already kills the <code>tests/features/</code> duplicate) with a systematic matrix: every special form, every core macro, every stdlib function gets at least one positive case and one edge/error-path case.</li>
+        <li>Every Phase 1 crash fix ships with the crash as a permanent regression test.</li>
+        <li>Grow <code>tests/parity/</code> from 11 cases into a real differential corpus against a JVM Clojure install, so semantic drift (like the map-mutation bug) gets caught automatically instead of by manual audit.</li>
+        <li>Stand up CI (none exists today) gating on: Rust unit tests, the full <code>.clr</code> sweep, and the parity corpus — for both AOT and JIT paths.</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 4 — Rust interop hardening</h3><span class="phase-eta">4–6 weeks</span></div>
+      <p class="goal">Make the actual differentiator live up to "seamless" — and confirm what Coral needs from it today, since it's the one real production consumer.</p>
+      <ul>
+        <li>Audit Coral's actual FFI usage first — it's the only ground truth for what "seamless" needs to mean in practice.</li>
+        <li>Expand the type whitelist: <code>Vec&lt;T&gt;</code>, <code>Option&lt;T&gt;</code>, <code>Result&lt;T,E&gt;</code>, and a path for structs/enums (even if via opaque handles initially).</li>
+        <li>Support impl-block / associated-method APIs, not just top-level <code>pub fn</code> — most real Rust crates are exactly the shape currently rejected.</li>
+        <li>Investigate a Rust→Clorus embedding API if Coral needs one; document the supported FFI surface precisely so "should work" stops being the answer.</li>
+      </ul>
+    </div>
+    <div class="phase">
+      <div class="phase-head"><h3>Phase 5 — Docs &amp; release readiness</h3><span class="phase-eta">2–3 weeks, mostly parallel</span></div>
+      <p class="goal">Land the single-source-of-truth model the repo already half-built.</p>
+      <ul>
+        <li>Final doc set: <code>README.md</code>, <code>docs/LANGUAGE.md</code>, <code>docs/RUST_INTEROP.md</code>, <code>docs/STDLIB.md</code>, <code>docs/ROADMAP.md</code>, generated status committed and CI-refreshed. Everything else lives under <code>docs/archive/</code> or is deleted.</li>
+        <li>Move <code>docs/gui/</code> (Coral content) into the Coral repo.</li>
+        <li>Rewrite the root README against measured numbers from this report, not the current aspirational "~75–80% parity" figure.</li>
+        <li>Add a LICENSE (none currently exists) and a CHANGELOG once the version starts moving past 0.1.0.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <p>Every status above was verified by reading source (<code>crates/*/src</code>, <code>stdlib/</code>, <code>tests/</code>) and by actually running <code>cargo build</code>, <code>cargo test --lib</code>, and the <code>.clr</code> suite directly — not by trusting the repo's existing documentation, several files of which assert numbers this audit could not reproduce.</p>
+    <div class="sources">crates/clorus-{syntax,codegen,runtime,cli,ffi-gen,types,std} · stdlib/clorus/*.clr · tests/{language,stdlib,compiler,integration}/ · cargo 1.93.0, LLVM 18</div>
+  </div>
+</footer>
