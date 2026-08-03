@@ -917,8 +917,8 @@ pub extern "C" fn clorus_extract_opaque_pointer(val: *mut Value) -> *mut u8 {
 
 /// Check if a Value is truthy (for if/when/etc.)
 /// Returns 1 for truthy, 0 for falsy
-/// Falsy values: nil, false, 0 (as Long or Double)
-/// Everything else is truthy
+/// Falsy values: nil, false. Everything else is truthy (matches Clojure
+/// semantics -- 0, 0.0, "", and empty collections are all truthy).
 #[no_mangle]
 pub extern "C" fn clorus_is_truthy(val: *mut Value) -> i32 {
     if val.is_null() {
@@ -930,15 +930,7 @@ pub extern "C" fn clorus_is_truthy(val: *mut Value) -> i32 {
             ValueTag::Bool => {
                 if (*val).as_bool() { 1 } else { 0 }
             }
-            ValueTag::Long => {
-                let n = (*val).as_long();
-                if n == 0 { 0 } else { 1 }
-            }
-            ValueTag::Double => {
-                let n = (*val).as_double();
-                if n == 0.0 { 0 } else { 1 }
-            }
-            _ => 1, // Everything else is truthy (strings, vectors, functions, etc.)
+            _ => 1, // Everything else is truthy (numbers, strings, vectors, functions, etc.)
         }
     }
 }

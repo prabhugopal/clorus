@@ -1,0 +1,26 @@
+(ns tests.language.test-truthy-semantics)
+
+;; Regression test: clorus_is_truthy special-cased 0 and 0.0 as falsy.
+;; Real Clojure semantics: only nil and false are falsy -- every other
+;; value, including 0, 0.0, "", and empty collections, is truthy.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "0 is truthy" (if 0 :truthy :falsy) :truthy)
+    (assert-eq "0.0 is truthy" (if 0.0 :truthy :falsy) :truthy)
+    (assert-eq "-0.0 is truthy" (if -0.0 :truthy :falsy) :truthy)
+    (assert-eq "empty string is truthy" (if "" :truthy :falsy) :truthy)
+    (assert-eq "empty vector is truthy" (if [] :truthy :falsy) :truthy)
+    (assert-eq "empty map is truthy" (if {} :truthy :falsy) :truthy)
+    (assert-eq "empty list is truthy" (if (list) :truthy :falsy) :truthy)
+    (assert-eq "nil is falsy" (if nil :truthy :falsy) :falsy)
+    (assert-eq "false is falsy" (if false :truthy :falsy) :falsy)
+    (assert-eq "and short-circuits on false, not on 0" (and 0 1 2) 2)
+    (assert-eq "or picks 0 as truthy value" (or false 0) 0)
+    (assert-eq "when with 0 body runs" (when 0 :ran) :ran)
+    "PASS"))
