@@ -1932,6 +1932,33 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_pointer_value())
             }
 
+            "merge" => {
+                // (merge m1 m2 ...): idiomatic variadic call. clorus_map_merge
+                // itself takes a single vector-of-maps argument (later maps'
+                // keys win), so pack the call-site args into one here rather
+                // than requiring callers to write (merge [m1 m2 ...]).
+                let mut map_values = Vec::with_capacity(args.len());
+                for arg in args {
+                    map_values.push(self.compile_expr(arg)?);
+                }
+                let maps_vec = self.build_rest_vector_from_values(&map_values)?;
+
+                let merge_fn = self
+                    .module
+                    .get_function("clorus_map_merge")
+                    .ok_or("clorus_map_merge not declared")?;
+                let result = self
+                    .builder
+                    .build_call(merge_fn, &[maps_vec.into()], "merge_call")
+                    .unwrap();
+
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+
             "agent" => {
                 // agent takes 1 arg: initial value
                 if args.len() != 1 {

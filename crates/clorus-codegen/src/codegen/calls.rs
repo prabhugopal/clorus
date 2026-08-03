@@ -200,7 +200,9 @@ impl<'ctx> CodeGen<'ctx> {
             ("last", "clorus_last", 1),
             ("keys", "clorus_map_keys", 1),
             ("vals", "clorus_map_vals", 1),
-            ("merge", "clorus_map_merge", 1),
+            // "merge" is deliberately not here: it's variadic
+            // ((merge m1 m2 ...)), not a fixed 1-arg passthrough -- see
+            // its dedicated case in compile_core_call.
             ("distinct", "clorus_distinct", 1),
             ("dedupe", "clorus_dedupe", 1),
             ("flatten", "clorus_flatten", 1),
