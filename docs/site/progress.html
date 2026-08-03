@@ -203,7 +203,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
 
 <header class="masthead">
   <div class="wrap">
-    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · UPDATED 2026-08-02</div>
+    <div class="eyebrow"><span class="dot"></span> STATUS REPORT · VERIFIED AGAINST SOURCE, NOT DOCS · UPDATED 2026-08-03</div>
     <h1 class="title">Clorus<span class="lang">.</span> Progress</h1>
     <p class="tagline">Clojure semantics at native speed, with Rust interop as a first-class citizen — the same bet <a href="https://jank-lang.org/progress/" target="_blank" rel="noopener">jank</a> makes with C++. This is where that bet actually stands today.</p>
     <div class="meta-row">
@@ -317,11 +317,11 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
       <p><code>dosync</code> now actually retries the transaction body on commit conflict instead of silently continuing with a stale result (the prior TODO literally said "just continue after abort"). <code>commute</code> now has real deferred, replay-at-commit semantics instead of being an alias for <code>alter</code>. <code>PersistentVector</code> no longer corrupts <code>nth</code> past 1,024 elements (a raw leaf was being written where a subtree belonged). <code>alter</code>/<code>send</code>/agent dispatch no longer hardcode "named top-level function, ≤2 extra args" — closures, vars, and any arity now work. <code>alts!!</code> no longer busy-polls every 100μs. All verified with new passing unit tests and a clean 475/0 <code>cargo test --workspace</code> run.</p>
     </div>
   </div>
-  <div class="bug warn">
-    <div class="stripe"></div>
+  <div class="bug" style="border-color:var(--good)">
+    <div class="stripe" style="background:var(--good)"></div>
     <div class="bug-body">
-      <div class="bug-head"><span class="sev">Correctness · hardcoded</span><h4><code>merge</code> silently requires args wrapped in a vector</h4></div>
-      <p><code class="loc">clorus-codegen/src/codegen/calls.rs:16–18,203</code> — arity is hardcoded to exactly 1 argument, dispatching to a runtime function expecting a vector-of-maps. Idiomatic <code>(merge m1 m2)</code> errors; the only passing test writes <code>(merge [m1 m2])</code>. <code>keys</code>/<code>vals</code> are separately defined twice (native + shadowed stdlib) — dead code, not a bug, but exactly the kind of surprise that erodes trust in the builtin set.</p>
+      <div class="bug-head"><span class="sev" style="color:var(--good)">Fixed 2026-08-03</span><h4><code>merge</code> no longer requires args wrapped in a vector</h4></div>
+      <p>Was hardcoded to exactly 1 argument, dispatching straight to a runtime function expecting a vector-of-maps — idiomatic <code>(merge m1 m2)</code> errored, only <code>(merge [m1 m2])</code> worked. <code>merge</code> now gets its own variadic case in <code>compile_core_call</code>, packing call-site args into the vector <code>clorus_map_merge</code> already expects via the same <code>build_rest_vector_from_values</code> helper the variadic recur-TCO fix uses. <code>keys</code>/<code>vals</code> being defined twice (native + shadowed stdlib) is still dead code, not fixed — low priority, harmless.</p>
     </div>
   </div>
   <div class="bug" style="border-color:var(--good)">
@@ -456,7 +456,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
         <li><span class="pill broken">next up</span> The Apple-Silicon FFI-inside-<code>let</code> pointer corruption (<code>repros/codegen-bug-minimal-repro.clrs</code>) — highest priority given it's the one bug here with a live first-party victim (Coral).</li>
         <li><span class="pill implemented">done</span> Maps/sets replaced with a real persistent HAMT (mirrors the vector trie's structural-sharing pattern) — was the single highest-leverage semantics fix on this page.</li>
         <li>Root-cause and fix the 5 remaining failing tests (<code>test-numeric.clr</code> and 4 stdlib long-tail/sort tests) — each becomes a permanent regression test in Phase 3.</li>
-        <li>Fix <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>; delete the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs.</li>
+        <li><span class="pill implemented">done</span> Fixed <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>. Deleting the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs is still open (harmless, low priority).</li>
         <li><span class="pill implemented">done</span> <code>recur</code> self-tail-calls now have guaranteed TCO (implicit phi-node loop, same mechanism as <code>loop</code>) instead of hoping the optimizer cooperates — fixed-arity, multi-arity, variadic, and <code>letfn</code> all covered.</li>
         <li>Integrate <code>lazy-seq</code> with core <code>seq</code>/<code>first</code>/<code>rest</code>/<code>map</code>/<code>filter</code> instead of a parallel <code>lazy-</code> API.</li>
       </ul>
