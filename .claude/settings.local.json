@@ -257,7 +257,12 @@
       "Bash(CLORUS_ENTRY_FILE=/tmp/numeric_tm.clr timeout 10 ./target/release/clorus run)",
       "Bash(CLORUS_ENTRY_FILE=/tmp/numeric_tn.clr timeout 10 ./target/release/clorus run)",
       "Bash(CLORUS_DEBUG_TAG=Double CLORUS_ENTRY_FILE=/tmp/numeric_td.clr timeout 10 ./target/release/clorus run)",
-      "Bash(CLORUS_ENTRY_FILE=tests/language/test-let-symbol-alias-refcount.clr timeout 10 ./target/release/clorus run)"
+      "Bash(CLORUS_ENTRY_FILE=tests/language/test-let-symbol-alias-refcount.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/merge_check.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=/tmp/merge_check2.clr timeout 10 ./target/release/clorus run)",
+      "Bash(CLORUS_ENTRY_FILE=tests/stdlib/test-core-merge.clr timeout 10 ./target/release/clorus run)",
+      "Bash(/Users/prabhugopal/Workspace/github/clorus/target/release/clorus run *)",
+      "Bash(CLORUS_TEST_ENGINES=\"jit legacy\" CLORUS_TEST_TIMEOUT_SECONDS=15 CLORUS_TEST_JOBS=1 timeout 280 ./tests/run_all_tests.sh)"
     ]
   }
 }

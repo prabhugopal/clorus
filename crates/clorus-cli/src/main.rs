@@ -1,6 +1,7 @@
 use clorus_cli::{commands, pack};
 
-use std::env;
+use clap::{Parser, Subcommand, ValueEnum};
+use std::process::ExitCode;
 
 // Import Value FFI types from runtime
 use clorus_runtime::value::Value;
@@ -40,230 +41,177 @@ static FORCE_LINK_PROTOCOL_SATISFIES: extern "C" fn(*const std::ffi::c_char, *co
 static FORCE_LINK_GENSYM: extern "C" fn(*const std::ffi::c_char) -> *mut Value =
     clorus_runtime::value::clorus_gensym;
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
+#[derive(Parser)]
+#[command(
+    name = "clorus",
+    version,
+    about = "A Clojure-inspired systems programming language",
+    after_help = "See https://github.com/yourusername/clorus for more information"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
 
-    if args.len() < 2 {
-        print_help();
-        return;
-    }
+#[derive(Clone, Copy, ValueEnum)]
+enum TemplateArg {
+    Basic,
+    RustInterop,
+}
 
-    let result = match args[1].as_str() {
-        "new" => {
-            if args.len() < 3 {
-                eprintln!("Error: 'clorus new' requires a project name");
-                eprintln!("Usage: clorus new <name> [--template basic|rust-interop] [--rust-interop]");
-                std::process::exit(1);
-            }
+#[derive(Subcommand)]
+enum Command {
+    /// Create a new Clorus project
+    #[command(after_help = "EXAMPLES:\n    clorus new my-project\n    clorus new my-app --rust-interop\n    clorus new my-app --template rust-interop")]
+    New {
+        /// Project name
+        name: String,
+        /// Project template
+        #[arg(long, value_enum)]
+        template: Option<TemplateArg>,
+        /// Shortcut for --template rust-interop
+        #[arg(long = "rust-interop")]
+        rust_interop: bool,
+    },
+    /// Compile the current project
+    Build {
+        /// Build all workspace members
+        #[arg(long)]
+        workspace: bool,
+        /// Enable debug mode (memory tracking)
+        #[arg(short, long)]
+        debug: bool,
+    },
+    /// Run the current project (JIT by default)
+    #[command(after_help = "EXAMPLES:\n    clorus run                  Run with JIT (default)\n    clorus run --legacy-run     Run with legacy compile+execute path\n    clorus run arg1 arg2        Run with arguments passed to -main\n    clorus run --debug          Run with memory tracking")]
+    Run {
+        /// Enable debug mode (memory tracking)
+        #[arg(short, long)]
+        debug: bool,
+        /// Use legacy compile+run path instead of JIT
+        #[arg(long = "legacy-run")]
+        legacy_run: bool,
+        /// Force JIT (the default; kept for backward compatibility)
+        #[arg(long)]
+        jit: bool,
+        /// Entry file override and/or arguments passed to -main
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Check syntax without building
+    Check,
+    /// Remove build artifacts (target/)
+    Clean {
+        /// Clean all workspace members
+        #[arg(long)]
+        workspace: bool,
+    },
+    /// Start an interactive REPL
+    Repl {
+        /// Run on main thread (for GUI on macOS)
+        #[arg(long = "main-thread")]
+        main_thread: bool,
+    },
+    /// Start extended REPL (smart, adaptive)
+    Replx {
+        /// --main-thread, --warn, --silent, --no-adapt, --no-gui-detach
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Package project as a .clip library
+    #[command(after_help = "WORKSPACE EXAMPLES:\n    clorus pack --workspace     Package all libraries to dist/")]
+    Pack {
+        /// Package all workspace libraries
+        #[arg(long)]
+        workspace: bool,
+        /// Output directory (workspace only)
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Install a .clip package
+    Install {
+        /// Path to the .clip file
+        path: String,
+        /// Install to project (default: global)
+        #[arg(long)]
+        local: bool,
+    },
+    /// Print version information
+    Version,
+}
 
-            let mut template = commands::NewTemplate::Basic;
-            let mut i = 3usize;
-            while i < args.len() {
-                match args[i].as_str() {
-                    "--rust-interop" => {
-                        template = commands::NewTemplate::RustInterop;
-                        i += 1;
-                    }
-                    "--template" => {
-                        let value = args.get(i + 1).ok_or_else(|| {
-                            "Missing template value after --template (expected basic or rust-interop)"
-                                .to_string()
-                        });
-                        match value {
-                            Ok(v) => {
-                                template = match v.as_str() {
-                                    "basic" => commands::NewTemplate::Basic,
-                                    "rust-interop" => commands::NewTemplate::RustInterop,
-                                    other => {
-                                        return eprintln_and_exit(format!(
-                                            "Unknown template '{}'. Expected: basic, rust-interop",
-                                            other
-                                        ));
-                                    }
-                                };
-                                i += 2;
-                            }
-                            Err(e) => return eprintln_and_exit(e),
-                        }
-                    }
-                    unknown => {
-                        return eprintln_and_exit(format!(
-                            "Unknown option for 'new': {}",
-                            unknown
-                        ));
-                    }
-                }
-            }
+fn main() -> ExitCode {
+    let cli = Cli::parse();
 
-            commands::new_with_template(&args[2], template)
+    let command = match cli.command {
+        Some(command) => command,
+        None => {
+            let _ = <Cli as clap::CommandFactory>::command().print_help();
+            println!();
+            return ExitCode::SUCCESS;
         }
-        "build" => {
-            // Check for --workspace flag
-            let is_workspace = args.iter().any(|arg| arg == "--workspace");
-            let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
+    };
 
-            if is_workspace {
+    let result = match command {
+        Command::New {
+            name,
+            template,
+            rust_interop,
+        } => {
+            let resolved_template = match template {
+                Some(TemplateArg::Basic) => commands::NewTemplate::Basic,
+                Some(TemplateArg::RustInterop) => commands::NewTemplate::RustInterop,
+                None if rust_interop => commands::NewTemplate::RustInterop,
+                None => commands::NewTemplate::Basic,
+            };
+            commands::new_with_template(&name, resolved_template)
+        }
+        Command::Build { workspace, debug } => {
+            if workspace {
                 commands::build_workspace(debug)
             } else {
                 commands::build()
             }
         }
-        "run" => {
-            // Check for flags
-            let debug = args.iter().any(|arg| arg == "--debug" || arg == "-d");
-            // JIT is now the default execution path for `clorus run`.
-            // `--legacy-run` forces the pre-JIT compile+execute path.
-            let use_jit = !args.iter().any(|arg| arg == "--legacy-run");
-
-            // Collect arguments after "run" (excluding flags)
-            let extra_args: Vec<String> = args[2..]
-                .iter()
-                .filter(|arg| {
-                    *arg != "--debug"
-                        && *arg != "-d"
-                        && *arg != "--jit"
-                        && *arg != "--legacy-run"
-                })
-                .map(|s| s.clone())
-                .collect();
-
-            commands::run(debug, use_jit, extra_args)
+        Command::Run {
+            debug,
+            legacy_run,
+            jit: _,
+            args,
+        } => {
+            // JIT is the default execution path; --legacy-run forces the
+            // pre-JIT compile+execute path. --jit is accepted for backward
+            // compatibility but is a no-op (it was always the default).
+            commands::run(debug, !legacy_run, args)
         }
-        "check" => commands::check(),
-        "clean" => {
-            // Check for --workspace flag
-            let is_workspace = args.iter().any(|arg| arg == "--workspace");
-
-            if is_workspace {
+        Command::Check => commands::check(),
+        Command::Clean { workspace } => {
+            if workspace {
                 commands::clean_workspace()
             } else {
                 commands::clean()
             }
         }
-        "repl" => {
-            // Check for --main-thread flag
-            let main_thread = args.iter().any(|arg| arg == "--main-thread");
-            commands::repl(main_thread)
-        }
-        "replx" => {
-            // Extended REPL with smart adaptive execution
-            commands::replx(&args[2..])
-        }
-        "pack" => {
-            // Check for --workspace flag
-            let is_workspace = args.iter().any(|arg| arg == "--workspace");
-
-            if is_workspace {
-                // Parse --output flag for workspace pack
-                let output = args.iter()
-                    .position(|arg| arg == "--output")
-                    .and_then(|i| args.get(i + 1))
-                    .map(|s| s.clone());
-
+        Command::Repl { main_thread } => commands::repl(main_thread),
+        Command::Replx { args } => commands::replx(&args),
+        Command::Pack { workspace, output } => {
+            if workspace {
                 commands::pack_workspace(output)
             } else {
-                // Parse --output flag for single pack
-                let output = if args.len() >= 4 && args[2] == "--output" {
-                    Some(args[3].clone())
-                } else {
-                    None
-                };
                 pack::pack(output)
             }
         }
-        "install" => {
-            if args.len() < 3 {
-                eprintln!("Error: 'clorus install' requires a .clip file path");
-                eprintln!("Usage: clorus install <path-to-clip>");
-                std::process::exit(1);
-            }
-            let local = args.iter().any(|arg| arg == "--local");
-            pack::install(&args[2], local)
-        }
-        "help" | "--help" | "-h" => {
-            print_help();
-            return;
-        }
-        "version" | "--version" | "-V" => {
+        Command::Install { path, local } => pack::install(&path, local),
+        Command::Version => {
             println!("clorus {}", env!("CARGO_PKG_VERSION"));
-            return;
-        }
-        cmd => {
-            eprintln!("Error: unknown command '{}'", cmd);
-            eprintln!();
-            eprintln!("Usage: clorus <command>");
-            eprintln!();
-            eprintln!("Run 'clorus help' for more information");
-            std::process::exit(1);
+            return ExitCode::SUCCESS;
         }
     };
 
     if let Err(e) = result {
         eprintln!("Error: {}", e);
-        std::process::exit(1);
+        return ExitCode::FAILURE;
     }
-}
 
-fn print_help() {
-    println!("Clorus {}", env!("CARGO_PKG_VERSION"));
-    println!("A Clojure-inspired systems programming language");
-    println!();
-    println!("USAGE:");
-    println!("    clorus <command> [options]");
-    println!();
-    println!("COMMANDS:");
-    println!("    new <name>    Create a new Clorus project");
-    println!("                    --template basic|rust-interop");
-    println!("                    --rust-interop  Shortcut for --template rust-interop");
-    println!("    build         Compile the current project");
-    println!("                    --workspace  Build all workspace members");
-    println!("    run           Run the current project (JIT by default)");
-    println!("                    --legacy-run  Use legacy compile+run path");
-    println!("    check         Check syntax without building");
-    println!("    clean         Remove build artifacts");
-    println!("                    --workspace  Clean all workspace members");
-    println!("    pack          Package project as .clip library");
-    println!("                    --workspace  Package all workspace libraries");
-    println!("                    --output <dir>  Output directory (workspace only)");
-    println!("    install       Install a .clip package");
-    println!("                    --local  Install to project (default: global)");
-    println!("    repl          Start an interactive REPL");
-    println!("                    --main-thread  Run on main thread (for GUI on macOS)");
-    println!("    replx         Start extended REPL (smart, adaptive)");
-    println!("                    --main-thread  Run on main thread");
-    println!("                    --warn         Warn only, don't auto-fix");
-    println!("                    --silent       Auto-fix silently");
-    println!("                    --no-adapt     Disable adaptive features");
-    println!("    help          Print this help message");
-    println!("    version       Print version information");
-    println!();
-    println!("OPTIONS:");
-    println!("    -h, --help       Print help information");
-    println!("    -V, --version    Print version information");
-    println!("    -d, --debug      Enable debug mode (memory tracking)");
-    println!("    --workspace      Apply command to all workspace members");
-    println!();
-    println!("EXAMPLES:");
-    println!("    clorus new my-project       Create a new project");
-    println!("    clorus new my-app --rust-interop  Create crates.io Rust interop starter");
-    println!("    clorus new my-app --template rust-interop");
-    println!("    clorus run                  Run with JIT (default)");
-    println!("    clorus run --legacy-run     Run with legacy compile+execute path");
-    println!("    clorus run arg1 arg2        Run with arguments passed to -main");
-    println!("    clorus run --debug          Run with memory tracking");
-    println!("    clorus pack                 Package as a .clip library");
-    println!("    clorus check                Check for syntax errors");
-    println!("    clorus clean                Remove build artifacts (target/)");
-    println!();
-    println!("WORKSPACE EXAMPLES:");
-    println!("    clorus build --workspace    Build all workspace members");
-    println!("    clorus pack --workspace     Package all libraries to dist/");
-    println!("    clorus clean --workspace    Clean all workspace members");
-    println!();
-    println!("See https://github.com/yourusername/clorus for more information");
-}
-
-fn eprintln_and_exit(message: String) {
-    eprintln!("Error: {}", message);
-    std::process::exit(1);
+    ExitCode::SUCCESS
 }
