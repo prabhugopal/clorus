@@ -223,6 +223,44 @@ impl RustFfiProcessor {
         matches!(source, RustDepSource::Path(_))
     }
 
+    /// Rust primitive type names. A pointer/reference to one of these is
+    /// deliberately NOT treated as an opaque handle: `*mut i32` is a raw
+    /// pointer to a machine primitive with no ownership story, unlike a
+    /// pointer to a user-defined struct.
+    const FFI_PRIMITIVE_TYPE_NAMES: &'static [&'static str] = &[
+        "f32", "f64", "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "isize", "usize",
+        "bool", "str", "()",
+    ];
+
+    /// Recognizes `*mut Name`, `*const Name`, `&Name`, `&mut Name` for an
+    /// arbitrary named (non-primitive) type. These all carry a plain pointer
+    /// at the C ABI boundary; the wrapper casts/derefs back to the exact
+    /// Rust type before calling the original function.
+    fn is_opaque_pointer_type_name(type_name: &str) -> bool {
+        let pointee = type_name
+            .strip_prefix("*mut ")
+            .or_else(|| type_name.strip_prefix("*const "))
+            .or_else(|| type_name.strip_prefix("&mut "))
+            .or_else(|| type_name.strip_prefix('&'));
+        match pointee {
+            Some(name) => {
+                !name.is_empty()
+                    && !Self::FFI_PRIMITIVE_TYPE_NAMES.contains(&name)
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+            }
+            None => false,
+        }
+    }
+
+    /// A bare Rust reference (`&T` / `&mut T`) is only safe as a parameter:
+    /// the caller's value outlives the call. Returning one from an
+    /// `extern "C" fn` would create a dangling reference the moment the
+    /// call returns, so it is rejected even though it's accepted as a param.
+    fn is_borrowed_reference_type_name(type_name: &str) -> bool {
+        type_name != "&str" && (type_name.starts_with('&'))
+    }
+
     fn is_supported_ffi_type(type_name: &str) -> bool {
         matches!(
             type_name,
@@ -244,7 +282,11 @@ impl RustFfiProcessor {
                 | "()"
                 | "*mut u8"
                 | "*const u8"
-        )
+        ) || Self::is_opaque_pointer_type_name(type_name)
+    }
+
+    fn is_supported_ffi_return_type(type_name: &str) -> bool {
+        Self::is_supported_ffi_type(type_name) && !Self::is_borrowed_reference_type_name(type_name)
     }
 
     fn unsupported_signature_reason(function: &FunctionInfo) -> Option<String> {
@@ -257,10 +299,15 @@ impl RustFfiProcessor {
             }
         }
 
-        if !Self::is_supported_ffi_type(&function.return_type) {
+        if !Self::is_supported_ffi_return_type(&function.return_type) {
+            let reason = if Self::is_borrowed_reference_type_name(&function.return_type) {
+                " (returning a borrowed reference from an FFI function is unsound; return an owned pointer instead)"
+            } else {
+                ""
+            };
             return Some(format!(
-                "{}: unsupported return type `{}`",
-                function.name, function.return_type
+                "{}: unsupported return type `{}`{}",
+                function.name, function.return_type, reason
             ));
         }
 
@@ -445,7 +492,7 @@ impl RustFfiProcessor {
                 f.params
                     .iter()
                     .all(|p| Self::is_supported_ffi_type(&p.type_name))
-                    && Self::is_supported_ffi_type(&f.return_type)
+                    && Self::is_supported_ffi_return_type(&f.return_type)
             })
             .collect();
 
@@ -1318,10 +1365,20 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             "String" => "*mut c_char".to_string(),
             "&str" => "*mut c_char".to_string(),
             "()" => "()".to_string(),
-            "*mut u8" => "*mut u8".to_string(),
-            "*const u8" => "*mut u8".to_string(),
+            // Typed pointers/references (*mut T, *const T, &T, &mut T) all
+            // carry a plain pointer across the C ABI boundary.
             _ => "*mut u8".to_string(),
         }
+    }
+
+    /// Extracts `T` from a `*mut T` / `*const T` / `&T` / `&mut T` type name
+    /// produced by the analyzer's `type_to_string`.
+    fn opaque_pointee_type(rust_type: &str) -> Option<&str> {
+        rust_type
+            .strip_prefix("*mut ")
+            .or_else(|| rust_type.strip_prefix("*const "))
+            .or_else(|| rust_type.strip_prefix("&mut "))
+            .or_else(|| rust_type.strip_prefix('&'))
     }
 
     fn c_to_rust_conversion(name: &str, rust_type: &str) -> String {
@@ -1341,6 +1398,28 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 "    let {}_rust_owned = unsafe {{ CStr::from_ptr({} as *const c_char).to_string_lossy().to_string() }};\n    let {}_rust = {}_rust_owned.as_str();",
                 name, name, name, name
             ),
+            _ if rust_type.starts_with("*mut ") => {
+                let pointee = Self::opaque_pointee_type(rust_type).unwrap();
+                format!("    let {}_rust = {} as *mut {};", name, name, pointee)
+            }
+            _ if rust_type.starts_with("*const ") => {
+                let pointee = Self::opaque_pointee_type(rust_type).unwrap();
+                format!("    let {}_rust = {} as *const {};", name, name, pointee)
+            }
+            _ if rust_type.starts_with("&mut ") => {
+                let pointee = Self::opaque_pointee_type(rust_type).unwrap();
+                format!(
+                    "    let {}_rust: &mut {} = unsafe {{ &mut *({} as *mut {}) }};",
+                    name, pointee, name, pointee
+                )
+            }
+            _ if rust_type.starts_with('&') => {
+                let pointee = Self::opaque_pointee_type(rust_type).unwrap();
+                format!(
+                    "    let {}_rust: &{} = unsafe {{ &*({} as *const {}) }};",
+                    name, pointee, name, pointee
+                )
+            }
             _ => format!("    let {}_rust = {};", name, name),
         }
     }
@@ -1364,6 +1443,8 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 name
             ),
             "()" => "".to_string(),
+            // Bare reference return types are rejected upstream by
+            // is_supported_ffi_return_type, so only *mut T/*const T reach here.
             _ => format!("    {} as *mut u8", name),
         }
     }
@@ -6219,6 +6300,119 @@ auto-parse-mixed-lib = { path = "auto-parse-mixed-lib" }
         assert!(
             generated.contains("unsafe { CString::new(result).unwrap().into_raw() }"),
             "expected borrowed-str return conversion in generated wrapper:\n{}",
+            generated
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_supports_typed_pointers_and_references() {
+        // Regression coverage: idiomatic Rust APIs pass typed pointers/references
+        // to named structs (not just raw *mut u8 blobs), e.g. `&mut Counter`,
+        // `&Counter`, `*mut Counter`. These must auto-wrap as opaque handles, and
+        // a bare reference RETURN type must stay rejected (it would dangle the
+        // instant an extern "C" fn returns).
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_autoparse_typed_ptr_{}", unique));
+        let dep_dir = root.join("typed-ptr-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "typed-ptr-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Counter { pub value: i64 }
+pub fn make_counter() -> *mut Counter { Box::into_raw(Box::new(Counter { value: 0 })) }
+pub fn bump(c: &mut Counter) -> f64 { c.value += 1; c.value as f64 }
+pub fn peek(c: &Counter) -> f64 { c.value as f64 }
+pub fn dangling_ref(c: &mut Counter) -> &Counter { c }
+pub fn only_bad_ptr(p: *mut i32) -> *mut i32 { p }
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+typed-ptr-lib = { path = "typed-ptr-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"make_counter"));
+        assert!(names.contains(&"bump"));
+        assert!(names.contains(&"peek"));
+        // A bare reference return type is unsound across FFI; must be filtered out.
+        assert!(!names.contains(&"dangling_ref"));
+        // A pointer to a primitive is not an opaque handle; must stay rejected too.
+        assert!(!names.contains(&"only_bad_ptr"));
+
+        let make_counter = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "make_counter")
+            .expect("make_counter function should exist");
+        assert_eq!(make_counter.return_type, "*mut Counter");
+
+        let bump = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "bump")
+            .expect("bump function should exist");
+        assert_eq!(bump.params[0].type_name, "&mut Counter");
+
+        let peek = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "peek")
+            .expect("peek function should exist");
+        assert_eq!(peek.params[0].type_name, "&Counter");
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("typed_ptr_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src)
+            .unwrap_or_else(|e| panic!("read generated wrapper {}: {}", wrapper_src.display(), e));
+        assert!(
+            generated.contains("unsafe { &mut *(c as *mut Counter) }"),
+            "expected &mut T param deref in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("unsafe { &*(c as *const Counter) }"),
+            "expected &T param deref in generated wrapper:\n{}",
             generated
         );
 

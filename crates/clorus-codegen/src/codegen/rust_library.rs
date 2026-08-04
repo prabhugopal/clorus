@@ -96,6 +96,7 @@ impl<'ctx> CodeGen<'ctx> {
                     "i64" | "u64" | "isize" | "usize" => i64_type.into(),
                     "bool" => self.context.bool_type().into(),
                     "*mut u8" | "*const u8" => i8_ptr_type.into(), // Opaque pointers
+                    other if Self::is_opaque_ffi_pointer_type_name(other) => i8_ptr_type.into(),
                     other => return Err(format!("Unsupported parameter type in FFI: {}", other)),
                 };
                 param_types.push(llvm_type);
@@ -111,6 +112,9 @@ impl<'ctx> CodeGen<'ctx> {
                 "bool" => self.context.bool_type().fn_type(&param_types, false),
                 "()" => self.context.void_type().fn_type(&param_types, false),
                 "*mut u8" | "*const u8" => i8_ptr_type.fn_type(&param_types, false), // Opaque pointers
+                other if Self::is_opaque_ffi_pointer_type_name(other) => {
+                    i8_ptr_type.fn_type(&param_types, false)
+                }
                 other => return Err(format!("Unsupported return type in FFI: {}", other)),
             };
 

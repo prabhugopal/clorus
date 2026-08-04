@@ -221,6 +221,12 @@ impl<'ctx> CodeGen<'ctx> {
                     // Extract pointer from Value*
                     self.extract_pointer_from_value(arg_val).into()
                 }
+                other if Self::is_opaque_ffi_pointer_type_name(other) => {
+                    // Typed pointer/reference to a named Rust type (*mut T, *const T,
+                    // &T, &mut T). Carried as a plain pointer; the generated wrapper
+                    // casts/derefs it back to the exact Rust type.
+                    self.extract_pointer_from_value(arg_val).into()
+                }
                 other => return Err(format!("Unsupported parameter type: {}", other)),
             };
 
@@ -351,7 +357,47 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_pointer_value();
                 Ok(self.box_pointer(ptr))
             }
+            other if Self::is_opaque_ffi_pointer_type_name(other) => {
+                // Typed pointer to a named Rust type (*mut T / *const T). Bare
+                // reference return types are rejected upstream, before codegen.
+                let ptr = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                Ok(self.box_pointer(ptr))
+            }
             other => Err(format!("Unsupported return type: {}", other)),
+        }
+    }
+
+    /// Rust primitive type names -- a pointer/reference to one of these is
+    /// deliberately not treated as an opaque handle (kept in sync with
+    /// clorus-cli's rust_ffi::RustFfiProcessor::FFI_PRIMITIVE_TYPE_NAMES,
+    /// the source of truth for which type-name strings reach codegen).
+    const FFI_PRIMITIVE_TYPE_NAMES: &'static [&'static str] = &[
+        "f32", "f64", "i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "isize", "usize",
+        "bool", "str", "()",
+    ];
+
+    /// Recognizes `*mut Name`, `*const Name`, `&Name`, `&mut Name` for an
+    /// arbitrary named (non-primitive) Rust type -- all carried as a plain
+    /// opaque pointer at the C ABI boundary. Mirrors clorus-cli's rust_ffi
+    /// analyzer, which is the source of these type-name strings.
+    pub(super) fn is_opaque_ffi_pointer_type_name(type_name: &str) -> bool {
+        let pointee = type_name
+            .strip_prefix("*mut ")
+            .or_else(|| type_name.strip_prefix("*const "))
+            .or_else(|| type_name.strip_prefix("&mut "))
+            .or_else(|| type_name.strip_prefix('&'));
+        match pointee {
+            Some(name) => {
+                !name.is_empty()
+                    && !Self::FFI_PRIMITIVE_TYPE_NAMES.contains(&name)
+                    && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                    && name.chars().next().is_some_and(|c| !c.is_ascii_digit())
+            }
+            None => false,
         }
     }
 

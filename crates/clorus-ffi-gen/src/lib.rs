@@ -122,6 +122,12 @@ impl FfiGenerator {
                     .replace(' ', "");
                 if reference.mutability.is_none() && pointee == "str" {
                     "&str".to_string()
+                } else if pointee.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                    // Opaque reference to a named type, e.g. &Counter / &mut Counter.
+                    // Treated as a borrowed opaque pointer: the wrapper dereferences
+                    // it back to a real Rust reference before calling the original fn.
+                    let prefix = if reference.mutability.is_some() { "&mut " } else { "&" };
+                    format!("{}{}", prefix, pointee)
                 } else {
                     "unknown".to_string()
                 }
