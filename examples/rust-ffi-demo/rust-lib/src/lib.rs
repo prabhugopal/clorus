@@ -2,8 +2,6 @@
 ///
 /// These functions will be automatically wrapped for Clorus
 
-pub mod ffi;
-
 /// Simple arithmetic function
 pub fn add(x: f64, y: f64) -> f64 {
     x + y
