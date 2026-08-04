@@ -25,6 +25,9 @@ test-*.clr.out
 .vscode/
 .idea/
 
+# Claude Code local settings (per-developer, not shared)
+.claude/settings.local.json
+
 
 # Organized structure - ignore build artifacts
 organize-repo.sh
