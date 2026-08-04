@@ -487,6 +487,28 @@ impl<'ctx> CodeGen<'ctx> {
             .into_pointer_value()
     }
 
+    /// Helper: Free a heap C string previously produced by `extract_cstring_from_value`
+    /// or returned by a Rust FFI wrapper via `CString::into_raw()`. Must never be called
+    /// on a static/global string pointer (e.g. `build_global_string_ptr` output).
+    pub(super) fn free_c_string(&self, str_ptr: PointerValue<'ctx>) {
+        let free_fn = self
+            .module
+            .get_function("clorus_free_cstring")
+            .expect("clorus_free_cstring not declared - runtime functions not initialized");
+        self.builder
+            .build_call(free_fn, &[str_ptr.into()], "free_c_string")
+            .expect("Failed to build call to clorus_free_cstring");
+    }
+
+    /// Helper: Box a heap-allocated C string (owned via `CString::into_raw()`) into a
+    /// Value*, then free the original C string. `clorus_value_string` copies the bytes
+    /// into a Clorus-managed string, so the source buffer would otherwise leak.
+    pub(super) fn box_owned_c_string(&self, str_ptr: PointerValue<'ctx>) -> PointerValue<'ctx> {
+        let boxed = self.box_string(str_ptr);
+        self.free_c_string(str_ptr);
+        boxed
+    }
+
     /// Helper: Call a runtime function and return pointer result
     /// This encapsulates the common pattern: get_function + build_call + type conversion
     /// Eliminates unwrap/expect boilerplate

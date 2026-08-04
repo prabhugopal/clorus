@@ -151,13 +151,17 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Compile and convert arguments based on parameter types
         let mut ffi_args = Vec::new();
+        let mut owned_cstrings_to_free = Vec::new();
         for (arg_expr, param) in args.iter().zip(&func_meta.params) {
             let arg_val = self.compile_expr(arg_expr)?;
 
             let ffi_arg = match param.type_name.as_str() {
                 "String" => {
-                    // Extract C string from Value*
-                    self.extract_cstring_from_value(arg_val).into()
+                    // Extract C string from Value*. clorus_value_as_cstring allocates a
+                    // fresh CString for this call; it must be freed after the FFI call.
+                    let cstr_ptr = self.extract_cstring_from_value(arg_val);
+                    owned_cstrings_to_free.push(cstr_ptr);
+                    cstr_ptr.into()
                 }
                 "f32" => {
                     let f64_val = self.unbox_number(arg_val);
@@ -237,15 +241,22 @@ impl<'ctx> CodeGen<'ctx> {
             .build_call(ffi_func, &ffi_args, &format!("call_{}", rust_func_name))
             .unwrap();
 
+        // Free the C strings allocated for string arguments now that the call is done.
+        for cstr_ptr in owned_cstrings_to_free {
+            self.free_c_string(cstr_ptr);
+        }
+
         // Convert return value based on return type
         match func_meta.return_type.as_str() {
             "String" => {
+                // Wrapper returns an owned *mut c_char (CString::into_raw()); box it
+                // and free the source buffer.
                 let str_ptr = call_result
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_pointer_value();
-                Ok(self.box_string(str_ptr))
+                Ok(self.box_owned_c_string(str_ptr))
             }
             "f32" => {
                 let f32_val = call_result
@@ -363,6 +374,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Compile and convert arguments based on canonical FFI types
         let mut ffi_args = Vec::new();
+        let mut owned_cstrings_to_free = Vec::new();
         for (arg_expr, param) in args.iter().zip(&func.params) {
             let arg_val = self.compile_expr(arg_expr)?;
 
@@ -394,8 +406,11 @@ impl<'ctx> CodeGen<'ctx> {
                         .into()
                 }
                 FfiType::String => {
-                    // Extract C string from Value*
-                    self.extract_cstring_from_value(arg_val).into()
+                    // Extract C string from Value*. clorus_value_as_cstring allocates a
+                    // fresh CString for this call; it must be freed after the FFI call.
+                    let cstr_ptr = self.extract_cstring_from_value(arg_val);
+                    owned_cstrings_to_free.push(cstr_ptr);
+                    cstr_ptr.into()
                 }
                 FfiType::OpaquePointer { .. } => {
                     // Extract raw pointer from Value*
@@ -427,6 +442,11 @@ impl<'ctx> CodeGen<'ctx> {
             .builder
             .build_call(ffi_func, &ffi_args, &format!("call_{}", func.name))
             .unwrap();
+
+        // Free the C strings allocated for string arguments now that the call is done.
+        for cstr_ptr in owned_cstrings_to_free {
+            self.free_c_string(cstr_ptr);
+        }
 
         // Convert return value based on canonical FFI type
         match &func.return_type {
@@ -467,12 +487,14 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(self.box_number(f64_val))
             }
             FfiType::String => {
+                // Wrapper returns an owned *mut c_char (CString::into_raw()); box it
+                // and free the source buffer.
                 let str_ptr = call_result
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_pointer_value();
-                Ok(self.box_string(str_ptr))
+                Ok(self.box_owned_c_string(str_ptr))
             }
             FfiType::OpaquePointer { .. } => {
                 // Box raw pointer into Value*

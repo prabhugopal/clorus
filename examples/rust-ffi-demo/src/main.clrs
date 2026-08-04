@@ -1,12 +1,32 @@
 ; Test Rust FFI - calling Rust functions from Clorus!
-(use rust.example)
+(use rust.example-rust-lib)
 
 ; Test basic arithmetic from Rust
-(def sum (example/add 10 20))
-(def product (example/multiply 6 7))
+(def sum (example-rust-lib/add 10 20))
+(def product (example-rust-lib/multiply 6 7))
 
 ; Calculate factorial(5) = 120
-(def fact (example/factorial 5))
+(def fact (example-rust-lib/factorial 5))
 
-; Return the factorial result
-fact
+; Test string args/returns across the FFI boundary (regression coverage for
+; the CString ownership fix: args and returns must each free their own
+; heap-allocated C string exactly once, with no leak and no use-after-free).
+(def greeting (example-rust-lib/greet "Clorus"))
+(def upper (example-rust-lib/to-upper "seamless rust interop"))
+(def len (example-rust-lib/string-length "twelve chars"))
+
+(println greeting)
+(println upper)
+(println len)
+
+; Repeat calls to surface any double-free/use-after-free from the ownership fix
+(dotimes [i 50]
+  (example-rust-lib/greet "stress")
+  (example-rust-lib/to-upper "stress")
+  (example-rust-lib/string-length "stress"))
+
+(if (and (= greeting "Hello, Clorus!")
+         (= upper "SEAMLESS RUST INTEROP")
+         (= len 12))
+  (do (println "PASS") fact)
+  (throw "FFI string round-trip assertion failed"))

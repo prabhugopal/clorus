@@ -273,14 +273,14 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_call(slurp_fn, &[path_ptr.into()], "slurp_call")
                     .unwrap();
 
-                // slurp returns *mut c_char (string pointer)
-                // Box it into a Value* string
+                // slurp returns an owned *mut c_char (CString::into_raw()).
+                // Box it into a Value* string and free the source buffer.
                 let str_ptr = result
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_pointer_value();
-                Ok(self.box_string(str_ptr))
+                Ok(self.box_owned_c_string(str_ptr))
             }
 
             "spit" => {
