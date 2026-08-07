@@ -363,6 +363,7 @@ impl<'ctx> CodeGen<'ctx> {
         // ===== Transducer Support =====
         self.declare_value_fn("clorus_reduced", 1); // Wrap value as reduced
         self.declare_value_to_bool_fn("clorus_is_reduced"); // Check if value is reduced
+        self.declare_value_to_bool_fn("clorus_value_as_bool"); // Extract bool from a Bool-tagged Value
         self.declare_value_fn("clorus_deref_reduced", 1); // Extract value from reduced
         self.declare_value_fn("clorus_ensure_reduced", 1); // Ensure value is reduced
     }
@@ -446,6 +447,37 @@ impl<'ctx> CodeGen<'ctx> {
     /// Helper: Box an f64 into a Value* (alias for consistency)
     pub(super) fn box_number(&self, float_val: FloatValue<'ctx>) -> PointerValue<'ctx> {
         self.create_value_from_float(float_val)
+    }
+
+    /// Helper: Unbox a Bool-tagged Value* to an i1. Must NOT go through
+    /// unbox_number/clorus_value_as_number: that function returns 0.0 for
+    /// any non-Long/Double tag (including Bool), which silently collapses
+    /// both true and false to "false" -- exactly the bug this avoids.
+    pub(super) fn extract_bool_from_value(
+        &self,
+        value_ptr: PointerValue<'ctx>,
+    ) -> inkwell::values::IntValue<'ctx> {
+        let as_bool_fn = self
+            .module
+            .get_function("clorus_value_as_bool")
+            .expect("clorus_value_as_bool not declared - runtime functions not initialized");
+        let call_result = self
+            .builder
+            .build_call(as_bool_fn, &[value_ptr.into()], "bool_from_value")
+            .expect("Failed to build call to clorus_value_as_bool");
+        let i8_val = call_result
+            .try_as_basic_value()
+            .left()
+            .expect("clorus_value_as_bool should return i8, got void")
+            .into_int_value();
+        self.builder
+            .build_int_compare(
+                inkwell::IntPredicate::NE,
+                i8_val,
+                self.context.i8_type().const_zero(),
+                "bool_from_value_i1",
+            )
+            .expect("Failed to build bool truncation compare")
     }
 
     /// Helper: Unbox a Value* to f64 (alias for consistency)

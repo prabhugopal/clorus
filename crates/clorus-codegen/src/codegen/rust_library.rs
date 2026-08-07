@@ -97,6 +97,8 @@ impl<'ctx> CodeGen<'ctx> {
                     "bool" => self.context.bool_type().into(),
                     "*mut u8" | "*const u8" => i8_ptr_type.into(), // Opaque pointers
                     other if Self::is_opaque_ffi_pointer_type_name(other) => i8_ptr_type.into(),
+                    // Option<T> (T pointer-shaped) reuses T's own carrier: null means None.
+                    other if Self::option_ffi_inner_type(other).is_some() => i8_ptr_type.into(),
                     other => return Err(format!("Unsupported parameter type in FFI: {}", other)),
                 };
                 param_types.push(llvm_type);
@@ -113,6 +115,14 @@ impl<'ctx> CodeGen<'ctx> {
                 "()" => self.context.void_type().fn_type(&param_types, false),
                 "*mut u8" | "*const u8" => i8_ptr_type.fn_type(&param_types, false), // Opaque pointers
                 other if Self::is_opaque_ffi_pointer_type_name(other) => {
+                    i8_ptr_type.fn_type(&param_types, false)
+                }
+                // Option<T>/Result<T,E> (T pointer-shaped) both carry a plain
+                // pointer: null means None / Err respectively.
+                other if Self::option_ffi_inner_type(other).is_some() => {
+                    i8_ptr_type.fn_type(&param_types, false)
+                }
+                other if Self::result_ffi_inner_types(other).is_some() => {
                     i8_ptr_type.fn_type(&param_types, false)
                 }
                 other => return Err(format!("Unsupported return type in FFI: {}", other)),

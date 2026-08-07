@@ -261,6 +261,52 @@ impl RustFfiProcessor {
         type_name != "&str" && (type_name.starts_with('&'))
     }
 
+    /// Strips `Wrapper<...>` down to the inner `...`, e.g.
+    /// `strip_generic_wrapper("Option<f64>", "Option") == Some("f64")`.
+    fn strip_generic_wrapper<'a>(type_name: &'a str, wrapper: &str) -> Option<&'a str> {
+        let rest = type_name.strip_prefix(wrapper)?;
+        let inner = rest.strip_prefix('<')?;
+        let inner = inner.strip_suffix('>')?;
+        Some(inner)
+    }
+
+    /// Splits `"A, B"` into `("A", "B")` at the top-level comma, respecting
+    /// nested `<...>` so `"Vec<f64>, String"` doesn't split inside `Vec<f64>`.
+    fn split_top_level_comma(s: &str) -> Option<(String, String)> {
+        let mut depth = 0i32;
+        for (i, c) in s.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    return Some((s[..i].trim().to_string(), s[i + 1..].trim().to_string()));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn option_inner_type(type_name: &str) -> Option<String> {
+        Self::strip_generic_wrapper(type_name, "Option").map(|s| s.trim().to_string())
+    }
+
+    fn result_inner_types(type_name: &str) -> Option<(String, String)> {
+        Self::strip_generic_wrapper(type_name, "Result").and_then(Self::split_top_level_comma)
+    }
+
+    /// A "pointer-shaped" type is one whose own C ABI carrier is already a
+    /// pointer (owned String/&str via CString, or a named opaque pointer or
+    /// reference). These can serve as the payload of `Option<T>`/`Result<T,E>`
+    /// using a null sentinel with zero extra allocation. Primitives
+    /// (f32/i64/bool/...) are deliberately not supported as a payload yet:
+    /// boxing them would need an explicit free/destructor story to avoid
+    /// leaking or mixing allocators across the FFI boundary, which is a
+    /// separate, larger piece of work (typed ownership + destructors).
+    fn is_pointer_shaped_ffi_payload_type(type_name: &str) -> bool {
+        type_name == "String" || type_name == "&str" || Self::is_opaque_pointer_type_name(type_name)
+    }
+
     fn is_supported_ffi_type(type_name: &str) -> bool {
         matches!(
             type_name,
@@ -283,10 +329,23 @@ impl RustFfiProcessor {
                 | "*mut u8"
                 | "*const u8"
         ) || Self::is_opaque_pointer_type_name(type_name)
+            || Self::option_inner_type(type_name)
+                .is_some_and(|inner| Self::is_pointer_shaped_ffi_payload_type(&inner))
     }
 
     fn is_supported_ffi_return_type(type_name: &str) -> bool {
-        Self::is_supported_ffi_type(type_name) && !Self::is_borrowed_reference_type_name(type_name)
+        if Self::is_borrowed_reference_type_name(type_name) {
+            return false;
+        }
+        if let Some(inner) = Self::option_inner_type(type_name) {
+            return Self::is_pointer_shaped_ffi_payload_type(&inner)
+                && !Self::is_borrowed_reference_type_name(&inner);
+        }
+        if let Some((ok_ty, _err_ty)) = Self::result_inner_types(type_name) {
+            return Self::is_pointer_shaped_ffi_payload_type(&ok_ty)
+                && !Self::is_borrowed_reference_type_name(&ok_ty);
+        }
+        Self::is_supported_ffi_type(type_name)
     }
 
     fn unsupported_signature_reason(function: &FunctionInfo) -> Option<String> {
@@ -701,7 +760,7 @@ impl RustFfiProcessor {
         Self::generate_wrapper_cargo_toml(&wrapper_dir, &wrapper_name, name, lib_path)?;
 
         // Generate lib.rs with FFI wrappers
-        Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
+        let error_slot_fn = Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
 
         if verbose {
             println!("      Generated wrapper crate: {}", wrapper_dir.display());
@@ -711,6 +770,7 @@ impl RustFfiProcessor {
         let mut processed =
             Self::compile_wrapper_crate(&wrapper_dir, &wrapper_name, verbose, true)?;
         processed.functions = generator.functions.clone();
+        processed.functions.extend(error_slot_fn);
 
         if verbose {
             println!(
@@ -779,11 +839,12 @@ impl RustFfiProcessor {
 
         let mut generator = FfiGenerator::new();
         generator.functions = functions.clone();
-        Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
+        let error_slot_fn = Self::generate_wrapper_lib_rs(&wrapper_dir, name, &generator)?;
 
         let mut processed =
             Self::compile_wrapper_crate(&wrapper_dir, &wrapper_name, verbose, false)?;
         processed.functions = functions;
+        processed.functions.extend(error_slot_fn);
         Ok(processed)
     }
 
@@ -1292,11 +1353,31 @@ crate-type = ["cdylib", "staticlib", "rlib"]
     }
 
     /// Generate lib.rs for the wrapper crate with FFI wrappers
+    /// Emitted once per wrapper crate iff at least one function returns a
+    /// `Result<T, E>`. A thread-local slot carries the Err message across
+    /// the FFI boundary (the errno/GetLastError pattern): the wrapper
+    /// stashes `format!("{:?}", e)` and returns null; Clorus codegen checks
+    /// for null and, on a Result-typed return, retrieves this message and
+    /// raises it as a genuine Clorus exception via the take-last-error
+    /// accessor generated below.
+    fn generate_error_slot_helper(original_name: &str) -> String {
+        let take_fn = Self::rust_wrapper_export_symbol(original_name, "take_last_error");
+        format!(
+            "thread_local! {{\n    static __CLORUS_FFI_LAST_ERROR: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);\n}}\n\nfn __clorus_ffi_set_last_error(msg: String) {{\n    __CLORUS_FFI_LAST_ERROR.with(|slot| *slot.borrow_mut() = Some(msg));\n}}\n\n#[no_mangle]\npub extern \"C\" fn {take_fn}() -> *mut c_char {{\n    let msg = __CLORUS_FFI_LAST_ERROR.with(|slot| slot.borrow_mut().take());\n    match msg {{\n        Some(m) => unsafe {{ CString::new(m).unwrap_or_else(|_| CString::new(\"<error message contained a NUL byte>\").unwrap()).into_raw() }},\n        None => std::ptr::null_mut(),\n    }}\n}}\n\n",
+            take_fn = take_fn
+        )
+    }
+
+    /// Generates lib.rs for the wrapper crate with FFI wrappers. Returns
+    /// metadata for a synthetic `take_last_error` accessor when the crate
+    /// needed an error slot (i.e. at least one function returns
+    /// `Result<T, E>`) -- callers must append this to their function-info
+    /// list so codegen declares and can call it.
     fn generate_wrapper_lib_rs(
         wrapper_dir: &Path,
         original_name: &str,
         generator: &FfiGenerator,
-    ) -> Result<(), String> {
+    ) -> Result<Option<FunctionInfo>, String> {
         let lib_name = original_name.replace('-', "_");
 
         let mut content = format!(
@@ -1309,6 +1390,14 @@ crate-type = ["cdylib", "staticlib", "rlib"]
              \n",
             original_name, lib_name
         );
+
+        let has_result_return = generator
+            .functions
+            .iter()
+            .any(|f| Self::result_inner_types(&f.return_type).is_some());
+        if has_result_return {
+            content.push_str(&Self::generate_error_slot_helper(original_name));
+        }
 
         for func in &generator.functions {
             let wrapper_name = Self::rust_wrapper_export_symbol(original_name, &func.name);
@@ -1343,7 +1432,13 @@ crate-type = ["cdylib", "staticlib", "rlib"]
         }
 
         fs::write(wrapper_dir.join("src/lib.rs"), content)
-            .map_err(|e| format!("Failed to write wrapper lib.rs: {}", e))
+            .map_err(|e| format!("Failed to write wrapper lib.rs: {}", e))?;
+
+        Ok(has_result_return.then(|| clorus_ffi_gen::FunctionInfo {
+            name: "take_last_error".to_string(),
+            params: Vec::new(),
+            return_type: "String".to_string(),
+        }))
     }
 
     fn rust_to_c_type(rust_type: &str) -> String {
@@ -1365,6 +1460,17 @@ crate-type = ["cdylib", "staticlib", "rlib"]
             "String" => "*mut c_char".to_string(),
             "&str" => "*mut c_char".to_string(),
             "()" => "()".to_string(),
+            // Option<T>/Result<T,E> (T pointer-shaped) reuse T's own carrier:
+            // null already means "no value" / "error", so no new C type is
+            // needed. The Err payload of a Result never crosses the ABI as a
+            // value -- see the thread-local error slot in rust_to_c_conversion.
+            _ if Self::option_inner_type(rust_type).is_some() => {
+                Self::rust_to_c_type(&Self::option_inner_type(rust_type).unwrap())
+            }
+            _ if Self::result_inner_types(rust_type).is_some() => {
+                let (ok_ty, _err_ty) = Self::result_inner_types(rust_type).unwrap();
+                Self::rust_to_c_type(&ok_ty)
+            }
             // Typed pointers/references (*mut T, *const T, &T, &mut T) all
             // carry a plain pointer across the C ABI boundary.
             _ => "*mut u8".to_string(),
@@ -1420,7 +1526,56 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                     name, pointee, name, pointee
                 )
             }
+            _ if Self::option_inner_type(rust_type).is_some() => {
+                let inner = Self::option_inner_type(rust_type).unwrap();
+                Self::option_param_conversion(name, &inner)
+            }
             _ => format!("    let {}_rust = {};", name, name),
+        }
+    }
+
+    /// Builds the parameter conversion for an `Option<T>` where T is
+    /// pointer-shaped (String/&str/opaque pointer or reference). The C
+    /// carrier is T's own carrier with null meaning `None`.
+    fn option_param_conversion(name: &str, inner: &str) -> String {
+        match inner {
+            "String" => format!(
+                "    let {name}_rust: Option<String> = if {name}.is_null() {{ None }} else {{ Some(unsafe {{ CStr::from_ptr({name} as *const c_char).to_string_lossy().to_string() }}) }};",
+                name = name
+            ),
+            "&str" => format!(
+                "    let {name}_rust_owned: Option<String> = if {name}.is_null() {{ None }} else {{ Some(unsafe {{ CStr::from_ptr({name} as *const c_char).to_string_lossy().to_string() }}) }};\n    let {name}_rust: Option<&str> = {name}_rust_owned.as_deref();",
+                name = name
+            ),
+            _ if inner.starts_with("*mut ") => {
+                let pointee = Self::opaque_pointee_type(inner).unwrap();
+                format!(
+                    "    let {name}_rust: Option<*mut {pointee}> = if {name}.is_null() {{ None }} else {{ Some({name} as *mut {pointee}) }};",
+                    name = name, pointee = pointee
+                )
+            }
+            _ if inner.starts_with("*const ") => {
+                let pointee = Self::opaque_pointee_type(inner).unwrap();
+                format!(
+                    "    let {name}_rust: Option<*const {pointee}> = if {name}.is_null() {{ None }} else {{ Some({name} as *const {pointee}) }};",
+                    name = name, pointee = pointee
+                )
+            }
+            _ if inner.starts_with("&mut ") => {
+                let pointee = Self::opaque_pointee_type(inner).unwrap();
+                format!(
+                    "    let {name}_rust: Option<&mut {pointee}> = if {name}.is_null() {{ None }} else {{ Some(unsafe {{ &mut *({name} as *mut {pointee}) }}) }};",
+                    name = name, pointee = pointee
+                )
+            }
+            _ if inner.starts_with('&') => {
+                let pointee = Self::opaque_pointee_type(inner).unwrap();
+                format!(
+                    "    let {name}_rust: Option<&{pointee}> = if {name}.is_null() {{ None }} else {{ Some(unsafe {{ &*({name} as *const {pointee}) }}) }};",
+                    name = name, pointee = pointee
+                )
+            }
+            _ => format!("    let {name}_rust = {name}; // unsupported Option payload type", name = name),
         }
     }
 
@@ -1443,6 +1598,22 @@ crate-type = ["cdylib", "staticlib", "rlib"]
                 name
             ),
             "()" => "".to_string(),
+            _ if Self::option_inner_type(rust_type).is_some() => {
+                let inner = Self::option_inner_type(rust_type).unwrap();
+                let some_expr = Self::rust_to_c_conversion("v", &inner);
+                format!(
+                    "    match {name} {{\n        Some(v) => {{\n{some_expr}\n        }}\n        None => std::ptr::null_mut(),\n    }}",
+                    name = name, some_expr = some_expr
+                )
+            }
+            _ if Self::result_inner_types(rust_type).is_some() => {
+                let (ok_ty, _err_ty) = Self::result_inner_types(rust_type).unwrap();
+                let ok_expr = Self::rust_to_c_conversion("v", &ok_ty);
+                format!(
+                    "    match {name} {{\n        Ok(v) => {{\n{ok_expr}\n        }}\n        Err(e) => {{\n            __clorus_ffi_set_last_error(format!(\"{{:?}}\", e));\n            std::ptr::null_mut()\n        }}\n    }}",
+                    name = name, ok_expr = ok_expr
+                )
+            }
             // Bare reference return types are rejected upstream by
             // is_supported_ffi_return_type, so only *mut T/*const T reach here.
             _ => format!("    {} as *mut u8", name),
@@ -6413,6 +6584,140 @@ typed-ptr-lib = { path = "typed-ptr-lib" }
         assert!(
             generated.contains("unsafe { &*(c as *const Counter) }"),
             "expected &T param deref in generated wrapper:\n{}",
+            generated
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_supports_option_and_result() {
+        // Regression coverage: Option<T>/Result<T,E> for pointer-shaped T
+        // (String/&str/opaque pointer) auto-wrap using a null sentinel with
+        // zero extra allocation. Option<i64> (primitive payload) must stay
+        // rejected -- boxing primitives needs an explicit free/destructor
+        // story this pass deliberately does not build. Result<T,E> as a
+        // PARAMETER type must also stay rejected (no defined Clorus-side
+        // representation for "this is an Err with this payload").
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_autoparse_opt_result_{}", unique));
+        let dep_dir = root.join("opt-result-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "opt-result-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Widget { pub id: i64 }
+pub fn find_widget(id: i64) -> Option<*mut Widget> {
+    if id == 42 { Some(Box::into_raw(Box::new(Widget { id }))) } else { None }
+}
+pub fn maybe_greeting(name: String) -> Option<String> {
+    if name.is_empty() { None } else { Some(format!("Hello, {}!", name)) }
+}
+pub fn make_widget_or_fail(fail: bool) -> Result<*mut Widget, String> {
+    if fail { Err("refused".to_string()) } else { Ok(Box::into_raw(Box::new(Widget { id: 7 }))) }
+}
+pub fn accept_maybe_id(id: Option<i64>) -> f64 {
+    match id { Some(v) => v as f64, None => -1.0 }
+}
+pub fn accept_result(r: Result<f64, String>) -> f64 {
+    match r { Ok(v) => v, Err(_) => -1.0 }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+opt-result-lib = { path = "opt-result-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"find_widget"));
+        assert!(names.contains(&"maybe_greeting"));
+        assert!(names.contains(&"make_widget_or_fail"));
+        // Synthetic error-slot accessor, generated because a Result-returning
+        // function is present.
+        assert!(names.contains(&"take_last_error"));
+        // Primitive Option/Result payloads stay rejected in this pass.
+        assert!(!names.contains(&"accept_maybe_id"));
+        // Result<T,E> as a PARAMETER type stays rejected (return-only).
+        assert!(!names.contains(&"accept_result"));
+
+        let find_widget = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "find_widget")
+            .expect("find_widget function should exist");
+        assert_eq!(find_widget.return_type, "Option<*mut Widget>");
+
+        let make_widget_or_fail = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "make_widget_or_fail")
+            .expect("make_widget_or_fail function should exist");
+        assert_eq!(
+            make_widget_or_fail.return_type,
+            "Result<*mut Widget, String>"
+        );
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("opt_result_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src)
+            .unwrap_or_else(|e| panic!("read generated wrapper {}: {}", wrapper_src.display(), e));
+        assert!(
+            generated.contains("thread_local!"),
+            "expected an error-slot thread_local in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("fn clorus_opt_result_lib__take_last_error() -> *mut c_char"),
+            "expected a take_last_error accessor in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("Some(v) =>") && generated.contains("None => std::ptr::null_mut()"),
+            "expected Option<T> match arms in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("Ok(v) =>") && generated.contains("__clorus_ffi_set_last_error"),
+            "expected Result<T,E> match arms in generated wrapper:\n{}",
             generated
         );
 

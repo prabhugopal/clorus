@@ -108,12 +108,42 @@ impl FfiGenerator {
 
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
-            Type::Path(path) => path
-                .path
-                .segments
-                .last()
-                .map(|seg| seg.ident.to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
+            Type::Path(path) => {
+                let Some(segment) = path.path.segments.last() else {
+                    return "unknown".to_string();
+                };
+                let name = segment.ident.to_string();
+
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    let type_args: Vec<&Type> = args
+                        .args
+                        .iter()
+                        .filter_map(|arg| match arg {
+                            syn::GenericArgument::Type(t) => Some(t),
+                            _ => None,
+                        })
+                        .collect();
+
+                    match (name.as_str(), type_args.as_slice()) {
+                        ("Vec", [elem]) => {
+                            return format!("Vec<{}>", self.type_to_string(elem));
+                        }
+                        ("Option", [inner]) => {
+                            return format!("Option<{}>", self.type_to_string(inner));
+                        }
+                        ("Result", [ok, err]) => {
+                            return format!(
+                                "Result<{}, {}>",
+                                self.type_to_string(ok),
+                                self.type_to_string(err)
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+
+                name
+            }
             Type::Reference(reference) => {
                 let pointee = reference
                     .elem

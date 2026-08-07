@@ -25,8 +25,30 @@
   (example-rust-lib/to-upper "stress")
   (example-rust-lib/string-length "stress"))
 
+; Regression coverage: bool FFI args/returns. clorus_value_as_number returns
+; 0.0 for a Bool-tagged Value (wrong tag), which used to silently collapse
+; both true and false to false when passed as an FFI bool argument.
+(def negated-true (example-rust-lib/negate true))
+(def negated-false (example-rust-lib/negate false))
+
+; Regression coverage: Option<*mut T> and Result<*mut T, String> -- nil for
+; None, a genuine Clorus exception (catchable via try/catch) for Err.
+(def counter (example-rust-lib/make-counter 5))
+(def missing-counter (example-rust-lib/make-counter -1))
+(def checked-counter (example-rust-lib/make-counter-checked 9 false))
+(def refused-message
+  (try
+    (example-rust-lib/make-counter-checked 0 true)
+    (catch e (str e))))
+
 (if (and (= greeting "Hello, Clorus!")
          (= upper "SEAMLESS RUST INTEROP")
-         (= len 12))
+         (= len 12)
+         (= negated-true false)
+         (= negated-false true)
+         (= (example-rust-lib/counter-value counter) 5)
+         (= missing-counter nil)
+         (= (example-rust-lib/counter-value checked-counter) 9)
+         (includes? refused-message "refused"))
   (do (println "PASS") fact)
-  (throw "FFI string round-trip assertion failed"))
+  (throw "FFI regression assertion failed"))

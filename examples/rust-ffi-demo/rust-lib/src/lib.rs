@@ -36,6 +36,39 @@ pub fn string_length(s: String) -> f64 {
     s.len() as f64
 }
 
+/// Identity on bool -- regression coverage for FFI bool marshaling.
+pub fn negate(b: bool) -> bool {
+    !b
+}
+
+/// Named struct behind a pointer, used to test Option<*mut T>/Result<*mut T, E>.
+pub struct Counter {
+    pub value: i64,
+}
+
+/// Returns None for a negative start, Some(handle) otherwise.
+pub fn make_counter(start: i64) -> Option<*mut Counter> {
+    if start < 0 {
+        None
+    } else {
+        Some(Box::into_raw(Box::new(Counter { value: start })))
+    }
+}
+
+pub fn counter_value(c: *mut Counter) -> f64 {
+    unsafe { (*c).value as f64 }
+}
+
+/// Ok(handle) unless refused is true, matching Coral's "Result/error
+/// transport" gate: the Err message becomes a genuine Clorus exception.
+pub fn make_counter_checked(start: i64, refused: bool) -> Result<*mut Counter, String> {
+    if refused {
+        Err(format!("counter creation refused for start={}", start))
+    } else {
+        Ok(Box::into_raw(Box::new(Counter { value: start })))
+    }
+}
+
 // Private function - should NOT be wrapped
 fn internal_helper(x: f64) -> f64 {
     x * 2.0
@@ -58,5 +91,25 @@ mod tests {
     #[test]
     fn test_factorial() {
         assert_eq!(factorial(5.0), 120.0);
+    }
+
+    #[test]
+    fn test_negate() {
+        assert_eq!(negate(true), false);
+        assert_eq!(negate(false), true);
+    }
+
+    #[test]
+    fn test_make_counter() {
+        assert!(make_counter(-1).is_none());
+        let handle = make_counter(5).expect("non-negative start should succeed");
+        assert_eq!(counter_value(handle), 5.0);
+    }
+
+    #[test]
+    fn test_make_counter_checked() {
+        assert!(make_counter_checked(0, true).is_err());
+        let handle = make_counter_checked(3, false).expect("should succeed");
+        assert_eq!(counter_value(handle), 3.0);
     }
 }

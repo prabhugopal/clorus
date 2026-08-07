@@ -204,18 +204,11 @@ impl<'ctx> CodeGen<'ctx> {
                         .into()
                 }
                 "bool" => {
-                    // Unbox number and convert to bool (non-zero = true)
-                    let f64_val = self.unbox_number(arg_val);
-                    let zero = self.context.f64_type().const_float(0.0);
-                    self.builder
-                        .build_float_compare(
-                            FloatPredicate::ONE, // Ordered and Not Equal
-                            f64_val,
-                            zero,
-                            "f64_to_bool",
-                        )
-                        .unwrap()
-                        .into()
+                    // Extract from the Bool-tagged Value directly. Do NOT route
+                    // through unbox_number: clorus_value_as_number returns 0.0
+                    // for any non-numeric tag, including Bool, which would
+                    // silently collapse both true and false to false.
+                    self.extract_bool_from_value(arg_val).into()
                 }
                 "*mut u8" | "*const u8" => {
                     // Extract pointer from Value*
@@ -226,6 +219,11 @@ impl<'ctx> CodeGen<'ctx> {
                     // &T, &mut T). Carried as a plain pointer; the generated wrapper
                     // casts/derefs it back to the exact Rust type.
                     self.extract_pointer_from_value(arg_val).into()
+                }
+                other if Self::option_ffi_inner_type(other).is_some() => {
+                    let inner = Self::option_ffi_inner_type(other).unwrap();
+                    self.compile_option_ffi_param(arg_val, &inner, &mut owned_cstrings_to_free)?
+                        .into()
                 }
                 other => return Err(format!("Unsupported parameter type: {}", other)),
             };
@@ -333,6 +331,9 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(self.box_number(f64_val))
             }
             "bool" => {
+                // Box as a genuine Bool-tagged Value, not a Number: boxing as
+                // a Number would make a `false` return truthy (0.0 is truthy
+                // in Clorus, matching Clojure -- only nil/false are falsy).
                 let bool_val = call_result
                     .try_as_basic_value()
                     .left()
@@ -342,7 +343,18 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_unsigned_int_to_float(bool_val, self.context.f64_type(), "bool_to_f64")
                     .unwrap();
-                Ok(self.box_number(f64_val))
+                let value_bool_fn = self
+                    .module
+                    .get_function("clorus_value_bool")
+                    .ok_or("clorus_value_bool not declared")?;
+                Ok(self
+                    .builder
+                    .build_call(value_bool_fn, &[f64_val.into()], "box_bool")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
             }
             "()" => {
                 // Void return - return nil (0.0)
@@ -366,6 +378,24 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap()
                     .into_pointer_value();
                 Ok(self.box_pointer(ptr))
+            }
+            other if Self::option_ffi_inner_type(other).is_some() => {
+                let inner = Self::option_ffi_inner_type(other).unwrap();
+                let raw_ptr = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                self.compile_option_ffi_return(raw_ptr, &inner)
+            }
+            other if Self::result_ffi_inner_types(other).is_some() => {
+                let (ok_ty, _err_ty) = Self::result_ffi_inner_types(other).unwrap();
+                let raw_ptr = call_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                self.compile_result_ffi_return(raw_ptr, &ok_ty, &lib.name)
             }
             other => Err(format!("Unsupported return type: {}", other)),
         }
@@ -399,6 +429,260 @@ impl<'ctx> CodeGen<'ctx> {
             }
             None => false,
         }
+    }
+
+    /// Strips `Wrapper<...>` down to the inner `...` (mirrors clorus-cli's
+    /// rust_ffi::RustFfiProcessor::strip_generic_wrapper).
+    fn strip_generic_wrapper<'a>(type_name: &'a str, wrapper: &str) -> Option<&'a str> {
+        type_name
+            .strip_prefix(wrapper)?
+            .strip_prefix('<')?
+            .strip_suffix('>')
+    }
+
+    fn split_top_level_comma(s: &str) -> Option<(String, String)> {
+        let mut depth = 0i32;
+        for (i, c) in s.char_indices() {
+            match c {
+                '<' => depth += 1,
+                '>' => depth -= 1,
+                ',' if depth == 0 => {
+                    return Some((s[..i].trim().to_string(), s[i + 1..].trim().to_string()));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    pub(super) fn option_ffi_inner_type(type_name: &str) -> Option<String> {
+        Self::strip_generic_wrapper(type_name, "Option").map(|s| s.trim().to_string())
+    }
+
+    pub(super) fn result_ffi_inner_types(type_name: &str) -> Option<(String, String)> {
+        Self::strip_generic_wrapper(type_name, "Result").and_then(Self::split_top_level_comma)
+    }
+
+    /// Compiles an `Option<T>` (T pointer-shaped) FFI argument: nil becomes
+    /// a null pointer, any other value is converted the same way a plain T
+    /// argument would be. Both arms produce an i8* so a phi can merge them.
+    fn compile_option_ffi_param(
+        &mut self,
+        arg_val: PointerValue<'ctx>,
+        inner_type: &str,
+        owned_cstrings_to_free: &mut Vec<PointerValue<'ctx>>,
+    ) -> Result<PointerValue<'ctx>, String> {
+        let is_nil_fn = self
+            .module
+            .get_function("clorus_value_is_nil")
+            .ok_or("clorus_value_is_nil not declared")?;
+        let is_nil_i32 = self
+            .builder
+            .build_call(is_nil_fn, &[arg_val.into()], "opt_param_is_nil_i32")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+        let is_nil = self
+            .builder
+            .build_int_compare(
+                inkwell::IntPredicate::NE,
+                is_nil_i32,
+                self.context.i32_type().const_zero(),
+                "opt_param_is_nil",
+            )
+            .unwrap();
+
+        let function = self
+            .builder
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .expect("no parent function");
+        let none_bb = self.context.append_basic_block(function, "opt_param_none");
+        let some_bb = self.context.append_basic_block(function, "opt_param_some");
+        let merge_bb = self.context.append_basic_block(function, "opt_param_merge");
+
+        self.builder
+            .build_conditional_branch(is_nil, none_bb, some_bb)
+            .unwrap();
+
+        self.builder.position_at_end(none_bb);
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let none_val = i8_ptr_type.const_null();
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+        let none_bb_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(some_bb);
+        let some_val = if matches!(inner_type, "String" | "&str") {
+            self.extract_cstring_from_value(arg_val)
+        } else {
+            self.extract_pointer_from_value(arg_val)
+        };
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+        let some_bb_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(merge_bb);
+        let phi = self
+            .builder
+            .build_phi(i8_ptr_type, "opt_param_result")
+            .unwrap();
+        phi.add_incoming(&[(&none_val, none_bb_end), (&some_val, some_bb_end)]);
+        let result = phi.as_basic_value().into_pointer_value();
+
+        if matches!(inner_type, "String" | "&str") {
+            // Freeing a null pointer is a documented no-op in clorus_free_cstring,
+            // so pushing the merged (possibly-null) result is safe either way.
+            owned_cstrings_to_free.push(result);
+        }
+
+        Ok(result)
+    }
+
+    /// Boxes a raw FFI return pointer as a Value*, treating it as if
+    /// `inner_type` were the function's own (non-Option/Result) return type.
+    /// Used for the Some/Ok arm of Option<T>/Result<T,E> returns.
+    fn box_ffi_return_value_for_type(
+        &mut self,
+        ptr: PointerValue<'ctx>,
+        inner_type: &str,
+    ) -> PointerValue<'ctx> {
+        if matches!(inner_type, "String" | "&str") {
+            self.box_owned_c_string(ptr)
+        } else {
+            self.box_pointer(ptr)
+        }
+    }
+
+    /// Compiles an `Option<T>` (T pointer-shaped) FFI return value: a null
+    /// pointer becomes Clorus nil, anything else is unboxed as if the
+    /// function had simply returned T.
+    fn compile_option_ffi_return(
+        &mut self,
+        raw_ptr: PointerValue<'ctx>,
+        inner_type: &str,
+    ) -> Result<PointerValue<'ctx>, String> {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let is_null = self
+            .builder
+            .build_is_null(raw_ptr, "opt_ret_is_null")
+            .unwrap();
+
+        let function = self
+            .builder
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .expect("no parent function");
+        let none_bb = self.context.append_basic_block(function, "opt_ret_none");
+        let some_bb = self.context.append_basic_block(function, "opt_ret_some");
+        let merge_bb = self.context.append_basic_block(function, "opt_ret_merge");
+
+        self.builder
+            .build_conditional_branch(is_null, none_bb, some_bb)
+            .unwrap();
+
+        self.builder.position_at_end(none_bb);
+        let nil_fn = self
+            .module
+            .get_function("clorus_value_nil")
+            .ok_or("clorus_value_nil not declared")?;
+        let nil_val = self
+            .builder
+            .build_call(nil_fn, &[], "opt_ret_nil")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+        let none_bb_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(some_bb);
+        let some_val = self.box_ffi_return_value_for_type(raw_ptr, inner_type);
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+        let some_bb_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(merge_bb);
+        let phi = self
+            .builder
+            .build_phi(i8_ptr_type, "opt_ret_result")
+            .unwrap();
+        phi.add_incoming(&[(&nil_val, none_bb_end), (&some_val, some_bb_end)]);
+        Ok(phi.as_basic_value().into_pointer_value())
+    }
+
+    /// Compiles a `Result<T, E>` (T pointer-shaped) FFI return value: a null
+    /// pointer means the wrapper hit `Err` and stashed a message in its
+    /// thread-local error slot, retrieved here and raised as a genuine
+    /// Clorus exception (the same mechanism `(throw ...)` uses). A non-null
+    /// pointer is unboxed as if the function had simply returned T.
+    fn compile_result_ffi_return(
+        &mut self,
+        raw_ptr: PointerValue<'ctx>,
+        ok_type: &str,
+        lib_name: &str,
+    ) -> Result<PointerValue<'ctx>, String> {
+        let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let is_null = self
+            .builder
+            .build_is_null(raw_ptr, "result_ret_is_null")
+            .unwrap();
+
+        let function = self
+            .builder
+            .get_insert_block()
+            .and_then(|b| b.get_parent())
+            .expect("no parent function");
+        let err_bb = self.context.append_basic_block(function, "result_ret_err");
+        let ok_bb = self.context.append_basic_block(function, "result_ret_ok");
+        let merge_bb = self.context.append_basic_block(function, "result_ret_merge");
+
+        self.builder
+            .build_conditional_branch(is_null, err_bb, ok_bb)
+            .unwrap();
+
+        self.builder.position_at_end(err_bb);
+        let take_err_name = Self::rust_ffi_symbol_name(lib_name, "take_last_error");
+        let take_err_fn = self
+            .module
+            .get_function(&take_err_name)
+            .ok_or_else(|| format!("{} not declared", take_err_name))?;
+        let err_cstr = self
+            .builder
+            .build_call(take_err_fn, &[], "result_ret_take_err")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+        let err_msg_val = self.box_owned_c_string(err_cstr);
+        let wrap_fn = self
+            .module
+            .get_function("clorus_value_exception")
+            .ok_or("clorus_value_exception not declared")?;
+        let exception_val = self
+            .builder
+            .build_call(wrap_fn, &[err_msg_val.into()], "result_ret_exception")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+        let err_bb_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(ok_bb);
+        let ok_val = self.box_ffi_return_value_for_type(raw_ptr, ok_type);
+        self.builder.build_unconditional_branch(merge_bb).unwrap();
+        let ok_bb_end = self.builder.get_insert_block().unwrap();
+
+        self.builder.position_at_end(merge_bb);
+        let phi = self
+            .builder
+            .build_phi(i8_ptr_type, "result_ret_result")
+            .unwrap();
+        phi.add_incoming(&[(&exception_val, err_bb_end), (&ok_val, ok_bb_end)]);
+        Ok(phi.as_basic_value().into_pointer_value())
     }
 
     /// Compile a Rust FFI function call using canonical FfiFunction type
