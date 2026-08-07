@@ -59,6 +59,31 @@ pub fn counter_value(c: *mut Counter) -> f64 {
     unsafe { (*c).value as f64 }
 }
 
+/// Instance methods and an associated function -- regression coverage for
+/// Rust-interop method-call syntax (`lib.Type/method`). `bump`/`reset` take
+/// `&mut self`, `peek` takes `&self`, `spawn` is an associated function with
+/// no receiver; all three receiver shapes reuse the same &T/&mut T deref
+/// machinery already used for plain reference parameters.
+impl Counter {
+    pub fn spawn(start: i64) -> *mut Counter {
+        Box::into_raw(Box::new(Counter { value: start }))
+    }
+
+    pub fn bump(&mut self) -> f64 {
+        self.value += 1;
+        self.value as f64
+    }
+
+    pub fn peek(&self) -> f64 {
+        self.value as f64
+    }
+
+    pub fn reset(&mut self, to: i64) -> f64 {
+        self.value = to;
+        self.value as f64
+    }
+}
+
 /// Ok(handle) unless refused is true, matching Coral's "Result/error
 /// transport" gate: the Err message becomes a genuine Clorus exception.
 pub fn make_counter_checked(start: i64, refused: bool) -> Result<*mut Counter, String> {
@@ -111,5 +136,15 @@ mod tests {
         assert!(make_counter_checked(0, true).is_err());
         let handle = make_counter_checked(3, false).expect("should succeed");
         assert_eq!(counter_value(handle), 3.0);
+    }
+
+    #[test]
+    fn test_counter_methods() {
+        let c = unsafe { &mut *Counter::spawn(0) };
+        assert_eq!(c.peek(), 0.0);
+        assert_eq!(c.bump(), 1.0);
+        assert_eq!(c.bump(), 2.0);
+        assert_eq!(c.reset(10), 10.0);
+        assert_eq!(c.peek(), 10.0);
     }
 }

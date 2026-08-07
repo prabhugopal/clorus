@@ -11,6 +11,7 @@ mod multimethods;
 mod patterns;
 mod quotes;
 mod rust_library;
+mod rust_methods;
 #[cfg(test)]
 mod tests;
 
@@ -5144,6 +5145,16 @@ impl<'ctx> CodeGen<'ctx> {
 
                         if let Some(lib) = rust_lib {
                             return self.compile_rust_library_call(&lib, func_name, args);
+                        }
+
+                        // Not a plain Rust library call either -- try `lib.TypeName/method`,
+                        // a Rust-interop instance method or associated function.
+                        if let Some(result) = self.try_compile_rust_type_method_call(
+                            namespace_or_alias,
+                            func_name,
+                            args,
+                        ) {
+                            return result;
                         }
                     }
 

@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::Path;
 use quote::ToTokens;
-use syn::{parse_file, FnArg, Item, ItemFn, ReturnType, Type};
+use syn::{parse_file, FnArg, ImplItem, Item, ItemFn, ItemImpl, ReturnType, Type};
 
 // Modern type-safe FFI analyzer
 pub mod analyzer;
@@ -17,6 +17,12 @@ pub struct FfiGenerator {
 
 #[derive(Debug, Clone)]
 pub struct FunctionInfo {
+    /// For a plain top-level free function, this is the function name
+    /// itself, directly callable. For an impl-block method (associated
+    /// function or instance method), this is `TypeName::method_name` --
+    /// itself a valid Rust call expression via UFCS (`Type::method(recv,
+    /// args)`), so no separate "call path" field is needed: `name` IS the
+    /// call path in both cases.
     pub name: String,
     pub params: Vec<ParamInfo>,
     pub return_type: String,
@@ -44,13 +50,19 @@ impl FfiGenerator {
             .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))?;
 
         for item in ast.items {
-            if let Item::Fn(func) = item {
-                // Only process public functions
-                if self.is_public(&func) {
-                    if let Some(info) = self.extract_function_info(&func) {
-                        self.functions.push(info);
+            match item {
+                Item::Fn(func) => {
+                    // Only process public functions
+                    if self.is_public(&func) {
+                        if let Some(info) = self.extract_function_info(&func) {
+                            self.functions.push(info);
+                        }
                     }
                 }
+                Item::Impl(item_impl) => {
+                    self.functions.extend(Self::extract_impl_methods(&item_impl));
+                }
+                _ => {}
             }
         }
 
@@ -59,6 +71,118 @@ impl FfiGenerator {
 
     fn is_public(&self, func: &ItemFn) -> bool {
         matches!(func.vis, syn::Visibility::Public(_))
+    }
+
+    /// Extracts associated functions and instance methods from an inherent
+    /// `impl TypeName { ... }` block. Trait impls (`impl Trait for TypeName`)
+    /// are intentionally NOT handled here: calling a trait method by UFCS
+    /// path (`TypeName::method(...)`) generally needs the trait brought into
+    /// scope, which requires resolving the trait's fully qualified path --
+    /// real name resolution the analyzer doesn't do. Getting that wrong
+    /// would silently generate a wrapper that fails to compile or, worse,
+    /// resolves to the wrong trait; better to not auto-discover it at all.
+    fn extract_impl_methods(item_impl: &ItemImpl) -> Vec<FunctionInfo> {
+        // Trait impls are out of scope for this pass -- see doc comment above.
+        if item_impl.trait_.is_some() {
+            return Vec::new();
+        }
+        // Generic impls (`impl<T> Foo<T>`) aren't concretely callable across
+        // an extern "C" boundary -- there's no single monomorphization to pick.
+        if !item_impl.generics.params.is_empty() {
+            return Vec::new();
+        }
+
+        let Type::Path(self_type_path) = &*item_impl.self_ty else {
+            return Vec::new();
+        };
+        let Some(self_segment) = self_type_path.path.segments.last() else {
+            return Vec::new();
+        };
+        // Generic Self type (e.g. `impl Foo<Bar>`) -- same reasoning as above.
+        if !self_segment.arguments.is_empty() {
+            return Vec::new();
+        }
+        let type_name = self_segment.ident.to_string();
+
+        let mut methods = Vec::new();
+        for impl_item in &item_impl.items {
+            let ImplItem::Fn(method) = impl_item else {
+                continue;
+            };
+            if !matches!(method.vis, syn::Visibility::Public(_)) {
+                continue;
+            }
+            if method.sig.asyncness.is_some() {
+                continue;
+            }
+            // Generic methods (`fn foo<T>(...)`, or a `impl Trait` param
+            // desugared the same way) can't be called across an extern "C"
+            // boundary without picking one concrete instantiation -- skip.
+            if !method.sig.generics.params.is_empty() {
+                continue;
+            }
+
+            let mut inputs = method.sig.inputs.iter();
+            let mut params = Vec::new();
+
+            if let Some(FnArg::Receiver(receiver)) = inputs.clone().next() {
+                inputs.next();
+                match &receiver.reference {
+                    Some(_) => {
+                        let prefix = if receiver.mutability.is_some() {
+                            "&mut "
+                        } else {
+                            "&"
+                        };
+                        // Named "self_recv", not "self": the generated wrapper
+                        // is a plain extern "C" fn, not a method, and Rust
+                        // only allows a parameter literally named `self`
+                        // inside impl/trait method signatures.
+                        params.push(ParamInfo {
+                            name: "self_recv".to_string(),
+                            type_name: format!("{}{}", prefix, type_name),
+                        });
+                    }
+                    // By-value `self` (consuming) is unsupported in this pass:
+                    // Clorus opaque pointers have no ownership tracking yet, so
+                    // there is no safe way to prevent the handle being used
+                    // again after the value is moved into the method.
+                    None => continue,
+                }
+            }
+
+            let mut signature_ok = true;
+            for input in inputs {
+                if let FnArg::Typed(pat_type) = input {
+                    if let syn::Pat::Ident(ident) = &*pat_type.pat {
+                        let param_type = Self::type_to_string(&pat_type.ty);
+                        params.push(ParamInfo {
+                            name: ident.ident.to_string(),
+                            type_name: param_type,
+                        });
+                        continue;
+                    }
+                }
+                signature_ok = false;
+                break;
+            }
+            if !signature_ok {
+                continue;
+            }
+
+            let return_type = match &method.sig.output {
+                ReturnType::Default => "()".to_string(),
+                ReturnType::Type(_, ty) => Self::type_to_string(ty),
+            };
+
+            methods.push(FunctionInfo {
+                name: format!("{}::{}", type_name, method.sig.ident),
+                params,
+                return_type,
+            });
+        }
+
+        methods
     }
 
     fn extract_function_info(&self, func: &ItemFn) -> Option<FunctionInfo> {
@@ -84,7 +208,7 @@ impl FfiGenerator {
             if let FnArg::Typed(pat_type) = input {
                 if let syn::Pat::Ident(ident) = &*pat_type.pat {
                     let param_name = ident.ident.to_string();
-                    let type_name = self.type_to_string(&pat_type.ty);
+                    let type_name = Self::type_to_string(&pat_type.ty);
                     params.push(ParamInfo {
                         name: param_name,
                         type_name,
@@ -96,7 +220,7 @@ impl FfiGenerator {
         // Extract return type
         let return_type = match &func.sig.output {
             ReturnType::Default => "()".to_string(),
-            ReturnType::Type(_, ty) => self.type_to_string(ty),
+            ReturnType::Type(_, ty) => Self::type_to_string(ty),
         };
 
         Some(FunctionInfo {
@@ -106,7 +230,7 @@ impl FfiGenerator {
         })
     }
 
-    fn type_to_string(&self, ty: &Type) -> String {
+    fn type_to_string(ty: &Type) -> String {
         match ty {
             Type::Path(path) => {
                 let Some(segment) = path.path.segments.last() else {
@@ -126,16 +250,16 @@ impl FfiGenerator {
 
                     match (name.as_str(), type_args.as_slice()) {
                         ("Vec", [elem]) => {
-                            return format!("Vec<{}>", self.type_to_string(elem));
+                            return format!("Vec<{}>", Self::type_to_string(elem));
                         }
                         ("Option", [inner]) => {
-                            return format!("Option<{}>", self.type_to_string(inner));
+                            return format!("Option<{}>", Self::type_to_string(inner));
                         }
                         ("Result", [ok, err]) => {
                             return format!(
                                 "Result<{}, {}>",
-                                self.type_to_string(ok),
-                                self.type_to_string(err)
+                                Self::type_to_string(ok),
+                                Self::type_to_string(err)
                             );
                         }
                         _ => {}

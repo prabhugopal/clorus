@@ -6174,13 +6174,21 @@ edition = "2021"
         )
         .expect("write dep cargo");
 
+        // Both methods are filtered out at analysis time, before signature
+        // filtering even runs: `inc` takes `self` by value (consuming
+        // methods are rejected -- Clorus has no ownership tracking yet to
+        // prevent reuse of a moved-from handle) and `generic` has a type
+        // parameter (can't be called across an extern "C" boundary without
+        // picking one instantiation). So the whole crate should still have
+        // nothing discoverable at all, even though `&self`/`&mut self`
+        // methods with a supported signature now auto-discover in general.
         std::fs::write(
             dep_dir.join("src/lib.rs"),
             r#"
 pub struct Counter(i32);
 impl Counter {
-    pub fn new(v: i32) -> Self { Self(v) }
-    pub fn inc(&mut self) { self.0 += 1; }
+    pub fn inc(self) -> Counter { Counter(self.0 + 1) }
+    pub fn generic<T>(&self, _x: T) -> i32 { self.0 }
 }
 "#,
         )
@@ -6718,6 +6726,135 @@ opt-result-lib = { path = "opt-result-lib" }
         assert!(
             generated.contains("Ok(v) =>") && generated.contains("__clorus_ffi_set_last_error"),
             "expected Result<T,E> match arms in generated wrapper:\n{}",
+            generated
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn process_dependencies_e2e_local_path_auto_parse_supports_impl_methods() {
+        // Regression coverage: instance methods (&self/&mut self) and
+        // associated functions inside `impl TypeName { ... }` blocks now
+        // auto-discover, using `TypeName::method_name` as the function's
+        // name -- itself a valid Rust UFCS call expression, so wrapper
+        // generation needs no special-casing beyond the analyzer producing
+        // the receiver as an ordinary "&TypeName"/"&mut TypeName" parameter.
+        //
+        // Also verifies the deliberate rejections: by-value `self`
+        // (consuming methods -- no ownership tracking to prevent reuse of a
+        // moved-from handle yet) and generic methods (no single
+        // monomorphization to pick across an extern "C" boundary) must be
+        // cleanly excluded, not miscompiled.
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("clorus_rustffi_e2e_autoparse_methods_{}", unique));
+        let dep_dir = root.join("method-lib");
+        std::fs::create_dir_all(dep_dir.join("src")).expect("create dep src");
+
+        std::fs::write(
+            dep_dir.join("Cargo.toml"),
+            r#"[package]
+name = "method-lib"
+version = "0.1.0"
+edition = "2021"
+"#,
+        )
+        .expect("write dep cargo");
+
+        std::fs::write(
+            dep_dir.join("src/lib.rs"),
+            r#"
+pub struct Counter { value: i64 }
+impl Counter {
+    pub fn new(start: i64) -> *mut Counter {
+        Box::into_raw(Box::new(Counter { value: start }))
+    }
+    pub fn bump(&mut self) -> f64 { self.value += 1; self.value as f64 }
+    pub fn peek(&self) -> f64 { self.value as f64 }
+    pub fn consuming(self) -> f64 { self.value as f64 }
+    pub fn generic<T>(&self, _x: T) -> f64 { self.value as f64 }
+}
+"#,
+        )
+        .expect("write dep lib");
+
+        let manifest: Manifest = toml::from_str(
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+
+[build]
+entry = "src/main.clrs"
+
+[rust-dependencies]
+method-lib = { path = "method-lib" }
+"#,
+        )
+        .expect("parse manifest");
+
+        let processed = with_cwd(&root, || {
+            RustFfiProcessor::process_dependencies(&manifest, false)
+                .expect("process dependencies")
+        });
+
+        assert_eq!(processed.libraries.len(), 1);
+        let lib = &processed.libraries[0];
+
+        let names: Vec<&str> = lib.functions.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"Counter::new"));
+        assert!(names.contains(&"Counter::bump"));
+        assert!(names.contains(&"Counter::peek"));
+        assert!(!names.contains(&"Counter::consuming"));
+        assert!(!names.contains(&"Counter::generic"));
+
+        let bump = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "Counter::bump")
+            .expect("Counter::bump should exist");
+        assert_eq!(bump.params[0].type_name, "&mut Counter");
+
+        let peek = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "Counter::peek")
+            .expect("Counter::peek should exist");
+        assert_eq!(peek.params[0].type_name, "&Counter");
+
+        let new_fn = lib
+            .functions
+            .iter()
+            .find(|f| f.name == "Counter::new")
+            .expect("Counter::new should exist");
+        assert!(new_fn.params.iter().all(|p| p.name != "self_recv"));
+
+        let wrapper_src = root
+            .join("target")
+            .join("rust-ffi")
+            .join("method_lib_ffi")
+            .join("src")
+            .join("lib.rs");
+        let generated = std::fs::read_to_string(&wrapper_src)
+            .unwrap_or_else(|e| panic!("read generated wrapper {}: {}", wrapper_src.display(), e));
+        assert!(
+            generated.contains("let result = Counter::new(start_rust);"),
+            "expected associated-function UFCS call in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains(
+                "let self_recv_rust: &mut Counter = unsafe { &mut *(self_recv as *mut Counter) };"
+            ),
+            "expected &mut self receiver deref in generated wrapper:\n{}",
+            generated
+        );
+        assert!(
+            generated.contains("let result = Counter::bump(self_recv_rust);"),
+            "expected instance-method UFCS call in generated wrapper:\n{}",
             generated
         );
 

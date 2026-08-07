@@ -41,6 +41,16 @@
     (example-rust-lib/make-counter-checked 0 true)
     (catch e (str e))))
 
+; Regression coverage: Rust-interop method-call syntax (lib.Type/method).
+; &mut self mutates the real underlying value (not a copy), &self reads it
+; back, and the associated function (no receiver) constructs the handle.
+(def mc (example-rust-lib.Counter/spawn 0))
+(def peek0 (example-rust-lib.Counter/peek mc))
+(def bump1 (example-rust-lib.Counter/bump mc))
+(def bump2 (example-rust-lib.Counter/bump mc))
+(def reset10 (example-rust-lib.Counter/reset mc 10))
+(def peek-after (example-rust-lib.Counter/peek mc))
+
 (if (and (= greeting "Hello, Clorus!")
          (= upper "SEAMLESS RUST INTEROP")
          (= len 12)
@@ -49,6 +59,11 @@
          (= (example-rust-lib/counter-value counter) 5)
          (= missing-counter nil)
          (= (example-rust-lib/counter-value checked-counter) 9)
-         (includes? refused-message "refused"))
+         (includes? refused-message "refused")
+         (= peek0 0)
+         (= bump1 1)
+         (= bump2 2)
+         (= reset10 10)
+         (= peek-after 10))
   (do (println "PASS") fact)
   (throw "FFI regression assertion failed"))
