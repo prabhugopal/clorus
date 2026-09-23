@@ -84,10 +84,18 @@ impl Transaction {
     }
 
     /// Record a read from a ref.
+    ///
+    /// This is *only* about commit-time validation (has this ref changed
+    /// since I first touched it?), which is orthogonal to what value
+    /// `clorus_ref_deref` returns for computation within the transaction
+    /// (that's handled separately via `tx_get_write`/`tx_get_commute_value`,
+    /// checked before this is ever reached). Once a ref has been read, its
+    /// observed version must stay recorded and validated at commit time even
+    /// if the transaction later also writes to it (e.g. `alter`, which reads
+    /// then stages a write) -- see `stage_write`.
     pub fn record_read(&mut self, ref_id: RefId, version: u64) {
-        // Writes and deferred commutes already define the local value flow for this ref.
-        if !self.writes.contains_key(&ref_id) && !self.commutes.contains_key(&ref_id) {
-            self.reads.insert(ref_id, version);
+        if !self.commutes.contains_key(&ref_id) {
+            self.reads.entry(ref_id).or_insert(version);
         }
     }
 
@@ -108,9 +116,16 @@ impl Transaction {
     pub fn stage_write(&mut self, ref_id: RefId, value: *mut Value) {
         crate::value::clorus_retain(value);
 
-        // A regular write supersedes any deferred commute state.
+        // A regular write supersedes any deferred commute state, but it must
+        // NOT clear a prior read record: `alter` reads the ref's current
+        // value (recording its version for validation) and then stages a
+        // write computed from that value. If staging the write wiped the
+        // read record, commit-time validation would have nothing left to
+        // check for this ref -- silently disabling conflict detection for
+        // the single most common STM pattern (read-then-write). The read
+        // version and the staged write are validated/applied independently
+        // at commit time; see commit_transaction.
         self.clear_commutes_for_ref(ref_id);
-        self.reads.remove(&ref_id);
 
         if let Some(old_val) = self.writes.insert(ref_id, value) {
             crate::value::clorus_release(old_val);
@@ -365,15 +380,24 @@ pub fn tx_has_commute(ref_id: RefId) -> bool {
 /// Commit a transaction atomically
 ///
 /// 1. Collect all refs to lock (sorted by address to prevent deadlock)
-/// 2. Lock all refs
-/// 3. Validate read set (check versions)
-/// 4. Apply write set
-/// 5. Release locks
+/// 2. Lock ALL of them up front and hold every lock for the entire critical
+///    section below -- this is required for atomicity across multiple refs.
+///    (Earlier versions of this function locked/validated/wrote one ref at a
+///    time across three separate loops, releasing each lock before moving to
+///    the next; that let another thread's transaction interleave between a
+///    ref being validated and a different ref in the same transaction being
+///    written, breaking the atomicity dosync is supposed to guarantee.)
+/// 3. Validate read set (check versions) using the held locks
+/// 4. Apply write set and commutes using the held locks
+/// 5. Release all locks together when this function returns
 fn commit_transaction(tx: &mut Transaction) -> bool {
     use crate::ref_type::RefValue;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard};
 
-    // Collect all refs involved (reads + writes + commutes)
+    // Collect all refs involved (reads + writes + commutes), sorted so every
+    // transaction acquires locks in the same global order regardless of which
+    // refs it touches -- this is what makes locking all of them upfront
+    // deadlock-safe against other concurrent transactions.
     let mut ref_ids: Vec<RefId> = tx
         .reads
         .keys()
@@ -385,22 +409,25 @@ fn commit_transaction(tx: &mut Transaction) -> bool {
     ref_ids.sort();
     ref_ids.dedup();
 
-    // Validate all reads - check versions haven't changed.
-    for (ref_id, expected_version) in tx.read_set() {
+    let mut guards: HashMap<RefId, MutexGuard<'_, RefValue>> = HashMap::with_capacity(ref_ids.len());
+    for ref_id in &ref_ids {
         let mutex_ptr = *ref_id as *const Mutex<RefValue>;
-        unsafe {
-            let guard = (*mutex_ptr).lock().unwrap();
-            if guard.version != *expected_version {
-                return false;
-            }
+        let guard = unsafe { (*mutex_ptr).lock().unwrap() };
+        guards.insert(*ref_id, guard);
+    }
+
+    // Validate all reads - check versions haven't changed since they were read.
+    for (ref_id, expected_version) in tx.read_set() {
+        let guard = guards.get(ref_id).expect("read ref missing its held lock");
+        if guard.version != *expected_version {
+            return false; // All guards drop here, releasing every lock together.
         }
     }
 
-    // Apply regular writes first.
+    // Apply regular writes.
     for (ref_id, new_value) in tx.write_set() {
-        let mutex_ptr = *ref_id as *const Mutex<RefValue>;
+        let guard = guards.get_mut(ref_id).expect("write ref missing its held lock");
         unsafe {
-            let mut guard = (*mutex_ptr).lock().unwrap();
             (&**new_value).header().retain();
             let old_value = guard.value;
             guard.value = *new_value;
@@ -415,14 +442,13 @@ fn commit_transaction(tx: &mut Transaction) -> bool {
             continue;
         }
 
-        let mutex_ptr = *ref_id as *const Mutex<RefValue>;
-        unsafe {
-            let mut guard = (*mutex_ptr).lock().unwrap();
-            let original_value = guard.value;
-            let mut current_value = original_value;
-            let mut current_owned = false;
+        let guard = guards.get_mut(ref_id).expect("commute ref missing its held lock");
+        let original_value = guard.value;
+        let mut current_value = original_value;
+        let mut current_owned = false;
 
-            for commute in commutes {
+        for commute in commutes {
+            unsafe {
                 let extra_count = crate::vector::clorus_vector_count(commute.args_vec) as usize;
                 let mut args: Vec<*mut Value> = Vec::with_capacity(extra_count + 1);
                 args.push(current_value);
@@ -443,10 +469,12 @@ fn commit_transaction(tx: &mut Transaction) -> bool {
                 current_value = new_value;
                 current_owned = true;
             }
+        }
 
-            if current_owned {
-                guard.value = current_value;
-                guard.version += 1;
+        if current_owned {
+            guard.value = current_value;
+            guard.version += 1;
+            unsafe {
                 crate::value::clorus_release(original_value);
             }
         }
@@ -567,6 +595,110 @@ mod tests {
             clorus_release(args_vec);
             clorus_release(func_val);
             clorus_release(ref_val);
+        }
+    }
+
+    /// Concurrent stress test for cross-ref atomicity: the classic "bank
+    /// transfer between two refs" invariant check. Many threads repeatedly
+    /// move a random amount from ref A to ref B inside a single transaction
+    /// (both refs read, both refs written, one commit). If commits across
+    /// multiple refs aren't truly atomic -- e.g. if each ref is locked and
+    /// released independently instead of all refs being locked for the whole
+    /// validate+apply critical section -- two transactions can interleave
+    /// such that value is created or destroyed, and A + B will drift from
+    /// its starting total under real contention. This exercises the exact
+    /// bug fixed in commit_transaction (previously-unused `ref_ids` locking
+    /// scaffolding was computed but never actually used to hold all locks).
+    #[test]
+    fn test_tx_concurrent_transfer_preserves_total() {
+        use crate::ref_type::{clorus_ref, clorus_ref_deref, clorus_ref_set};
+        use crate::value::{clorus_release, Value};
+        use std::sync::atomic::{AtomicI64, Ordering as AtomicOrdering};
+        use std::sync::Arc;
+        use std::thread;
+
+        const STARTING_BALANCE: i64 = 500;
+        const THREADS: usize = 8;
+        const TRANSFERS_PER_THREAD: usize = 300;
+
+        unsafe {
+            let ref_a = clorus_ref(Value::long(STARTING_BALANCE));
+            let ref_b = clorus_ref(Value::long(STARTING_BALANCE));
+
+            // Shared retry-count so a pathological livelock shows up as a
+            // very large number rather than the test hanging forever.
+            let total_retries = Arc::new(AtomicI64::new(0));
+
+            let ref_a_addr = ref_a as usize;
+            let ref_b_addr = ref_b as usize;
+
+            let handles: Vec<_> = (0..THREADS)
+                .map(|thread_idx| {
+                    let total_retries = Arc::clone(&total_retries);
+                    thread::spawn(move || {
+                        let ref_a = ref_a_addr as *mut Value;
+                        let ref_b = ref_b_addr as *mut Value;
+                        let mut rng_state: u64 = 0x9E3779B97F4A7C15u64.wrapping_add(thread_idx as u64);
+
+                        for _ in 0..TRANSFERS_PER_THREAD {
+                            loop {
+                                // xorshift, good enough for picking a small transfer amount
+                                rng_state ^= rng_state << 13;
+                                rng_state ^= rng_state >> 7;
+                                rng_state ^= rng_state << 17;
+                                let amount = 1 + (rng_state % 5) as i64;
+
+                                assert!(clorus_tx_begin());
+
+                                let a_val = clorus_ref_deref(ref_a);
+                                let b_val = clorus_ref_deref(ref_b);
+                                let a_current = (*a_val).as_long();
+                                let b_current = (*b_val).as_long();
+                                clorus_release(a_val);
+                                clorus_release(b_val);
+
+                                let new_a = Value::long(a_current - amount);
+                                let new_b = Value::long(b_current + amount);
+                                let ret_a = clorus_ref_set(ref_a, new_a);
+                                let ret_b = clorus_ref_set(ref_b, new_b);
+                                clorus_release(ret_a);
+                                clorus_release(ret_b);
+                                clorus_release(new_a);
+                                clorus_release(new_b);
+
+                                if clorus_tx_commit() {
+                                    break;
+                                }
+                                clorus_tx_abort();
+                                total_retries.fetch_add(1, AtomicOrdering::Relaxed);
+                            }
+                        }
+                    })
+                })
+                .collect();
+
+            for h in handles {
+                h.join().unwrap();
+            }
+
+            let final_a_val = clorus_ref_deref(ref_a);
+            let final_b_val = clorus_ref_deref(ref_b);
+            let final_a = (*final_a_val).as_long();
+            let final_b = (*final_b_val).as_long();
+            clorus_release(final_a_val);
+            clorus_release(final_b_val);
+
+            assert_eq!(
+                final_a + final_b,
+                STARTING_BALANCE * 2,
+                "total balance drifted under concurrent transactions: A={} B={} (retries observed: {})",
+                final_a,
+                final_b,
+                total_retries.load(AtomicOrdering::Relaxed)
+            );
+
+            clorus_release(ref_a);
+            clorus_release(ref_b);
         }
     }
 

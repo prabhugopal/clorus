@@ -50,11 +50,12 @@ These are the top items to close before broader feature expansion.
 - Primary area: `stdlib/clorus/core.clr`
 - Why first: correctness bug at production scale
 
-### P0-2 STM retry semantics
-- Impact: `dosync` / `alter` / `commute` are not yet trustworthy under real contention
-- Primary areas:
-  - `crates/clorus-runtime/src/transaction.rs`
-  - `crates/clorus-runtime/src/ref_type.rs`
+### P0-2 STM retry semantics — FIXED 2026-09-23
+- Two distinct real bugs found and fixed in `crates/clorus-runtime/src/transaction.rs`, both required for correctness (fixing only one was not enough — proved by a failing stress test in between):
+  1. `commit_transaction` computed a sorted `ref_ids` list (comment: "sorted by address to prevent deadlock") but never used it — validation, writes, and commutes each locked and released one ref's mutex per iteration, across three separate loops, instead of holding all of a transaction's locks for the whole critical section. Another thread's transaction could interleave between a ref being validated and a different ref in the same transaction being written.
+  2. `Transaction::stage_write` unconditionally called `self.reads.remove(&ref_id)`. Since `alter` reads a ref (recording its version) then stages a write computed from that read, this silently deleted the only record commit-time validation had to check — meaning **conflict detection was completely disabled for the single most common STM pattern (read-then-write)**. This was the dominant bug: a 2-ref concurrent-transfer stress test showed the total drifting under contention with *zero* commit conflicts ever detected, which is what exposed it — bug #1 alone did not explain that.
+- Verified with a new test, `transaction::tests::test_tx_concurrent_transfer_preserves_total`: 8 threads x 300 transfers between two refs, asserting the total is exactly preserved. Failed before the `stage_write` fix (drifted, zero retries observed — proving validation wasn't running), passes reliably after (run 6x, no flakes). Full test suite: 129/129, no regressions.
+- Not yet done: the retry loop (`crates/clorus-codegen/src/codegen/mod.rs` `Expr::Dosync`) has no backoff, so heavy contention means CPU-spin rather than a crash — a liveness/perf concern, not a correctness one.
 - Why first: current surface over-promises concurrency safety
 
 ### P0-3 REPL O(n²) recompilation
@@ -81,9 +82,8 @@ These are the top items to close before broader feature expansion.
 - Add regression tests for all of the above
 
 ### Sprint 2: Concurrency semantics
-- Implement STM retry/validation correctly
-- Harden `alter` / `commute` / `ensure`
-- Add concurrency stress tests
+- ~~Implement STM retry/validation correctly~~ — done, see P0-2
+- Add backoff to the `dosync` retry loop (currently an unbounded tight retry under contention)
 - Decide the minimal supported async model explicitly
 
 ### Sprint 3: Missing core language/platform pieces
@@ -137,7 +137,7 @@ Main issues:
 
 ### Concurrency
 Main issues:
-- STM semantics not complete enough yet
+- STM retry/validation correctness fixed (see P0-2); no backoff on retry yet
 - no complete `core.async`-grade model
 - no fully specified `go`/parking/alts story
 - futures/promises/delays absent
@@ -186,7 +186,6 @@ When choosing work:
 
 Clorus is ready to claim serious production direction when:
 - stdlib hot paths scale to large collections
-- STM semantics are trustworthy
 - AOT path is reliable enough for shipping binaries
 - runtime/compiler diagnostics are materially better
 - Rust interop covers more than bridge-crate basics
