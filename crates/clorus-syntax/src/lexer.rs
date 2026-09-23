@@ -500,11 +500,22 @@ impl Lexer {
                 Ok(self.read_number())
             }
 
-            Some(_) => {
+            Some(ch) => {
                 let start_pos = self.position;
                 let start_line = self.line;
                 let start_col = self.column;
                 let sym = self.read_symbol();
+                if sym.is_empty() {
+                    // `ch` isn't handled by any earlier dispatch arm and isn't a
+                    // valid symbol-start character either, so read_symbol()
+                    // consumed nothing. Returning a token here without advancing
+                    // would make tokenize()'s loop spin forever re-tokenizing the
+                    // same position (e.g. a bare `\` or `|` outside a string).
+                    return Err(format!(
+                        "Unexpected character '{}' at line {}, column {}",
+                        ch, start_line, start_col
+                    ));
+                }
                 let span = self.make_span(start_pos, start_line, start_col);
                 match sym.as_str() {
                     "true" => Ok(Token::Bool(true, span)),
