@@ -1,3 +1,5 @@
+> **Archived 2026-09-23.** Describes an early v0.1.0 stack-only, no-heap-allocation memory model that no longer reflects the codebase — the runtime now uses heap-allocated, atomic-refcounted `Value`s with persistent collections, STM, agents and channels. For the current, accurate memory model see `docs/design/RC_VS_GC_DECISION.md`.
+
 # Clorus Memory Model
 
 ## Current Implementation (v0.1.0)

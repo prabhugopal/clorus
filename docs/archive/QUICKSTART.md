@@ -1,3 +1,5 @@
+> **Archived 2026-09-23.** References a personal local path (`~/Learning/git/clorus`) and a `cargo run --bin repl` invocation that no longer matches the current workspace or binary names. For an accurate, verified quick start see the top-level `README.md`.
+
 # Clorus Quick Start
 
 ## Installation

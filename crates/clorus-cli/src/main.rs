@@ -46,7 +46,7 @@ static FORCE_LINK_GENSYM: extern "C" fn(*const std::ffi::c_char) -> *mut Value =
     name = "clorus",
     version,
     about = "A Clojure-inspired systems programming language",
-    after_help = "See https://github.com/yourusername/clorus for more information"
+    after_help = "See https://github.com/prabhugopal/clorus for more information"
 )]
 struct Cli {
     #[command(subcommand)]

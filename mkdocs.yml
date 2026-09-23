@@ -1,7 +1,7 @@
 site_name: Clorus Docs
 site_description: Clorus language, compiler, interop, and test coverage
 repo_name: clorus
-repo_url: https://github.com/yourusername/clorus
+repo_url: https://github.com/prabhugopal/clorus
 
 markdown_extensions:
   - admonition

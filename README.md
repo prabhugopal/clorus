@@ -121,7 +121,7 @@ This is an honest list, not a comprehensive changelog — see [`docs/PRODUCTION_
 - **No character or ratio literals.** `\a`-style chars and `22/7`-style ratios aren't implemented. Ratios fail with a clean compile error; **character literal syntax currently hangs the compiler instead of erroring** — avoid `\x` syntax until this is fixed.
 - **Concurrency is real but not `core.async`-grade yet.** Atoms, refs/STM, agents, channels, `go`, and `alts!!` all work, but `go` blocks run on a fixed-size worker pool (sized to CPU count) rather than as lightweight suspended state machines — a program with more concurrently-blocked `go` blocks than CPU cores can exhaust the pool. STM retry/validation under heavy contention is also not yet hardened.
 - **Rust interop doesn't yet cover generics, trait objects, closures/fn-pointers, by-value structs, or standard collections** (`Vec`, `HashMap`) across the FFI boundary — only the shapes listed above are auto-bridged.
-- Nested multi-arity closures capturing outer variables have a known open bug (flat/single-level multi-arity closures work correctly).
+- **The REPL recompiles its entire session history on every evaluated form** (O(n²)) — sessions on nontrivial projects slow down, and can effectively hang, as history grows. The fix is architecturally trickier than it looks (see `docs/PRODUCTION_PLAN.md` P0-3) and is not yet done.
 
 ## Project structure
 

@@ -28,7 +28,7 @@ Last Updated: February 2026
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/clorus.git
+git clone https://github.com/prabhugopal/clorus.git
 cd clorus
 
 # Build the CLI

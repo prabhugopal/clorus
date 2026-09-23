@@ -1,3 +1,5 @@
+> **Archived 2026-09-23.** Very early milestone tracker (single-binary `cargo run`/`cargo test` era, basic arithmetic only) that no longer reflects the project. For the current roadmap see the "Priority Roadmap" section of `docs/PRODUCTION_PLAN.md`.
+
 # Clorus Development Roadmap
 
 ## ✅ Milestone 1: Working Compiler (COMPLETED!)

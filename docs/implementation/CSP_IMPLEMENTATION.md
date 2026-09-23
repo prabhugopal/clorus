@@ -1,5 +1,7 @@
 # Clorus CSP Concurrency - COMPLETE ✅
 
+> **Caveat added 2026-09-23:** "complete" here means the features below work correctly (verified directly), not that they match `core.async` semantics. `go` blocks run on a fixed-size worker pool (sized to CPU count) rather than as lightweight suspended state machines, so a blocking channel op inside `go` occupies a pool thread for its duration — more concurrently-blocked `go` blocks than CPU cores can exhaust the pool. `alts!!` wakes on a single process-wide condvar shared by every channel, not per-channel notification. Separately, STM (`dosync`/`alter`/`commute`, not covered by this doc) is not yet trustworthy under contention — see `docs/PRODUCTION_PLAN.md` P0-2.
+
 ## Summary
 
 **All phases complete and tested!**

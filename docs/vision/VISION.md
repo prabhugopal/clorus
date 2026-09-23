@@ -1,5 +1,7 @@
 # Clorus: The Vision
 
+> **This is an aspirational vision document, not a status report.** Claims like "Zero-Copy FFI" and "wrap any Rust crate" below describe the goal, not current behavior — real FFI marshaling has overhead today, and auto-bridging is limited to a specific set of type shapes (primitives, opaque pointers, `String`/`&str`, `Option`/`Result`). For current, verified status see `docs/PRODUCTION_PLAN.md` and `docs/generated/PARITY_STATUS.md`.
+
 **Clojure's Elegance + Rust's Performance + Rust's Ecosystem = 🚀**
 
 ## Executive Summary
@@ -684,7 +686,7 @@ We create a language that is:
 
 ```bash
 # Clone
-git clone https://github.com/yourusername/clorus
+git clone https://github.com/prabhugopal/clorus
 cd clorus
 
 # Build
@@ -706,7 +708,7 @@ We're building the future of systems programming. Join us!
 
 - 📖 Read the [Contributing Guide](docs/CONTRIBUTING.md)
 - 💬 Join our [Discord](https://discord.gg/clorus)
-- 🐛 Report issues on [GitHub](https://github.com/yourusername/clorus/issues)
+- 🐛 Report issues on [GitHub](https://github.com/prabhugopal/clorus/issues)
 - ✨ Submit PRs for features or fixes
 
 ## License

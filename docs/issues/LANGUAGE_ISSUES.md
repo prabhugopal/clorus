@@ -404,8 +404,8 @@ Likely in parser or compiler driver:
 ## Summary
 
 ### Critical Issues Blocking CORAL
-1. ❌ **Mutual recursion with `declare`** - No workaround, blocks tree structures
-2. ❌ **Compiler hangs on parse errors** - Should report error and exit, not hang
+1. ✅ **Mutual recursion with `declare`** - FIXED (see Issue #3 above; re-verified directly 2026-09-23, this summary line previously contradicted Issue #3's own "FIXED" status)
+2. ❌ **Compiler hangs on parse errors** - Should report error and exit, not hang (re-verified directly 2026-09-23; tracked as `docs/PRODUCTION_PLAN.md` P0-4)
 3. ✅ **Loop/recur** - FIXED
 4. ✅ **String UAF** - FIXED
 
@@ -419,7 +419,8 @@ Likely in parser or compiler driver:
 2. 🟢 **More type predicates** - Can add as needed
 
 ### Next Steps
-1. **Fix `declare`** - This is the biggest blocker for advanced CORAL features
-2. Add remaining type predicates (`nil?`, `keyword?`, etc.)
-3. Fix docstring parsing
-4. Add missing core functions as needed
+1. ~~Fix `declare`~~ - done, see Issue #3
+2. Fix the compiler-hang-on-parse-error bug (Issue #8) - see `docs/PRODUCTION_PLAN.md` P0-4
+3. Add remaining type predicates (`nil?`, `keyword?`, etc.)
+4. Fix docstring parsing
+5. Add missing core functions as needed

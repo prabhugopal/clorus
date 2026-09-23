@@ -2,8 +2,8 @@
 
 **Version:** 0.5.1
 **Last Updated:** January 29, 2026
-**Status:** Beta - Production-ready for medium projects
-**Single Source of Truth** for Clorus language features
+**Status:** Alpha. This doc's own status/parity claims are directional, not exact — see `docs/generated/PARITY_STATUS.md` and `docs/PRODUCTION_PLAN.md` for current, verified status.
+**Language reference** for Clorus features (see status note above for how "done" a feature actually is)
 
 ---
 
@@ -12,12 +12,12 @@
 **What is Clorus?**
 - Clojure-inspired systems programming language
 - LLVM-compiled to native code
-- Zero-cost Rust FFI
+- Rust FFI with real (non-zero) marshaling overhead for the type shapes it auto-bridges today
 - REPL-driven development
 - No garbage collector (reference counting)
 
-**Current State:** ~80-85% Clojure parity
-**Ready for:** Data processing, automation, CLI tools, FFI wrappers, concurrent programs
+**Current State:** see `docs/generated/PARITY_STATUS.md` for a verified breakdown (the ~80-85% figure here is an old estimate)
+**Ready for:** experimentation and language/tooling development; not yet recommended for production use — see `docs/PRODUCTION_PLAN.md`
 
 ---
 
@@ -42,9 +42,9 @@
 ## Data Types
 
 ### Scalar Types ✅ Complete
-- **Numbers**: `f64` only (integers cast to float)
+- **Numbers**: integers are a real `i64` type (`ValueTag::Long`), not f64-cast; `f64` used for decimals
   ```clojure
-  42      ; => 42.0
+  42      ; => 42
   3.14    ; => 3.14
   ```
 - **Strings**: UTF-8, immutable
@@ -62,8 +62,7 @@
 - **Symbols**: For identifiers (mostly internal)
 
 **Missing:**
-- ❌ Integers (i64/i32) - only f64
-- ❌ Characters - individual chars
+- ❌ Characters - individual chars (`\a` currently hangs the compiler instead of erroring — see `docs/PRODUCTION_PLAN.md` P0-4)
 - ❌ Rationals - fractions
 - ❌ BigInt/BigDecimal - arbitrary precision
 
@@ -114,7 +113,7 @@
 - Performance: O(1) membership
 - Structural sharing: Partial
 
-**Detailed docs:** `docs/COLLECTION_ACCESS_COMPLETE.md`
+**Detailed docs:** `docs/STDLIB_PARITY_MATRIX.md`
 
 ---
 
@@ -161,7 +160,7 @@
 (add5 10)  ; => 15
 ```
 
-**Detailed docs:** `docs/HOF_IMPLEMENTATION_COMPLETE.md`
+**Detailed docs:** `docs/generated/PARITY_STATUS.md`
 
 ---
 
@@ -220,7 +219,7 @@
 (dotimes [i n] & body)
 ```
 
-**Detailed docs:** `docs/THREADING_MACROS_COMPLETE.md`
+**Detailed docs:** `docs/generated/PARITY_STATUS.md`
 
 ---
 
@@ -262,11 +261,7 @@ Go-style channels:
 (close! ch)
 ```
 
-**Detailed docs:**
-- `docs/implementation/LOOP_AND_ATOMS_COMPLETE.md`
-- `docs/features/REFS_STM_COMPLETE.md`
-- `docs/features/AGENTS_COMPLETE.md`
-- `docs/features/CHANNELS_PHASE1_COMPLETE.md`
+**Detailed docs:** `docs/implementation/LOOP_AND_ATOMS_COMPLETE.md`, `docs/generated/PARITY_STATUS.md`
 
 ---
 
@@ -280,8 +275,8 @@ Named data structures:
 (get p :x)  ; => 10
 ```
 
-### Protocols ✅ 85% Complete
-Type-based dispatch:
+### Protocols ✅ Complete
+Type-based dispatch, called directly (automatic dispatch, verified working 2026-09-23):
 ```clojure
 (defprotocol Drawable
   (draw [this])
@@ -292,12 +287,11 @@ Type-based dispatch:
   (draw [this] ...)
   (area [this] ...))
 
-;; Explicit call (auto-dispatch not yet implemented)
-(Circle_Drawable_draw c)
+(draw c)  ; direct call, dispatches on c's type automatically
 ```
 
-### Multimethods ✅ 85% Complete
-Custom dispatch:
+### Multimethods ✅ Complete
+Custom dispatch, called directly:
 ```clojure
 (defmulti calculate-price
   (fn [item] (get item :type)))
@@ -305,16 +299,12 @@ Custom dispatch:
 (defmethod calculate-price :book [item]
   (get item :price))
 
-;; Explicit call
-(calculate-price_book item)
+(calculate-price item)  ; direct call, dispatches on the multi-fn's dispatch value
 ```
 
-**Missing:**
-- ❌ Automatic dispatch wrapper
-- ❌ `:default` for multimethods
-- ❌ Hierarchy support
+Hierarchy support (`derive`/`isa?`) and `:default` dispatch also exist — see `tests/language/test-multimethod-hierarchy.clr` and `test-multimethod-dispatch.clr`.
 
-**Detailed docs:** `docs/PHASE_C_COMPLETE.md`
+**Detailed docs:** `docs/generated/PARITY_STATUS.md`
 
 ---
 
@@ -348,7 +338,7 @@ Custom dispatch:
 - ❌ `macroexpand` - Debug expansion
 - ❌ `macroexpand-1` - Single-step expansion
 
-**Detailed docs:** `docs/QUOTE_IMPLEMENTATION_COMPLETE.md`
+**Detailed docs:** `docs/generated/PARITY_STATUS.md`
 
 ---
 
@@ -377,7 +367,7 @@ Custom dispatch:
 - ❌ `:import` - Rust type imports (partial)
 - ❌ Dynamic namespace manipulation
 
-**Detailed docs:** `docs/NAMESPACE_VALIDATION_COMPLETE.md`
+**Detailed docs:** `docs/generated/PARITY_STATUS.md`
 
 ---
 
@@ -422,9 +412,7 @@ Stdlib implementations:
 (mapcat #(list % %) [1 2])  ; => (1 1 2 2)
 ```
 
-**Detailed docs:**
-- `docs/LAZY_SEQUENCES_COMPLETE.md`
-- `docs/sessions/SESSION_COLLECTIONS_LAZY_SEQUENCES.md`
+**Detailed docs:** `docs/LAZY_SEQUENCES_GUIDE.md`
 
 ---
 
@@ -504,12 +492,11 @@ fs = { path = "crates/rust-fs" }
 
 **Features:**
 - ✅ Direct Rust library integration
-- ✅ Automatic FFI generation
-- ✅ Type marshalling
+- ✅ Automatic FFI generation (for the type shapes `docs/RUST_INTEROP_STATUS.md` lists as supported)
+- ✅ Type marshalling (has real overhead, e.g. `String` round-trips via `CString` — not zero-cost)
 - ✅ Memory safety (refcounting)
-- ✅ Zero-cost abstractions
 
-**Detailed docs:** `docs/FFI_ROADMAP.md`
+**Detailed docs:** `docs/RUST_INTEROP_STATUS.md`
 
 ---
 
@@ -536,7 +523,7 @@ clorus repl
 - ❌ `doc` function
 - ❌ `source` function
 
-**Detailed docs:** `docs/features/REPL_FEATURES.md`
+**Detailed docs:** `docs/features/repl/REPL_FEATURES.md`
 
 ---
 
@@ -601,7 +588,7 @@ Many can be implemented in pure Clorus:
 
 ### Installation
 ```bash
-git clone https://github.com/yourusername/clorus
+git clone https://github.com/prabhugopal/clorus
 cd clorus
 cargo build --release
 ```
