@@ -1,3 +1,5 @@
+> **Archived 2026-09-23.** Verified stale by direct execution against current code: both the flat and nested multi-arity closure capture cases this document describes as broken now work correctly, including the full transducer pipeline it says is blocked by them. Kept for history only — see `docs/PRODUCTION_PLAN.md` and `docs/generated/PARITY_STATUS.md` for current status.
+
 # Clorus Known Limitations
 
 ## Multi-Arity Closures Don't Support Variable Capture

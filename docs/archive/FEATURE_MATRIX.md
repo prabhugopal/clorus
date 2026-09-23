@@ -1,3 +1,5 @@
+> **Archived 2026-09-23.** Verified stale by direct execution against current code: this document's core claims (e.g. `do`/`fn`/macros/defmacro "missing", multi-arity closure capture "not supported", integers "only via f64") are contradicted by the current build. Kept for history only — see `docs/generated/PARITY_STATUS.md` for current status.
+
 # Clorus Language Feature Matrix
 
 **Based on:** Jank Programming Language Feature Checklist

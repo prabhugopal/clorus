@@ -45,30 +45,36 @@ Planning estimate:
 
 These are the top items to close before broader feature expansion.
 
-### P0-1 Nested multi-arity closure capture
-- Impact: breaks `completing`, transducers, and higher-order patterns returning multi-arity closures
-- Likely area: `crates/clorus-codegen/src/codegen/`
-- Why first: it blocks valid core language patterns and contaminates stdlib quality
-
-### P0-2 Recursive stdlib stack overflow / quadratic builders
+### P0-1 Recursive stdlib stack overflow / quadratic builders
 - Impact: `map`, `filter`, `take`, `drop`, `range`, `repeat`, `reverse`, and related sequence builders fail or scale badly on large inputs
 - Primary area: `stdlib/clorus/core.clr`
 - Why first: correctness bug at production scale
 
-### P0-3 STM retry semantics
+### P0-2 STM retry semantics
 - Impact: `dosync` / `alter` / `commute` are not yet trustworthy under real contention
 - Primary areas:
   - `crates/clorus-runtime/src/transaction.rs`
   - `crates/clorus-runtime/src/ref_type.rs`
 - Why first: current surface over-promises concurrency safety
 
+### P0-3 REPL O(n²) recompilation
+- Impact: `clorus repl` creates a fresh `CodeGen` per evaluated form instead of reusing one incrementally, so every eval recompiles the entire session history — REPL sessions on nontrivial projects slow down and can hang as history grows
+- Primary area: `crates/clorus-repl/src/repl_engine.rs`
+- Why first: directly undermines the REPL-driven workflow the language is designed around; a fix for this existed once (2026-02-15) but was never merged into the main development line and needs to be re-implemented against the current REPL architecture
+
+### P0-4 Compiler hangs instead of erroring on unrecognized/malformed syntax
+- Impact: a parse error (mismatched delimiters, unsupported reader syntax such as a `\a` char literal) causes `clorus build`/`clorus run` to hang indefinitely instead of reporting an error and exiting non-zero; requires force-killing the process
+- Primary area: `crates/clorus-syntax/src/parser.rs` (and/or the compiler driver in `crates/clorus-cli`)
+- Why first: silent hangs are far worse for adoption than a missing feature erroring cleanly; verified reproducible by direct execution on 2026-09-23 (`(println \a)` hangs past a 20s timeout); previously logged in `docs/issues/LANGUAGE_ISSUES.md` Issue #8, never fixed
+
+> Note: an earlier version of this list included "nested multi-arity closure capture" as P0-1. Verified fixed by direct execution on 2026-09-23 (`completing`-style nested multi-arity closures and full `transduce`/`map` pipelines both run correctly) — removed from blockers below.
+
 ## Priority Roadmap
 
 ### Sprint 1: Correctness
-- Fix nested multi-arity closure capture
 - Rewrite recursive stdlib hot paths with `loop/recur`
 - Fix `conj`-builder performance mistakes in stdlib
-- Re-enable transducers after closure fix
+- Re-implement REPL incremental compilation (persistent `CodeGen`) to fix O(n²) recompilation
 - Add regression tests for all of the above
 
 ### Sprint 2: Concurrency semantics
@@ -111,7 +117,6 @@ These are the top items to close before broader feature expansion.
 
 ### Core Language
 Still missing or incomplete:
-- nested multi-arity closure capture
 - syntax-quote namespace preservation edge cases
 - character type
 - ratio literals
@@ -123,7 +128,6 @@ Still missing or incomplete:
 ### Standard Library
 Main issues:
 - recursion-based implementations that fail at scale
-- transducer usability blocked by closure bug
 - missing namespaces: `clojure.string`, `clojure.walk`, `clojure.data`
 - missing EDN roundtrip and broader serialization story
 - more scale/correctness than breadth in some areas
@@ -178,7 +182,6 @@ When choosing work:
 ## Success Criteria
 
 Clorus is ready to claim serious production direction when:
-- closure/transducer correctness is fixed
 - stdlib hot paths scale to large collections
 - STM semantics are trustworthy
 - AOT path is reliable enough for shipping binaries
