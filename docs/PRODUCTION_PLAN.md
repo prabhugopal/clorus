@@ -65,10 +65,10 @@ These are the top items to close before broader feature expansion.
 - This is almost certainly why the 2026-02-15 orphaned commit (see git history / `orphaned-repl-incremental-fix` tag) was never merged despite its own status doc claiming success — its own testing only exercised self-contained expressions (`(+ 10 20)`) and it admits the one real multi-def project it tried "hangs during form loading," i.e. it likely never got far enough to hit this bug either.
 - **A real fix needs one long-lived `ExecutionEngine` for the whole session** (not a fresh one per eval), with each new eval adding a small new module to it via incremental module-linking (verify inkwell/LLVM support for this), so previously-defined globals' memory is never discarded. This is a bigger change than it looks; budget accordingly and write a multi-eval cross-reference regression test (`(def x 10)` then a later eval reading `x`) before considering it done — clorus-repl currently has zero automated tests.
 
-### P0-4 Compiler hangs instead of erroring on unrecognized/malformed syntax
-- Impact: a parse error (mismatched delimiters, unsupported reader syntax such as a `\a` char literal) causes `clorus build`/`clorus run` to hang indefinitely instead of reporting an error and exiting non-zero; requires force-killing the process
-- Primary area: `crates/clorus-syntax/src/parser.rs` (and/or the compiler driver in `crates/clorus-cli`)
-- Why first: silent hangs are far worse for adoption than a missing feature erroring cleanly; verified reproducible by direct execution on 2026-09-23 (`(println \a)` hangs past a 20s timeout); previously logged in `docs/issues/LANGUAGE_ISSUES.md` Issue #8, never fixed
+### P0-4 Compiler hangs instead of erroring on unrecognized/malformed syntax — FIXED 2026-09-23
+- Root cause was in the lexer, not the parser: `crates/clorus-syntax/src/lexer.rs` `next_token()`'s catch-all branch fell through to `read_symbol()` for any unmatched character; `read_symbol()`'s allowed-character set excluded `\`/`|`/`$`/etc., so it read zero characters without advancing the cursor, and `tokenize()`'s loop spun forever re-tokenizing the same position
+- The unbalanced-delimiter case (the other symptom `docs/issues/LANGUAGE_ISSUES.md` Issue #8 described) was already fixed separately — verified it errors cleanly today
+- Fix: `next_token()` now returns an error when `read_symbol()` makes zero progress, instead of returning an empty-string token. Verified against `\`, `|`, `$` directly, and against the full test suite (129/129 passing)
 
 > Note: an earlier version of this list included "nested multi-arity closure capture" as P0-1. Verified fixed by direct execution on 2026-09-23 (`completing`-style nested multi-arity closures and full `transduce`/`map` pipelines both run correctly) — removed from blockers below.
 
