@@ -1,203 +1,56 @@
 # Clorus
 
-A **Clojure-inspired systems programming language** that combines Clojure's elegant syntax with native performance and Rust interop, compiled via LLVM.
+Clorus is a Clojure-inspired programming language, implemented from scratch in Rust and compiled natively via LLVM — no JVM, no bytecode interpreter. It aims to give Clojure developers the language and REPL workflow they already know, with native performance and first-class, two-way Rust interop.
 
-**Version:** 0.1.0 (pre-release)
-**Status:** see [docs/site/progress.html](docs/site/progress.html) for a source-verified status report — numbers below are being reconciled against it, some are currently overstated.
-**Latest:** Polymorphism system + Lazy sequences + Project-aware REPL
+**Status: alpha.** The core language, standard library, and Rust interop all work end to end (see [Language](#language) below for runnable examples), but there are real gaps and open bugs — see [Known limitations](#known-limitations) before you rely on this for anything beyond experimentation.
 
-## Features
+## Why Clorus
 
-- ✅ **Full Clojure syntax**: S-expressions, destructuring, macros
-- ✅ **Native compilation**: LLVM → machine code (via Inkwell)
-- ✅ **Interactive REPL**: Project-aware with Clojure-style output
-- ✅ **Polymorphism**: Records, Protocols, Multimethods
-- ✅ **Lazy sequences**: Memory-efficient stream processing
-- ✅ **Package tool**: Cargo-like CLI (`clorus new`, `clorus run`, etc.)
-- ✅ **Rust FFI**: Direct Rust integration
-- ✅ **Concurrency**: Atoms, channels, go blocks, agents
-- ✅ **Standard library**: 50+ functions in pure Clorus
+- **Clojure syntax and semantics**, not a Clojure-flavored DSL — s-expressions, immutable-by-default data structures, `def`/`defn`/`let`/`loop`-`recur`, macros with syntax-quote, protocols, multimethods, atoms/refs/agents.
+- **No JVM.** Source compiles to LLVM IR and runs as native machine code, either JIT'd for fast iteration (`clorus run`) or ahead-of-time to a standalone executable (`clorus build`).
+- **Rust interop as a first-class feature, not an afterthought.** Public Rust functions and `impl` methods are discovered directly from source (no hand-written bindings for common shapes) and linked in at build time.
 
-## Quick Start
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/your-org/clorus.git
-cd clorus
-
-# Build the compiler and tools
-cargo build --release
-
-# Add to PATH (optional)
-export PATH="$PWD/target/release:$PATH"
-```
-
-### Create Your First Project
-
-```bash
-# Create a new project
-clorus new my-app
-cd my-app
-
-# Run it
-clorus run
-```
-
-### Try the REPL
-
-```bash
-# In a project directory - loads project context
-clorus repl
-
-# Or run directly
-cargo run --bin repl
-```
-
-## Building from Source
+## Quick start
 
 ### Prerequisites
-- Rust 1.70+ (2024 edition)
-- LLVM 17+ (via Inkwell)
-- Cargo
 
-### Build All Binaries
+- Rust (edition 2024 crates require rustc 1.85+)
+- LLVM 18.x — Clorus links against LLVM via [inkwell](https://github.com/TheDan64/inkwell) with the `llvm18-1` feature. If you have multiple LLVM versions installed, point inkwell at the right one, e.g. `export LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)`.
+
+### Build
 
 ```bash
-# Build everything in release mode
+git clone https://github.com/prabhugopal/clorus.git
+cd clorus
 cargo build --release
-
-# This creates:
-# - target/release/clorus         # Main CLI tool
-# - target/release/repl            # Interactive REPL
-# - target/release/clorus-ffi-gen  # FFI generator
 ```
 
-### Build Individual Components
+This builds the workspace, including:
+
+| Binary | Crate | Purpose |
+|---|---|---|
+| `clorus` | `clorus-cli` | Main CLI: project scaffolding, build, run, REPL, packaging |
+| `repl-dev` | `clorus-repl` | Standalone development REPL |
+| `replx` | `clorus-replx` | Extended/adaptive REPL |
+
+Put `target/release` on your `PATH`, or install to `~/.clorus`:
 
 ```bash
-# CLI tool only
-cargo build --release --bin clorus
-
-# REPL only
-cargo build --release --bin repl
-
-# Run tests
-cargo test
-
-# Check code
-cargo check
+make install
+export PATH="$HOME/.clorus/bin:$PATH"
+export CLORUS_HOME="$HOME/.clorus"
 ```
 
-### Development Build (faster)
+### Your first project
 
 ```bash
-# Unoptimized debug build
-cargo build
-
-# Run without installing
-cargo run --bin clorus -- new my-project
-cargo run --bin repl
+clorus new hello-world
+cd hello-world
 ```
 
-## Usage
-
-### Package Tool Commands
-
-```bash
-clorus new <name>        # Create new project
-clorus run               # Compile and run (JIT engine by default)
-clorus run --legacy-run  # Compile and run with legacy non-JIT engine
-clorus check             # Check syntax
-clorus build             # Build to object file
-clorus repl              # Start project-aware REPL
-clorus help              # Show help
-```
-
-See `PACKAGE_TOOL.md` for complete documentation.
-
-## Execution Modes
-
-- `run` and `repl` use the JIT path by default.
-- Legacy engine is still available for parity and regression checks via `--legacy-run` in `run`.
-- Production packaging/build flows should use AOT artifacts (`clorus build` / `clorus pack`).
-- CI/regression should run both engines:
-
-```bash
-CLORUS_TEST_ENGINES="jit legacy" tests/run_all_tests.sh
-```
-
-## Environment Variables
-
-This is the current complete list of `CLORUS_*` environment variables used by
-runtime code, REPL/CLI code, and first-party test/debug scripts.
-
-### Runtime + REPL/CLI
-
-| Variable | Default | Scope | Purpose |
-|---|---|---|---|
-| `CLORUS_HOME` | unset | CLI, REPL, REPLx, pack/build helpers | Installation root used to locate `lib/` and `stdlib/` (fallback is `~/.clorus/...` in several paths). |
-| `CLORUS_REPL_NO_CORE_LIB` | `0` (disabled) | REPL | If set to any value except `"0"`, skip loading `clorus-core` dylib fallback. |
-| `CLORUS_REPL_LOAD_STDLIB` | `1` (enabled) | REPL | If set to any value except `"0"`, JIT-load stdlib (`clorus.core`) at REPL startup (default path). |
-| `CLORUS_DEBUG_REPL` | unset | REPL, REPL engine | Verbose REPL debug logging. |
-| `CLORUS_DEBUG_IR` | unset | REPL engine | On LLVM verify failure, dumps REPL IR to `/tmp/clorus_repl_ir.ll`. |
-| `CLORUS_DEBUG_RUNTIME` | unset | REPL internals | Debug logging for runtime-library discovery (diagnostics only). |
-| `CLORUS_SAFE_VALUE` | unset | Runtime | Safety valve: skips `Value` deallocation (leaks memory) to avoid crashes while debugging memory corruption. |
-| `CLORUS_SAFE_VECTOR` | unset | Runtime | Safety valve: skips vector internals release (leaks vector memory) for debugging. |
-| `CLORUS_DEBUG_RELEASE` | unset | Runtime | Enables verbose retain/release/deallocation logging. |
-| `CLORUS_GUARD_RELEASE` | unset | Runtime | Adds guard checks (notably release on `refcount=0`). Used with `CLORUS_DEBUG_RELEASE=1`. |
-| `CLORUS_DEBUG_RELEASE_BT` | unset | Runtime | Adds backtraces for retain/release/double-free diagnostic logs. |
-| `CLORUS_DEBUG_ALLOC_BT` | unset | Runtime | Captures allocation backtraces for values (high overhead). |
-| `CLORUS_DEBUG_PTR` | unset | Runtime | Pointer filter for debug logs (hex `0x...` or decimal). |
-| `CLORUS_DEBUG_TAG` | unset | Runtime | Tag filter for debug logs (example: `Vector`, `Long`, `Double`). |
-| `CLORUS_DEBUG_VECTOR_RELEASE` | unset | Runtime/vector | Extra vector double-release diagnostics. |
-| `CLORUS_ENTRY_FILE` | unset | CLI `run`/`build` | Overrides manifest entry file for one invocation (used by test runners to execute per-file suites without rewriting `Clorus.toml`). |
-
-### Test + Debug Script Variables
-
-| Variable | Default | Used by | Purpose |
-|---|---|---|---|
-| `CLORUS_BIN` | Script-specific | `tests/run_all_tests.sh`, `tests/generate_metrics.sh`, `scripts/test/run-all.sh`, `trace_double_free.sh` | Path to `clorus` binary used by scripts. |
-| `CLORUS_TEST_ENGINES` | `jit legacy` | `tests/run_all_tests.sh` | Engine matrix for semantics runs. Values: `jit`, `legacy`. |
-| `CLORUS_TEST_JOBS` | `2` | `tests/run_all_tests.sh` | Per-test engine parallelism (`1` = sequential, `2` = parallel `jit`+`legacy`). |
-| `CLORUS_TEST_TIMEOUT_SECONDS` | `20` | `tests/run_all_tests.sh` | Per-test timeout used via `timeout`/`gtimeout` when available. |
-| `CLORUS_TEST_ISOLATE` | `1` | `tests/run_all_tests.sh` | Isolate per-engine test artifacts (`CARGO_TARGET_DIR`, `TMPDIR`) to avoid parallel engine collisions. |
-| `CLORUS_TEST_ISOLATION_ROOT` | `/tmp/clorus-test-isolation` | `tests/run_all_tests.sh` | Root directory for isolated per-engine test artifacts. |
-| `CLORUS_APP_DIR` | `~/Workspace/github/coral/coral-examples/gallery` | `trace_double_free.sh` | Working directory for gallery-based double-free tracing. |
-
-### Notes
-
-- `CLORUS_CACHE` is mentioned in some docs, but is not currently consumed by
-  runtime/CLI code paths.
-- `clorus run` now defaults to JIT. Legacy non-JIT run path is explicit:
-  `clorus run --legacy-run`.
-- `clorus repl` also runs on the JIT execution path by default.
-
-## Rust Interop (Current)
-
-- Canonical file/module import style is `ns` + `:rust`:
+`src/main.clrs`:
 
 ```clojure
-(ns main
-  (:rust [libm :as m]))
-```
-
-- In interactive REPL usage, `(use rust.<lib>)` is still supported for compatibility.
-- Preferred interop contract file is `.clri` (legacy `.clorus-ffi` remains supported).
-- Canonical status and limits are tracked in:
-  - `docs/RUST_INTEROP_STATUS.md`
-
-### Example Workflow
-
-```bash
-# Create a new project
-$ clorus new hello-world
-     Created binary (application) `hello-world` package
-
-# Edit src/main.clrs
-$ cd hello-world
-$ cat > src/main.clrs << EOF
 (ns main)
 
 (defn factorial [n]
@@ -206,309 +59,123 @@ $ cat > src/main.clrs << EOF
     (* n (factorial (- n 1)))))
 
 (defn -main [& _args]
-  (factorial 5))
-EOF
-
-# Run it
-$ clorus run
-   Compiling hello-world v0.1.0
-    Finished dev [unoptimized] target(s) in 0.00s
-     Running `src/main.clrs`
-
-=> 120
+  (println (factorial 5)))
 ```
 
-## Project Structure
+```bash
+clorus run     # JIT-compile and execute — fast, for development
+# => 120
 
-**Modular Workspace:**
+clorus build   # ahead-of-time compile to a standalone native executable
+./target/hello-world
+# => 120
+```
+
+### REPL
+
+```bash
+clorus repl
+```
+
+The REPL is project-aware (loads namespace/config from `Clorus.toml` when run inside a project), supports TAB-completion and persistent history, and mirrors Clojure's `#'namespace/name` convention for `def`/`defn` output.
+
+## Language
+
+Clorus targets close to full Clojure parity — s-expressions, immutable persistent collections, destructuring, macros with syntax-quote, protocols/records/multimethods with automatic dispatch, atoms/refs/STM/agents/channels, regex, transducers, laziness, exceptions. A couple of representative, verified-working snippets:
+
+```clojure
+(defprotocol Greet (hello [this]))
+(defrecord Person [name])
+(extend-type Person Greet
+  (hello [this] (str "Hi, " (:name this))))
+(hello (->Person "Ada"))          ; => "Hi, Ada"
+
+(def task (go (+ 100 200)))
+(<!! task)                        ; => 300
+```
+
+The full language reference lives in [`docs/reference/LANGUAGE_SPEC.md`](docs/reference/LANGUAGE_SPEC.md); treat its status/parity percentages as directional rather than exact — [`docs/generated/PARITY_STATUS.md`](docs/generated/PARITY_STATUS.md) is the canonical, continuously-regenerated source for what's actually implemented.
+
+## Rust interop
+
+Clorus discovers public Rust functions and `impl` methods directly from source and generates the FFI bridge automatically — you don't hand-write bindings for the common cases:
+
+- Free functions and `impl` methods (`&self` / `&mut self`) over primitives, `String`/`&str`, and opaque pointer/reference types
+- `Option<T>` and `Result<T, E>` are bridged automatically — a Rust `Err` becomes a catchable Clorus exception
+- Crate dependencies are resolved the normal Cargo way via `Clorus.toml`
+
+```clojure
+(ns main
+  (:rust [mylib :as lib]))
+
+(def counter (lib.Counter/new))
+(lib.Counter/bump counter)
+```
+
+This is a generated, AST-driven bridge (not a hand-maintained per-type list), which is deliberate — see [`docs/RUST_INTEROP_STATUS.md`](docs/RUST_INTEROP_STATUS.md) for exactly what's auto-mapped today and what still requires a hand-authored `.clri` interface file (generics, trait objects, by-value structs, and standard collections like `Vec`/`HashMap` aren't auto-mapped yet).
+
+## Known limitations
+
+This is an honest list, not a comprehensive changelog — see [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN.md) and [`docs/generated/PARITY_STATUS.md`](docs/generated/PARITY_STATUS.md) for the canonical, continuously-updated status.
+
+- **No character or ratio literals.** `\a`-style chars and `22/7`-style ratios aren't implemented. Ratios fail with a clean compile error; **character literal syntax currently hangs the compiler instead of erroring** — avoid `\x` syntax until this is fixed.
+- **Concurrency is real but not `core.async`-grade yet.** Atoms, refs/STM, agents, channels, `go`, and `alts!!` all work, but `go` blocks run on a fixed-size worker pool (sized to CPU count) rather than as lightweight suspended state machines — a program with more concurrently-blocked `go` blocks than CPU cores can exhaust the pool. STM retry/validation under heavy contention is also not yet hardened.
+- **Rust interop doesn't yet cover generics, trait objects, closures/fn-pointers, by-value structs, or standard collections** (`Vec`, `HashMap`) across the FFI boundary — only the shapes listed above are auto-bridged.
+- Nested multi-arity closures capturing outer variables have a known open bug (flat/single-level multi-arity closures work correctly).
+
+## Project structure
 
 ```
 clorus/
 ├── crates/
-│   ├── clorus-syntax/      # Lexer, Parser, AST (no deps!)
-│   ├── clorus-codegen/     # LLVM code generation
-│   ├── clorus/             # Main library (re-exports all)
-│   ├── clorus-cli/         # Package tool (like Cargo)
-│   └── clorus-repl/        # Interactive REPL
-└── Cargo.toml              # Workspace root
+│   ├── clorus-syntax/    # Lexer, parser, AST, macro expansion
+│   ├── clorus-codegen/   # LLVM IR generation (via inkwell)
+│   ├── clorus-runtime/   # Value representation, persistent collections, atoms/refs/agents/channels/STM
+│   ├── clorus-std/       # Standard library (Rust-side primitives)
+│   ├── clorus-core/      # Core language plumbing
+│   ├── clorus-errors/    # Diagnostics
+│   ├── clorus-ffi-gen/   # Rust → Clorus FFI bridge generator
+│   ├── clorus-types/     # Canonical type system shared across codegen/FFI
+│   ├── clorus-macros/    # Rust proc-macros used internally
+│   ├── clorus/           # Library crate re-exporting the pipeline
+│   ├── clorus-cli/       # `clorus` binary
+│   ├── clorus-repl/      # `repl-dev` binary
+│   └── clorus-replx/     # `replx` binary
+├── stdlib/clorus/        # Standard library written in Clorus itself
+├── examples/
+├── tests/
+└── docs/
 ```
 
-See `MODULAR_ARCHITECTURE.md` for details.
+## CLI reference
 
-## Current Status (v0.5.0 Beta)
-
-### ✅ Core Language (~75-80% Clojure Parity)
-
-**Data Types**
-- Numbers (f64), Strings, Booleans, Keywords, Nil
-- Vectors `[1 2 3]`, Maps `{:a 1}`, Lists `'(1 2)`, Sets `#{1 2}`
-
-**Functions**
-- Named functions `defn`, anonymous `fn`, shorthand `#(+ % 1)`
-- Multi-arity, variadic (`& rest`), closures
-- Higher-order: `map`, `filter`, `reduce`, `apply`
-
-**Control Flow**
-- `if`, `when`, `when-not`, `if-let`, `when-let`
-- `cond`, `case`, `and`, `or`
-- `loop`/`recur` with tail-call optimization
-- `while`, `dotimes`, `doseq`
-
-**Macros**
-- `defmacro`, `quote`, syntax-quote, unquote, `gensym`
-- All control flow implemented as macros
-
-**Destructuring**
-- Vector: `[a b c]`, `[a & rest]`, `[a [b c]]`
-- Map: `{:keys [x y]}`
-- Works in `let` and function parameters
-
-**Polymorphism** - **NEW!**
-- Records: `defrecord` with constructor functions
-- Protocols: `defprotocol`/`extend-type` for type-based dispatch
-- Multimethods: `defmulti`/`defmethod` for custom dispatch
-
-**Lazy Sequences** - **NEW!**
-- Infinite sequences: `lazy-range`, `lazy-repeat`, `lazy-cycle`
-- Transformations: `lazy-map`, `lazy-filter`, `lazy-take`
-- Memory-efficient stream processing
-
-**State Management**
-- Atoms: `atom`, `swap!`, `reset!`, `deref`/@
-- Refs, Agents, Channels (CSP), Transactions (STM)
-
-**Namespaces**
-- `ns`, `require`, `use`, `:as`, `:refer`
-
-**Collections API**
-- 50+ functions: `get`, `assoc`, `dissoc`, `conj`, `keys`, `vals`
-- `merge`, `get-in`, `assoc-in`, `select-keys`
-- `take`, `drop`, `concat`, `flatten`, `distinct`
-
-**Standard Library**
-- 50+ utility functions in pure Clorus (`stdlib/clorus/core.clr`)
-- `partial`, `comp`, `zipmap`, `frequencies`, `group-by`
-- Predicates: `nil?`, `even?`, `empty?`, etc.
-- Math: `abs`, `min`, `max`, `sum`
-
-**String Operations**
-- `str`, `subs`, `split`, `join`, `upper-case`, `lower-case`
-- `trim`, `replace`, `starts-with?`, `ends-with?`
-
-**Exception Handling**
-- `try`, `catch`, `finally`, `throw`
-
-**FFI**
-- Direct Rust integration
-- File I/O: `slurp`, `spit`
-- rust.fs module for file operations
-
-### 🚧 Not Yet Implemented
-
-- AOT compilation to standalone executables
-- Automatic dispatch for protocols/multimethods (requires explicit function names)
-- Regular expressions
-- Advanced STM features
-- Transducers
-- Full Clojure.spec compatibility
-
-## Syntax Examples
-
-### Simple Arithmetic
-```clojure
-(+ 1 2 3)        ; => 6
-(* 2 (+ 3 4))    ; => 14
 ```
-
-### Variables
-```clojure
-(def x 10)
-(def y 20)
-(+ x y)          ; => 30
+clorus new <name>   Create a new Clorus project
+clorus build        Compile the current project (ahead-of-time, standalone executable)
+clorus run          Compile and run (JIT by default)
+clorus check        Check syntax without building
+clorus clean        Remove build artifacts (target/)
+clorus repl         Start a project-aware interactive REPL
+clorus replx        Start the extended/adaptive REPL
+clorus pack         Package the project as a .clip library
+clorus install      Install a .clip package
+clorus version      Print version information
 ```
-
-### Functions
-```clojure
-(defn square [x]
-  (* x x))
-
-(square 5)       ; => 25
-```
-
-### Recursion - Fibonacci
-```clojure
-(defn fib [n]
-  (if (< n 2)
-    n
-    (+ (fib (- n 1)) (fib (- n 2)))))
-
-(fib 10)         ; => 55
-```
-
-### Recursion - Factorial
-```clojure
-(defn factorial [n]
-  (if (< n 2)
-    1
-    (* n (factorial (- n 1)))))
-
-(factorial 5)    ; => 120
-```
-
-### Control Flow
-```clojure
-(def age 25)
-
-(if (< age 18)
-  100  ; Minor
-  200) ; Adult
-       ; => 200
-```
-
-### Let Bindings
-```clojure
-(let [x 10
-      y 20
-      z (+ x y)]
-  (* z 2))       ; => 60
-```
-
-## Interactive REPL
-
-The REPL is **project-aware** and shows **Clojure-style output**:
-
-```bash
-$ clorus repl
-
-╔════════════════════════════════════╗
-║  Clorus REPL v0.2.0                ║
-║  Clojure-inspired systems language ║
-╚════════════════════════════════════╝
-
-📦 Project: my-app v0.1.0
-📂 Namespace: my_app.core
-
-✓ rust.fs module available
-✓ clorus.core module available
-
-my_app.coreλ> (def x 10)
-#'my_app.core/x
-
-my_app.coreλ> (defn square [n] (* n n))
-#'my_app.core/square
-
-my_app.coreλ> (square x)
-100
-
-my_app.coreλ> :quit
-Goodbye!
-```
-
-### REPL Features
-
-- ✅ **Project-aware**: Auto-loads namespace from `Clorus.toml`
-- ✅ **Clojure output**: Shows `#'namespace/name` for def/defn
-- ✅ **Persistent state**: Variables and functions persist across lines
-- ✅ **Auto-complete**: TAB completion for built-in functions
-- ✅ **History**: ↑/↓ navigation with persistent history file
-- ✅ **Commands**: `:help`, `:examples`, `:quit`
-
-See `docs/REPL_AND_CLEANUP_COMPLETE.md` for details.
-
-## Usage as a Library
-
-```rust
-use clorus::{parse, CodeGen};
-use inkwell::context::Context;
-use inkwell::OptimizationLevel;
-
-fn main() {
-    let code = "(+ (* 2 3) 4)";  // Result: 10
-
-    // Parse
-    let exprs = parse(code).unwrap();
-
-    // Compile
-    let context = Context::create();
-    let mut codegen = CodeGen::new(&context, "my_module");
-    codegen.wrap_in_function(&exprs[0], "eval").unwrap();
-
-    // Execute with JIT
-    let engine = codegen.get_module()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .unwrap();
-
-    unsafe {
-        type EvalFunc = unsafe extern "C" fn() -> f64;
-        let jit_fn = engine.get_function::<EvalFunc>("eval").unwrap();
-        println!("Result: {}", jit_fn.call());  // Prints: Result: 10
-    }
-}
-```
-
-## Rust Interop Example (Future)
-
-```clojure
-; Declare external Rust function
-(extern "Rust" calculate_pi [] f64)
-
-; Call Rust function from Clorus
-(def pi (calculate_pi))
-(println "Pi is approximately" pi)
-```
-
-## Design Philosophy
-
-1. **Simple and modular**: Each component is a self-contained crate
-2. **Clojure syntax**: Keep the elegant, minimal syntax of Clojure
-3. **Rust-level performance**: Compile to efficient native code
-4. **Easy interop**: First-class Rust FFI support
-5. **Developer-friendly**: Cargo-like tooling for familiar workflow
-
-## Roadmap
-
-### Phase 1: Core Language ✅ COMPLETE
-- ✅ Basic expressions and arithmetic
-- ✅ Functions and recursion
-- ✅ Control flow (all macros)
-- ✅ Global and local variables
-- ✅ Data types (numbers, strings, booleans, collections)
-- ✅ Destructuring (vector and map)
-- ✅ Macros system
-- ✅ Polymorphism (records, protocols, multimethods)
-- ✅ Lazy sequences
-
-### Phase 2: Tooling ✅ MOSTLY COMPLETE
-- ✅ Project scaffolding (`clorus new`)
-- ✅ JIT compilation (`clorus run`)
-- ✅ Syntax checking (`clorus check`)
-- ✅ Interactive REPL (project-aware)
-- ⏳ AOT compilation to native executables
-- ⏳ Testing framework (`clorus test`)
-- ⏳ Package management (dependencies)
-
-### Phase 3: Polish & Advanced Features (In Progress)
-- ✅ Standard library (50+ functions)
-- ⏳ Automatic protocol/multimethod dispatch
-- ⏳ Regular expressions
-- ⏳ Transducers
-- ⏳ Full STM implementation
-- ⏳ Advanced documentation tooling
-- ⏳ **Self-hosting** (compiler in Clorus!)
 
 ## Documentation
 
-- [`docs/LANGUAGE_PARITY.md`](docs/LANGUAGE_PARITY.md) - Complete feature comparison with Clojure
-- [`docs/COVERAGE_ASSESSMENT.md`](docs/COVERAGE_ASSESSMENT.md) - Implementation status
-- [`docs/REPL_AND_CLEANUP_COMPLETE.md`](docs/REPL_AND_CLEANUP_COMPLETE.md) - Latest improvements
-- [`docs/implementation/`](docs/implementation/) - Feature implementation docs
-- `PACKAGE_TOOL.md` - Package tool documentation
-- `MODULAR_ARCHITECTURE.md` - Crate architecture
+- [`docs/LANGUAGE.md`](docs/LANGUAGE.md), [`docs/reference/LANGUAGE_SPEC.md`](docs/reference/LANGUAGE_SPEC.md) — language reference
+- [`docs/generated/PARITY_STATUS.md`](docs/generated/PARITY_STATUS.md), [`docs/PRODUCTION_PLAN.md`](docs/PRODUCTION_PLAN.md) — canonical, up-to-date implementation status
+- [`docs/RUST_INTEROP_STATUS.md`](docs/RUST_INTEROP_STATUS.md), [`docs/guides/RUST_INTEROP_GUIDE.md`](docs/guides/RUST_INTEROP_GUIDE.md) — Rust interop
+- [`BUILD.md`](BUILD.md) — build, install, and distribution details
+- [`docs/design/ARCHITECTURE.md`](docs/design/ARCHITECTURE.md), [`docs/COMPILER_ARCHITECTURE.md`](docs/COMPILER_ARCHITECTURE.md) — compiler/runtime architecture
+
+Some documents under `docs/` are historical design notes or superseded status snapshots rather than current state; where a doc and the generated status pages disagree, trust `docs/generated/` and `docs/PRODUCTION_PLAN.md`.
 
 ## Contributing
 
-Clorus is under active development. Contributions welcome!
+Clorus is under active development as an alpha-stage project. Issues and pull requests are welcome.
 
 ## License
 
-MIT OR Apache-2.0
+MIT
