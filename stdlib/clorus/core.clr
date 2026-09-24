@@ -45,8 +45,21 @@
   (if x false true))
 
 ;; reverse - Reverse collection
+;; Realizes coll into a vector (if it isn't already one), then builds the
+;; result by reading that vector back-to-front. Deliberately doesn't rely on
+;; quoted empty-list literals ('()) or (conj list x) prepend semantics: '()
+;; currently evaluates to an empty vector rather than a real list (conj on
+;; it appends, not prepends), so folding onto '() cannot reverse anything --
+;; that's a separate, deeper reader/quote bug, not something to work around
+;; here. This stays correct and O(n) regardless of that bug.
 (defn reverse [coll]
-  (reduce (fn [acc x] (conj [x] acc)) [] coll))
+  (let [v (if (vector? coll) coll (reduce (fn [acc x] (conj acc x)) [] coll))
+        len (count v)]
+    (loop [i (dec len)
+           acc []]
+      (if (< i 0)
+        acc
+        (recur (dec i) (conj acc (nth v i)))))))
 
 ;; take - Take first n elements
 ;; Example: (take 3 [1 2 3 4 5]) ; => [1 2 3]
