@@ -437,6 +437,38 @@ pub extern "C" fn clorus_conj(coll: *mut Value, elem: *mut Value) -> *mut Value 
             ValueTag::HashSet => {
                 crate::set::clorus_set_conj(coll, elem)
             }
+            ValueTag::HashMap => {
+                if elem.is_null() {
+                    crate::value::clorus_retain(coll);
+                    return coll;
+                }
+                match (*elem).header().tag() {
+                    // (conj m [k v]) -- a 2-element vector is a key/value
+                    // entry to add, matching Clojure's conj-onto-map.
+                    ValueTag::Vector if crate::vector::clorus_vector_count(elem) == 2 => {
+                        let k = crate::vector::clorus_vector_nth(elem, 0);
+                        let v = crate::vector::clorus_vector_nth(elem, 1);
+                        let result = crate::map::clorus_map_assoc(coll, k, v);
+                        crate::value::clorus_release(k);
+                        crate::value::clorus_release(v);
+                        result
+                    }
+                    // (conj m1 m2) -- merge m2's entries into m1, matching
+                    // Clojure's conj-a-map-onto-a-map.
+                    ValueTag::HashMap => {
+                        let src_ptr = (*elem).as_ptr() as *mut ClorusHashMap;
+                        let mut result = coll;
+                        crate::value::clorus_retain(result);
+                        for (k, v) in (*src_ptr).entries_iter() {
+                            let next = crate::map::clorus_map_assoc(result, k, v);
+                            crate::value::clorus_release(result);
+                            result = next;
+                        }
+                        result
+                    }
+                    _ => Value::nil(),
+                }
+            }
             _ => Value::nil(),
         }
     }
