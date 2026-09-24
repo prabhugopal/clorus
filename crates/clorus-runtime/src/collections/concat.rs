@@ -47,6 +47,25 @@ pub extern "C" fn clorus_concat(colls: *mut Value) -> *mut Value {
                         current = current.rest();
                     }
                 }
+                ValueTag::HashMap | ValueTag::HashSet => {
+                    // Matches Clojure: (concat [1 2] {:a 1} #{3}) => (1 2 [:a 1] 3)
+                    // -- maps contribute [k v] entries, sets contribute their
+                    // elements. Reuses the same seqable-vector helper collections
+                    // uses for first/rest/last/nth/take/drop instead of a third
+                    // copy of "how do I walk a HashMap/HashSet" logic.
+                    if let Some(seq_vec) = crate::collections::coll_as_seqable_vector(coll) {
+                        let inner_vec = (*seq_vec).as_ptr() as *mut PersistentVector;
+                        let inner_count = (*inner_vec).count();
+                        for j in 0..inner_count {
+                            let elem = PersistentVector::nth(inner_vec, j);
+                            result = PersistentVector::conj(result, elem);
+                            if !elem.is_null() {
+                                crate::value::clorus_release(elem);
+                            }
+                        }
+                        crate::value::clorus_release(seq_vec);
+                    }
+                }
                 _ => {}
             }
         }

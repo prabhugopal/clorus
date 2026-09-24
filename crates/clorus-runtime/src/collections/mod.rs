@@ -35,7 +35,7 @@ pub use set_ops::*;
 /// Matches real Clojure semantics for these: (first {:a 1}) => [:a 1],
 /// (first #{1 2 3}) => some element, etc. -- maps and sets are genuinely
 /// seqable in Clojure, not just vectors and lists.
-unsafe fn coll_as_seqable_vector(coll: *mut Value) -> Option<*mut Value> {
+pub(crate) unsafe fn coll_as_seqable_vector(coll: *mut Value) -> Option<*mut Value> {
     match (*coll).header().tag() {
         ValueTag::HashMap => {
             let map_ptr = (*coll).as_ptr() as *mut ClorusHashMap;
