@@ -18,6 +18,55 @@ pub use map_ops::*;
 pub use concat::*;
 pub use set_ops::*;
 
+/// Materialize a HashMap's entries as a Vector of [k v] 2-element vectors,
+/// in the map's iteration order, and a HashSet's elements as a Vector, in
+/// the set's iteration order.
+///
+/// Clorus doesn't have a lazy map-entry-seq or set-seq type, so sequence
+/// operations (first/rest/last/nth/take/drop) can't walk a HashMap/HashSet
+/// directly the way they walk a Vector or List. Rather than duplicating
+/// each of those operations' logic once per collection type, every
+/// HashMap/HashSet arm of those operations converts through this one
+/// shared helper and then delegates back to the same operation's existing,
+/// already-correct Vector handling -- so there is exactly one
+/// implementation of "what does first/rest/last/nth/take/drop mean", not
+/// one per collection type it's been taught to understand.
+///
+/// Matches real Clojure semantics for these: (first {:a 1}) => [:a 1],
+/// (first #{1 2 3}) => some element, etc. -- maps and sets are genuinely
+/// seqable in Clojure, not just vectors and lists.
+unsafe fn coll_as_seqable_vector(coll: *mut Value) -> Option<*mut Value> {
+    match (*coll).header().tag() {
+        ValueTag::HashMap => {
+            let map_ptr = (*coll).as_ptr() as *mut ClorusHashMap;
+            let mut result = crate::vector::clorus_vector_empty();
+            for (k, v) in (*map_ptr).entries_iter() {
+                let pair = crate::vector::clorus_vector_empty();
+                let pair_k = crate::vector::clorus_vector_conj(pair, k);
+                crate::value::clorus_release(pair);
+                let pair_kv = crate::vector::clorus_vector_conj(pair_k, v);
+                crate::value::clorus_release(pair_k);
+                let next = crate::vector::clorus_vector_conj(result, pair_kv);
+                crate::value::clorus_release(result);
+                crate::value::clorus_release(pair_kv);
+                result = next;
+            }
+            Some(result)
+        }
+        ValueTag::HashSet => {
+            let set_ptr = (*coll).as_ptr() as *mut ClorusHashSet;
+            let mut result = crate::vector::clorus_vector_empty();
+            for elem in (*set_ptr).values() {
+                let next = crate::vector::clorus_vector_conj(result, elem);
+                crate::value::clorus_release(result);
+                result = next;
+            }
+            Some(result)
+        }
+        _ => None,
+    }
+}
+
 /// Get element from collection
 ///
 /// - For maps: get value by key
@@ -43,6 +92,17 @@ pub extern "C" fn clorus_get(coll: *mut Value, key: *mut Value) -> *mut Value {
                 };
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 PersistentVector::nth(vec_ptr, index)
+            }
+            ValueTag::HashSet => {
+                // (get set k) => k itself if present (equality is what
+                // matters here, not object identity), else nil.
+                let set_ptr = (*coll).as_ptr() as *mut ClorusHashSet;
+                if (*set_ptr).contains(key) {
+                    (*key).header().retain();
+                    key
+                } else {
+                    Value::nil()
+                }
             }
             _ => Value::nil(),
         }
@@ -120,6 +180,12 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
                 // For lists, walk to nth position (logic below)
                 clorus_list_nth(coll, index)
             }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll).unwrap();
+                let result = clorus_nth(seq_vec, index);
+                crate::value::clorus_release(seq_vec);
+                result
+            }
             _ => Value::nil(),
         }
     }
@@ -183,6 +249,12 @@ pub extern "C" fn clorus_first(coll: *mut Value) -> *mut Value {
                 // Use list helper which retains before returning
                 crate::list::clorus_list_first(coll)
             }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll).unwrap();
+                let result = clorus_first(seq_vec);
+                crate::value::clorus_release(seq_vec);
+                result
+            }
             _ => Value::nil(),
         }
     }
@@ -222,6 +294,12 @@ pub extern "C" fn clorus_rest(coll: *mut Value) -> *mut Value {
             }
             ValueTag::List => {
                 crate::list::clorus_list_rest(coll)
+            }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll).unwrap();
+                let result = clorus_rest(seq_vec);
+                crate::value::clorus_release(seq_vec);
+                result
             }
             _ => crate::list::clorus_list_empty(),
         }
@@ -273,6 +351,12 @@ pub extern "C" fn clorus_last(coll: *mut Value) -> *mut Value {
                 }
 
                 last_val
+            }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll).unwrap();
+                let result = clorus_last(seq_vec);
+                crate::value::clorus_release(seq_vec);
+                result
             }
             _ => Value::nil(),
         }
@@ -354,6 +438,12 @@ pub extern "C" fn clorus_take(coll: *mut Value, n: i64) -> *mut Value {
 
                 Value::from_ptr(ValueTag::Vector, result as *mut u8)
             }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll).unwrap();
+                let result = clorus_take(seq_vec, n);
+                crate::value::clorus_release(seq_vec);
+                result
+            }
             _ => crate::vector::clorus_vector_empty(),
         }
     }
@@ -409,6 +499,12 @@ pub extern "C" fn clorus_drop(coll: *mut Value, n: i64) -> *mut Value {
                 }
 
                 Value::from_ptr(ValueTag::Vector, result as *mut u8)
+            }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll).unwrap();
+                let result = clorus_drop(seq_vec, n);
+                crate::value::clorus_release(seq_vec);
+                result
             }
             _ => crate::vector::clorus_vector_empty(),
         }
