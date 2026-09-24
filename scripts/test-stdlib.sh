@@ -160,7 +160,38 @@ for test_file in "${TEST_FILES[@]}"; do
         echo -e "${BLUE}Running:${NC} $test_file"
     fi
 
-    if $BINARY run "$test_file" >/dev/null 2>&1; then
+    # Some test files are deliberately invalid, to verify the compiler
+    # correctly rejects them -- marked with a leading
+    # "; EXPECT_COMPILE_ERROR: <substring>" comment. For those, passing
+    # means the run fails AND the error output contains that substring
+    # (not just "any non-zero exit"), so a wrong-error case still fails.
+    EXPECT_LINE=$(head -1 "$test_file")
+    if [[ "$EXPECT_LINE" == "; EXPECT_COMPILE_ERROR:"* ]]; then
+        EXPECTED_SUBSTRING="${EXPECT_LINE#; EXPECT_COMPILE_ERROR:}"
+        EXPECTED_SUBSTRING="${EXPECTED_SUBSTRING# }"
+        # `if cmd; then` (not a bare `RUN_OUTPUT=$(cmd)` assignment followed
+        # by checking $?) is required here: under `set -e`, a plain command
+        # substitution assignment that returns non-zero aborts the whole
+        # script immediately, before its exit status can even be checked --
+        # and a non-zero exit is exactly what these EXPECT_COMPILE_ERROR
+        # tests are supposed to produce. Only the condition of an if/while/
+        # until is exempt from `set -e`.
+        if RUN_OUTPUT=$($BINARY run "$test_file" 2>&1); then
+            RUN_EXIT=0
+        else
+            RUN_EXIT=$?
+        fi
+        if [ $RUN_EXIT -ne 0 ] && [[ "$RUN_OUTPUT" == *"$EXPECTED_SUBSTRING"* ]]; then
+            TEST_RESULT=0
+        else
+            TEST_RESULT=1
+        fi
+    else
+        $BINARY run "$test_file" >/dev/null 2>&1
+        TEST_RESULT=$?
+    fi
+
+    if [ $TEST_RESULT -eq 0 ]; then
         if [ "$VERBOSE" = true ]; then
             echo -e "  ${GREEN}✓ PASS${NC}"
         else
