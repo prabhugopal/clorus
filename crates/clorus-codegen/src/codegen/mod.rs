@@ -333,6 +333,8 @@ impl<'ctx> CodeGen<'ctx> {
             "starts-with?",
             "ends-with?",
             "includes?",
+            "char-at",
+            "index-of",
             // Type predicates (public)
             "string?",
             "number?",

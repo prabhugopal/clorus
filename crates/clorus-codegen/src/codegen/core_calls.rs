@@ -3444,7 +3444,10 @@ impl<'ctx> CodeGen<'ctx> {
                     )
                     .unwrap();
 
-                // Convert i32 bool to Value* bool
+                // Box as a real Bool-tagged Value, not box_number/Double --
+                // see extract_bool_from_value's doc comment: boxing a
+                // boolean result as a number makes it always truthy in
+                // Clorus, since only nil/false are falsy and 0.0 is not.
                 let i32_result = result.try_as_basic_value().left().unwrap().into_int_value();
                 let float_result = self
                     .builder
@@ -3454,8 +3457,15 @@ impl<'ctx> CodeGen<'ctx> {
                         "bool_to_float",
                     )
                     .unwrap();
-
-                Ok(self.box_number(float_result))
+                let bool_fn = self
+                    .module
+                    .get_function("clorus_value_bool")
+                    .ok_or("clorus_value_bool not declared")?;
+                let boxed = self
+                    .builder
+                    .build_call(bool_fn, &[float_result.into()], "starts_with_bool_value")
+                    .unwrap();
+                Ok(boxed.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             "ends-with?" => {
@@ -3480,7 +3490,10 @@ impl<'ctx> CodeGen<'ctx> {
                     )
                     .unwrap();
 
-                // Convert i32 bool to Value* bool
+                // Box as a real Bool-tagged Value, not box_number/Double --
+                // see extract_bool_from_value's doc comment: boxing a
+                // boolean result as a number makes it always truthy in
+                // Clorus, since only nil/false are falsy and 0.0 is not.
                 let i32_result = result.try_as_basic_value().left().unwrap().into_int_value();
                 let float_result = self
                     .builder
@@ -3490,8 +3503,15 @@ impl<'ctx> CodeGen<'ctx> {
                         "bool_to_float",
                     )
                     .unwrap();
-
-                Ok(self.box_number(float_result))
+                let bool_fn = self
+                    .module
+                    .get_function("clorus_value_bool")
+                    .ok_or("clorus_value_bool not declared")?;
+                let boxed = self
+                    .builder
+                    .build_call(bool_fn, &[float_result.into()], "ends_with_bool_value")
+                    .unwrap();
+                Ok(boxed.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             "includes?" => {
@@ -3516,7 +3536,12 @@ impl<'ctx> CodeGen<'ctx> {
                     )
                     .unwrap();
 
-                // Convert i32 bool to Value* bool
+                // Box as a real Bool-tagged Value (not box_number/Double --
+                // see extract_bool_from_value's doc comment: boxing a
+                // boolean result as a number instead of a Bool makes it
+                // always truthy in Clorus, since only nil/false are falsy,
+                // and 0.0 is not. Matches the pattern every other
+                // boolean-returning builtin here uses, e.g. starts-with?.
                 let i32_result = result.try_as_basic_value().left().unwrap().into_int_value();
                 let float_result = self
                     .builder
@@ -3526,8 +3551,63 @@ impl<'ctx> CodeGen<'ctx> {
                         "bool_to_float",
                     )
                     .unwrap();
+                let bool_fn = self
+                    .module
+                    .get_function("clorus_value_bool")
+                    .ok_or("clorus_value_bool not declared")?;
+                let boxed = self
+                    .builder
+                    .build_call(bool_fn, &[float_result.into()], "includes_bool_value")
+                    .unwrap();
+                Ok(boxed.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
 
-                Ok(self.box_number(float_result))
+            "char-at" => {
+                // char-at takes 2 args: string, index -- returns a 1-char
+                // string (there is no dedicated Char type yet), or nil if
+                // out of range.
+                if args.len() != 2 {
+                    return Err("char-at requires 2 arguments: string, index".to_string());
+                }
+
+                let str_val = self.compile_expr(&args[0])?;
+                let index_val = self.compile_expr(&args[1])?;
+                let index_float = self.unbox_number(index_val);
+                let index_i64 = self
+                    .builder
+                    .build_float_to_signed_int(index_float, self.context.i64_type(), "char_at_index")
+                    .unwrap();
+
+                let char_at_fn = self
+                    .module
+                    .get_function("clorus_char_at")
+                    .ok_or("clorus_char_at not declared")?;
+                let result = self
+                    .builder
+                    .build_call(char_at_fn, &[str_val.into(), index_i64.into()], "char_at_call")
+                    .unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
+            "index-of" => {
+                // index-of takes 2 args: string, substring -- returns the
+                // index as a number, or nil if not found.
+                if args.len() != 2 {
+                    return Err("index-of requires 2 arguments: string, substring".to_string());
+                }
+
+                let str_val = self.compile_expr(&args[0])?;
+                let substr_val = self.compile_expr(&args[1])?;
+
+                let index_of_fn = self
+                    .module
+                    .get_function("clorus_index_of")
+                    .ok_or("clorus_index_of not declared")?;
+                let result = self
+                    .builder
+                    .build_call(index_of_fn, &[str_val.into(), substr_val.into()], "index_of_call")
+                    .unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
             _ => Err(format!("Unknown clorus.core function: {}", func)),

@@ -716,20 +716,32 @@ pub extern "C" fn clorus_is_string_i32(val: *mut Value) -> i32 {
 ///
 /// (starts-with? "hello world" "hello") => true
 /// (starts-with? "hello" "hi") => false
+///
+/// Returns i32 (0/1), not bool: the LLVM declaration for this function
+/// (declare_value2_to_i32_fn) expects a 4-byte i32 return value. A Rust
+/// `bool` return is only 1 byte at the C ABI level, and the C ABI does not
+/// guarantee the unused upper bytes of the return register are zeroed --
+/// so the caller reading all 4 bytes as i32 could see garbage in them, or
+/// (in the specific case of `false`, which is byte 0x00) still register as
+/// truthy whenever those garbage upper bytes happen to be non-zero. This
+/// silently broke every caller's false case. Every other function declared
+/// via declare_value2_to_i32_fn / declare_value_to_i32_fn is already named
+/// with an `_i32` suffix and already returns i32 correctly; these three
+/// were the only ones that didn't follow that convention.
 #[no_mangle]
-pub extern "C" fn clorus_starts_with(s: *mut Value, prefix: *mut Value) -> bool {
+pub extern "C" fn clorus_starts_with(s: *mut Value, prefix: *mut Value) -> i32 {
     unsafe {
         let string = match get_string_value(s) {
             Some(s) => s,
-            None => return false,
+            None => return 0,
         };
 
         let prefix_str = match get_string_value(prefix) {
             Some(p) => p,
-            None => return false,
+            None => return 0,
         };
 
-        string.starts_with(&prefix_str)
+        string.starts_with(&prefix_str) as i32
     }
 }
 
@@ -737,20 +749,21 @@ pub extern "C" fn clorus_starts_with(s: *mut Value, prefix: *mut Value) -> bool 
 ///
 /// (ends-with? "hello.txt" ".txt") => true
 /// (ends-with? "hello" ".txt") => false
+/// Returns i32 (0/1) -- see clorus_starts_with's doc comment for why.
 #[no_mangle]
-pub extern "C" fn clorus_ends_with(s: *mut Value, suffix: *mut Value) -> bool {
+pub extern "C" fn clorus_ends_with(s: *mut Value, suffix: *mut Value) -> i32 {
     unsafe {
         let string = match get_string_value(s) {
             Some(s) => s,
-            None => return false,
+            None => return 0,
         };
 
         let suffix_str = match get_string_value(suffix) {
             Some(p) => p,
-            None => return false,
+            None => return 0,
         };
 
-        string.ends_with(&suffix_str)
+        string.ends_with(&suffix_str) as i32
     }
 }
 
@@ -758,20 +771,21 @@ pub extern "C" fn clorus_ends_with(s: *mut Value, suffix: *mut Value) -> bool {
 ///
 /// (includes? "hello world" "lo wo") => true
 /// (includes? "hello" "x") => false
+/// Returns i32 (0/1) -- see clorus_starts_with's doc comment for why.
 #[no_mangle]
-pub extern "C" fn clorus_includes(s: *mut Value, substr: *mut Value) -> bool {
+pub extern "C" fn clorus_includes(s: *mut Value, substr: *mut Value) -> i32 {
     unsafe {
         let string = match get_string_value(s) {
             Some(s) => s,
-            None => return false,
+            None => return 0,
         };
 
         let substring = match get_string_value(substr) {
             Some(p) => p,
-            None => return false,
+            None => return 0,
         };
 
-        string.contains(&substring)
+        string.contains(&substring) as i32
     }
 }
 
