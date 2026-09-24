@@ -2,51 +2,21 @@
 ///
 /// Provides print, println, and other I/O functions
 
-use crate::value::{Value, ValueTag};
-use crate::vector::PersistentVector;
+use crate::value::Value;
 use std::io::{self, Write};
 
-/// Convert a Value* to a Rust String for display
+/// Convert a Value* to a Rust String for display.
+///
+/// This used to be a second, separate implementation duplicating
+/// crate::string::value_to_rust_string, except it was missing List and
+/// HashSet entirely (falling through to a generic "#<Tag>") and had
+/// HashMap literally stubbed as "{...}" -- so println/print never
+/// actually showed the contents of a map, set, or list, silently, this
+/// whole time. Delegating to the one correct, already-complete
+/// implementation instead of maintaining a second copy that can drift
+/// out of sync with it again.
 unsafe fn value_to_display_string(val: *mut Value) -> String {
-    if val.is_null() {
-        return "nil".to_string();
-    }
-
-    match (*val).header().tag() {
-        ValueTag::String => (*val).as_string().to_string(),
-        ValueTag::Long => format!("{}", (*val).as_long()),
-        ValueTag::Double => {
-            let num = (*val).as_double();
-            if num.fract() == 0.0 && num.is_finite() {
-                format!("{:.0}", num)
-            } else {
-                format!("{}", num)
-            }
-        }
-        ValueTag::Keyword => format!(":{}", (*val).as_keyword()),
-        ValueTag::Symbol => (*val).as_string().to_string(),
-        ValueTag::Bool => {
-            if (*val).as_bool() {
-                "true".to_string()
-            } else {
-                "false".to_string()
-            }
-        }
-        ValueTag::Nil => "nil".to_string(),
-        ValueTag::Vector => {
-            let vec_ptr = (*val).as_ptr() as *mut PersistentVector;
-            let count = (*vec_ptr).count();
-            let mut parts = Vec::new();
-            for i in 0..count {
-                let elem = PersistentVector::nth(vec_ptr, i);
-                parts.push(value_to_display_string(elem));
-                crate::value::clorus_release(elem);
-            }
-            format!("[{}]", parts.join(" "))
-        }
-        ValueTag::HashMap => format!("{{...}}"),
-        _ => format!("#<{:?}>", (*val).header().tag()),
-    }
+    crate::string::value_to_rust_string(val)
 }
 
 /// Print a value to stdout without a newline

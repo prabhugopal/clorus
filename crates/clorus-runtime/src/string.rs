@@ -27,7 +27,7 @@ use std::os::raw::c_char;
 /// - Boolean: "true" or "false"
 /// - Nil: Empty string
 /// - Collections: Print representation
-unsafe fn value_to_rust_string(val: *mut Value) -> String {
+pub(crate) unsafe fn value_to_rust_string(val: *mut Value) -> String {
     if val.is_null() {
         return String::new();
     }
