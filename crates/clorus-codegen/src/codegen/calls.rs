@@ -198,6 +198,7 @@ impl<'ctx> CodeGen<'ctx> {
             ("first", "clorus_first", 1),
             ("rest", "clorus_rest", 1),
             ("last", "clorus_last", 1),
+            ("empty", "clorus_empty", 1),
             ("keys", "clorus_map_keys", 1),
             ("vals", "clorus_map_vals", 1),
             // "merge" is deliberately not here: it's variadic

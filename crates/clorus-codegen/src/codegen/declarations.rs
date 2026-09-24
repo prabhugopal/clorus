@@ -125,6 +125,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_get", 2);
         self.declare_value_i64_fn("clorus_nth");
         self.declare_value_fn("clorus_first", 1);
+        self.declare_value_fn("clorus_empty", 1);
         self.declare_value_fn("clorus_rest", 1);
         self.declare_value_fn("clorus_last", 1);
         self.declare_value_to_i64_fn("clorus_count");

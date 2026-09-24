@@ -399,6 +399,36 @@ pub extern "C" fn clorus_count(coll: *mut Value) -> i64 {
     }
 }
 
+/// Return an empty collection of the same kind as coll.
+///
+/// (empty [1 2 3]) => []
+/// (empty {:a 1}) => {}
+/// (empty #{1 2}) => #{}
+/// (empty '(1 2)) => ()
+/// (empty nil) => nil
+///
+/// Matches Clojure: non-collection values (numbers, strings, keywords,
+/// etc.) have no defined "empty" and return nil here, consistent with
+/// this runtime's established lenient-fallback convention elsewhere
+/// (rather than throwing, which real Clojure does for those cases).
+#[no_mangle]
+pub extern "C" fn clorus_empty(coll: *mut Value) -> *mut Value {
+    if coll.is_null() {
+        return Value::nil();
+    }
+
+    unsafe {
+        match (*coll).header().tag() {
+            ValueTag::Vector => crate::vector::clorus_vector_empty(),
+            ValueTag::List => crate::list::clorus_list_empty(),
+            ValueTag::HashMap => crate::map::clorus_map_empty(),
+            ValueTag::HashSet => crate::set::clorus_set_empty(),
+            ValueTag::Nil => Value::nil(),
+            _ => Value::nil(),
+        }
+    }
+}
+
 /// Take first n elements from a collection
 #[no_mangle]
 pub extern "C" fn clorus_take(coll: *mut Value, n: i64) -> *mut Value {

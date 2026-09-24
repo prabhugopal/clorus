@@ -252,6 +252,7 @@ impl<'ctx> CodeGen<'ctx> {
             "last",
             "count",
             "empty?",
+            "empty",
             "reduce",
             "apply",
             "inc",
