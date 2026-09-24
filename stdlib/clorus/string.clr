@@ -1,0 +1,51 @@
+;; Clorus String Operations
+;; Following Clojure's clojure.string namespace
+;;
+;; Note: lower-level string primitives (split, join, trim, trim-left,
+;; trim-right, upper-case, lower-case, replace, replace-first,
+;; starts-with?, ends-with?, includes?, char-at, index-of,
+;; last-index-of, subs, str, compare) are compiler builtins living in
+;; clorus.core, not here -- this namespace only adds functions composed
+;; on top of those. Require as (require '[clorus.string :as str]).
+
+(ns clorus.string)
+
+;; blank? - true if s is nil, empty, or entirely whitespace
+;; (blank? nil) => true
+;; (blank? "") => true
+;; (blank? "   ") => true
+;; (blank? "a") => false
+(defn blank? [s]
+  (or (nil? s) (= (trim s) "")))
+
+;; capitalize - uppercase the first character, lowercase the rest
+;; (capitalize "hello world") => "Hello world"
+;; (capitalize "HELLO") => "Hello"
+;; (capitalize "") => ""
+(defn capitalize [s]
+  (if (empty? s)
+    s
+    (str (upper-case (subs s 0 1)) (lower-case (subs s 1)))))
+
+;; triml - remove leading whitespace only
+;; (triml "  hello  ") => "hello  "
+(defn triml [s]
+  (trim-left s))
+
+;; trimr - remove trailing whitespace only
+;; (trimr "  hello  ") => "  hello"
+(defn trimr [s]
+  (trim-right s))
+
+;; trim-newline - remove trailing newline(s) only (\r\n, \n, or \r), not
+;; other whitespace and not leading newlines
+;; (trim-newline "hello\n") => "hello"
+;; (trim-newline "hello\r\n") => "hello"
+;; (trim-newline "hello  ") => "hello  "
+(defn trim-newline [s]
+  (loop [s s]
+    (cond
+      (ends-with? s "\r\n") (recur (subs s 0 (- (count s) 2)))
+      (ends-with? s "\n") (recur (subs s 0 (- (count s) 1)))
+      (ends-with? s "\r") (recur (subs s 0 (- (count s) 1)))
+      :else s)))

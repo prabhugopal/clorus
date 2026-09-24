@@ -3610,6 +3610,31 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }
 
+            "last-index-of" => {
+                // last-index-of takes 2 args: string, substring -- returns
+                // the last matching index as a number, or nil if not found.
+                if args.len() != 2 {
+                    return Err("last-index-of requires 2 arguments: string, substring".to_string());
+                }
+
+                let str_val = self.compile_expr(&args[0])?;
+                let substr_val = self.compile_expr(&args[1])?;
+
+                let last_index_of_fn = self
+                    .module
+                    .get_function("clorus_last_index_of")
+                    .ok_or("clorus_last_index_of not declared")?;
+                let result = self
+                    .builder
+                    .build_call(
+                        last_index_of_fn,
+                        &[str_val.into(), substr_val.into()],
+                        "last_index_of_call",
+                    )
+                    .unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+
             _ => Err(format!("Unknown clorus.core function: {}", func)),
         }
     }

@@ -838,6 +838,36 @@ pub extern "C" fn clorus_index_of(s: *mut Value, substr: *mut Value) -> *mut Val
     }
 }
 
+/// Find last index of substring
+///
+/// (last-index-of "hello world hello" "hello") => 12
+/// (last-index-of "hello" "x") => nil
+///
+/// Note: like index-of, the returned index is a byte offset (Rust's
+/// str::rfind), not a Unicode character count -- consistent with
+/// index-of, but not with char-at, which indexes by character. There is
+/// no dedicated Char type yet, so string indexing isn't fully unified
+/// across these functions for non-ASCII input.
+#[no_mangle]
+pub extern "C" fn clorus_last_index_of(s: *mut Value, substr: *mut Value) -> *mut Value {
+    unsafe {
+        let string = match get_string_value(s) {
+            Some(s) => s,
+            None => return Value::nil(),
+        };
+
+        let substring = match get_string_value(substr) {
+            Some(p) => p,
+            None => return Value::nil(),
+        };
+
+        match string.rfind(&substring) {
+            Some(idx) => Value::long(idx as i64),
+            None => Value::nil(),
+        }
+    }
+}
+
 // ============================================================================
 // String Comparison
 // ============================================================================

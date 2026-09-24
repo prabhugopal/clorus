@@ -335,6 +335,7 @@ impl<'ctx> CodeGen<'ctx> {
         // String utility functions
         self.declare_value_and_i64_to_value_fn("clorus_char_at");
         self.declare_value2_to_value_fn("clorus_index_of");
+        self.declare_value2_to_value_fn("clorus_last_index_of");
 
         // ===== Arithmetic Operations =====
         self.declare_value_fn("clorus_add", 2);
