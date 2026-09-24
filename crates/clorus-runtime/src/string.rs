@@ -344,6 +344,27 @@ pub extern "C" fn clorus_join(sep: *mut Value, coll: *mut Value) -> *mut Value {
 
                 rust_string_to_value(parts.join(&separator))
             }
+            ValueTag::HashMap | ValueTag::HashSet => {
+                // Matches Clojure: maps/sets are seqable, so join walks
+                // their entries/elements too -- (join "," {:a 1}) => "[:a 1]".
+                // Reuses the same seqable-vector helper collections::mod
+                // uses for first/rest/last/nth/take/drop/concat.
+                match crate::collections::coll_as_seqable_vector(coll) {
+                    Some(seq_vec) => {
+                        let vec_ptr = (*seq_vec).as_ptr() as *mut PersistentVector;
+                        let count = (*vec_ptr).count();
+                        let mut parts = Vec::new();
+                        for i in 0..count {
+                            let elem = PersistentVector::nth(vec_ptr, i);
+                            parts.push(value_to_rust_string(elem));
+                            crate::value::clorus_release(elem);
+                        }
+                        crate::value::clorus_release(seq_vec);
+                        rust_string_to_value(parts.join(&separator))
+                    }
+                    None => rust_string_to_value(String::new()),
+                }
+            }
             _ => rust_string_to_value(String::new()),
         }
     }
