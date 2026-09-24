@@ -97,10 +97,15 @@ if [ "$RUN_TESTS" = true ]; then
     TEST_OUTPUT=$(cargo test $BUILD_FLAGS 2>&1)
     TEST_EXIT_CODE=$?
 
-    # Parse test results
-    TOTAL_TESTS=$(echo "$TEST_OUTPUT" | grep -o "running [0-9]* test" | grep -o "[0-9]*" | head -1 || echo "0")
-    PASSED_TESTS=$(echo "$TEST_OUTPUT" | grep "test result:" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
-    FAILED_TESTS=$(echo "$TEST_OUTPUT" | grep "test result:" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo "0")
+    # Parse test results. cargo test runs a separate test binary per crate,
+    # each printing its own "running N tests" / "test result: ... passed;
+    # ... failed" line -- these must be summed across all of them, not just
+    # captured (a bare capture of multiple grep matches assigns a multi-line
+    # string, which then prints every crate's count on its own line instead
+    # of one aggregated total).
+    TOTAL_TESTS=$(echo "$TEST_OUTPUT" | grep -o "running [0-9]* test" | grep -o "[0-9]*" | awk '{sum+=$1} END {print sum+0}')
+    PASSED_TESTS=$(echo "$TEST_OUTPUT" | grep "test result:" | grep -o "[0-9]* passed" | grep -o "[0-9]*" | awk '{sum+=$1} END {print sum+0}')
+    FAILED_TESTS=$(echo "$TEST_OUTPUT" | grep "test result:" | grep -o "[0-9]* failed" | grep -o "[0-9]*" | awk '{sum+=$1} END {print sum+0}')
 
     # Show results
     if [ "$VERBOSE" = true ]; then

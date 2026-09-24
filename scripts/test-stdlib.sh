@@ -15,7 +15,7 @@ BOLD='\033[1m'
 # Configuration
 RUN_TESTS=true
 VERBOSE=false
-TEST_PATTERN="*"
+TEST_PATTERN=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -77,7 +77,7 @@ fi
 
 echo -e "${YELLOW}Binary:${NC} $BINARY"
 echo -e "${YELLOW}Tests:${NC} $([ "$RUN_TESTS" = true ] && echo "Enabled" || echo "Disabled")"
-echo -e "${YELLOW}Pattern:${NC} $TEST_PATTERN"
+echo -e "${YELLOW}Pattern:${NC} $([ -z "$TEST_PATTERN" ] && echo "(all)" || echo "$TEST_PATTERN")"
 echo ""
 
 if [ "$RUN_TESTS" = false ]; then
@@ -89,14 +89,11 @@ fi
 echo -e "${BOLD}[1/2] Discovering test files...${NC}"
 
 TEST_DIRS=(
-    "tests/lang"
+    "tests/language"
     "tests/stdlib"
-    "tests/concurrency"
-    "tests/polymorphism"
-    "tests/types"
-    "tests/exceptions"
-    "tests/repl"
+    "tests/compiler"
     "tests/integration"
+    "tests/parity"
 )
 
 TEST_FILES=()
@@ -123,16 +120,37 @@ FAILED_FILES=0
 PASSED_TESTS=0
 FAILED_TESTS=0
 
-declare -A CATEGORY_STATS
+# Portable category-stats tracking (no associative arrays -- macOS ships
+# bash 3.2 by default, which has no `declare -A`). CATEGORY_NAMES holds each
+# category seen so far in first-seen order; CATEGORY_PASS/CATEGORY_FAIL are
+# parallel indexed arrays of counts, looked up by matching index.
+CATEGORY_NAMES=()
+CATEGORY_PASS=()
+CATEGORY_FAIL=()
+
+# Sets CATEGORY_IDX as a side effect. Must be called as a plain statement
+# (not via command substitution) so its array/variable mutations happen in
+# this shell rather than in a disposable subshell.
+category_index() {
+    local name="$1"
+    local i
+    for i in "${!CATEGORY_NAMES[@]}"; do
+        if [ "${CATEGORY_NAMES[$i]}" = "$name" ]; then
+            CATEGORY_IDX="$i"
+            return 0
+        fi
+    done
+    CATEGORY_NAMES+=("$name")
+    CATEGORY_PASS+=(0)
+    CATEGORY_FAIL+=(0)
+    CATEGORY_IDX=$((${#CATEGORY_NAMES[@]} - 1))
+}
 
 for test_file in "${TEST_FILES[@]}"; do
     # Extract category from path
     CATEGORY=$(echo "$test_file" | cut -d'/' -f2)
-
-    # Initialize category stats if needed
-    if [ -z "${CATEGORY_STATS[$CATEGORY]}" ]; then
-        CATEGORY_STATS[$CATEGORY]="0:0"  # passed:failed
-    fi
+    category_index "$CATEGORY"
+    idx="$CATEGORY_IDX"
 
     # Get relative filename
     FILENAME=$(basename "$test_file")
@@ -150,10 +168,7 @@ for test_file in "${TEST_FILES[@]}"; do
         fi
         PASSED_FILES=$((PASSED_FILES + 1))
         PASSED_TESTS=$((PASSED_TESTS + 1))
-
-        # Update category stats
-        IFS=':' read -r cat_pass cat_fail <<< "${CATEGORY_STATS[$CATEGORY]}"
-        CATEGORY_STATS[$CATEGORY]="$((cat_pass + 1)):$cat_fail"
+        CATEGORY_PASS[$idx]=$((CATEGORY_PASS[$idx] + 1))
     else
         if [ "$VERBOSE" = true ]; then
             echo -e "  ${RED}✗ FAIL${NC}"
@@ -162,10 +177,7 @@ for test_file in "${TEST_FILES[@]}"; do
         fi
         FAILED_FILES=$((FAILED_FILES + 1))
         FAILED_TESTS=$((FAILED_TESTS + 1))
-
-        # Update category stats
-        IFS=':' read -r cat_pass cat_fail <<< "${CATEGORY_STATS[$CATEGORY]}"
-        CATEGORY_STATS[$CATEGORY]="$cat_pass:$((cat_fail + 1))"
+        CATEGORY_FAIL[$idx]=$((CATEGORY_FAIL[$idx] + 1))
 
         echo -e "\n${RED}Failed: $test_file${NC}"
     fi
@@ -200,8 +212,11 @@ echo ""
 echo -e "${BOLD}Category Breakdown:${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-for category in $(echo "${!CATEGORY_STATS[@]}" | tr ' ' '\n' | sort); do
-    IFS=':' read -r cat_pass cat_fail <<< "${CATEGORY_STATS[$category]}"
+for category in $(printf '%s\n' "${CATEGORY_NAMES[@]}" | sort); do
+    category_index "$category"
+    idx="$CATEGORY_IDX"
+    cat_pass=${CATEGORY_PASS[$idx]}
+    cat_fail=${CATEGORY_FAIL[$idx]}
     cat_total=$((cat_pass + cat_fail))
     cat_rate=0
     if [ $cat_total -gt 0 ]; then

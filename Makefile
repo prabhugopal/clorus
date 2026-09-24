@@ -26,21 +26,21 @@ help:
 # Build all components in debug mode
 build:
 	@echo "Building Clorus (debug)..."
-	cargo build --bin clorus --bin repl
+	cargo build --bin clorus
 	cargo build -p clorus-runtime --lib
-	cargo build -p clorus-core --lib
+	cargo build -p clorus-std --lib
 	@echo "✅ Debug build complete"
 
 # Build all components in release mode
 build-release:
 	@echo "Building Clorus (release)..."
-	cargo build --release --bin clorus --bin repl
+	cargo build --release --bin clorus
 	cargo build --release -p clorus-runtime --lib
-	cargo build --release -p clorus-core --lib
+	cargo build --release -p clorus-std --lib
 	@echo "✅ Release build complete"
 	@echo ""
 	@echo "Binaries:"
-	@ls -lh target/release/clorus target/release/repl 2>/dev/null || true
+	@ls -lh target/release/clorus 2>/dev/null || true
 	@echo ""
 	@echo "Libraries:"
 	@ls -lh target/release/libclorus_runtime.* 2>/dev/null | grep -v ".d" || true
@@ -48,8 +48,8 @@ build-release:
 
 # Install to INSTALL_DIR (default: ~/.clorus)
 install: build-release
-	@chmod +x install.sh
-	@./install.sh $(INSTALL_DIR)
+	@chmod +x scripts/install/install.sh
+	@./scripts/install/install.sh $(INSTALL_DIR)
 
 # Run tests
 test:
@@ -62,5 +62,5 @@ clean:
 
 # Quick install for development (installs without rebuilding)
 install-dev:
-	@chmod +x install.sh
-	@./install.sh $(INSTALL_DIR)
+	@chmod +x scripts/install/install.sh
+	@./scripts/install/install.sh $(INSTALL_DIR)
