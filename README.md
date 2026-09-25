@@ -1,5 +1,7 @@
 # Clorus
 
+[![CI](https://github.com/prabhugopal/clorus/actions/workflows/ci.yml/badge.svg)](https://github.com/prabhugopal/clorus/actions/workflows/ci.yml)
+
 Clorus is a Clojure-inspired programming language, implemented from scratch in Rust and compiled natively via LLVM — no JVM, no bytecode interpreter. It aims to give Clojure developers the language and REPL workflow they already know, with native performance and first-class, two-way Rust interop.
 
 **Status: alpha.** The core language, standard library, and Rust interop all work end to end (see [Language](#language) below for runnable examples), but there are real gaps and open bugs — see [Known limitations](#known-limitations) before you rely on this for anything beyond experimentation.
