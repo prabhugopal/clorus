@@ -762,14 +762,24 @@ impl<'ctx> CodeGen<'ctx> {
                                 func_name.replace('-', "_")
                             );
 
-                            self.functions.get(&mangled_name).copied()
+                            self.functions
+                                .get(&mangled_name)
+                                .map(|f| (mangled_name, *f))
                         } else {
                             None
                         }
                     } else {
-                        // Unqualified name - try direct lookup first, then mangled for current namespace
+                        // Unqualified name - try direct lookup first, then mangled for current namespace.
+                        // Resolve to (lookup_key, FunctionValue) rather than just FunctionValue: the
+                        // lookup key is what's used below to find this function's calling convention
+                        // in function_signatures. function.get_name() is NOT a safe substitute for it --
+                        // if this name collides with an already-defined LLVM global (e.g. redefining a
+                        // name the auto-loaded stdlib already used), LLVM silently renames the new
+                        // global to keep module-wide names unique, and that renamed name was never a
+                        // function_signatures key.
                         self.functions
-                            .get(name)
+                            .get_key_value(name)
+                            .map(|(k, f)| (k.clone(), *f))
                             .or_else(|| {
                                 if let Some(binding) = self.namespace.imports.get(name) {
                                     let mangled_name = format!(
@@ -777,7 +787,9 @@ impl<'ctx> CodeGen<'ctx> {
                                         binding.namespace.replace('.', "_").replace('-', "_"),
                                         binding.symbol.replace('-', "_")
                                     );
-                                    self.functions.get(&mangled_name)
+                                    self.functions
+                                        .get(&mangled_name)
+                                        .map(|f| (mangled_name, *f))
                                 } else {
                                     None
                                 }
@@ -793,12 +805,13 @@ impl<'ctx> CodeGen<'ctx> {
                                         name.replace('-', "_")
                                     )
                                 };
-                                self.functions.get(&mangled_name)
+                                self.functions
+                                    .get(&mangled_name)
+                                    .map(|f| (mangled_name, *f))
                             })
-                            .copied()
                     };
 
-                    if let Some(function) = function {
+                    if let Some((resolved_name, function)) = function {
                         // Function reference - wrap in function value
                         // Call clorus_function_new with the function pointer and arity
                         let func_new_fn = self
@@ -814,10 +827,9 @@ impl<'ctx> CodeGen<'ctx> {
                             .build_pointer_cast(func_ptr, i8_ptr_type, "func_ptr_cast")
                             .unwrap();
 
-                        let fn_name = function.get_name().to_string_lossy().to_string();
                         let (fixed_params, has_rest) = self
                             .function_signatures
-                            .get(&fn_name)
+                            .get(&resolved_name)
                             .copied()
                             .unwrap_or_else(|| {
                                 // Fallback for externally declared functions
@@ -5523,17 +5535,18 @@ impl<'ctx> CodeGen<'ctx> {
                         format!("{}_arity_{}", function_to_lookup, arg_values.len());
                     let fallback_arity_variant = format!("{}_arity_{}", func, arg_values.len());
 
-                    if let Some(func) = self.functions.get(&arity_variant) {
+                    if let Some(f) = self.functions.get(&arity_variant) {
                         // Found multi-arity variant
-                        (func.clone(), arg_values)
-                    } else if let Some(func) = self.functions.get(&fallback_arity_variant) {
+                        (arity_variant, f.clone(), arg_values)
+                    } else if let Some(f) = self.functions.get(&fallback_arity_variant) {
                         // Found multi-arity variant via bare fallback name
-                        (func.clone(), arg_values)
+                        (fallback_arity_variant, f.clone(), arg_values)
                     } else if let Some(variadic_name) =
                         self.find_variadic_arity_variant(&function_to_lookup, arg_values.len())
                     {
-                        if let Some(func) = self.functions.get(&variadic_name) {
-                            (func.clone(), arg_values)
+                        if let Some(f) = self.functions.get(&variadic_name) {
+                            let f = f.clone();
+                            (variadic_name, f, arg_values)
                         } else {
                             return Err(format!(
                                 "Undefined variadic function variant: {} for call {}",
@@ -5543,8 +5556,9 @@ impl<'ctx> CodeGen<'ctx> {
                     } else if let Some(variadic_name) =
                         self.find_variadic_arity_variant(func, arg_values.len())
                     {
-                        if let Some(func) = self.functions.get(&variadic_name) {
-                            (func.clone(), arg_values)
+                        if let Some(f) = self.functions.get(&variadic_name) {
+                            let f = f.clone();
+                            (variadic_name, f, arg_values)
                         } else {
                             return Err(format!(
                                 "Undefined variadic function variant: {} for call {}",
@@ -5565,35 +5579,47 @@ impl<'ctx> CodeGen<'ctx> {
                             ));
                         }
 
-                        // Try regular function lookup
-                        let func = self
+                        // Try regular function lookup. Keep the exact key that found it
+                        // (function_to_lookup or func) -- see the comment below on why
+                        // function.get_name() cannot be used as a function_signatures key.
+                        let (resolved_name, f) = self
                             .functions
-                            .get(&function_to_lookup)
-                            .or_else(|| self.functions.get(func))
+                            .get_key_value(&function_to_lookup)
+                            .or_else(|| self.functions.get_key_value(func))
                             .ok_or_else(|| {
                                 format!(
                                     "Undefined function: {} (tried {} and multi-arity variants)",
                                     func, function_to_lookup
                                 )
-                            })?
-                            .clone();
-                        (func, arg_values)
+                            })?;
+                        (resolved_name.clone(), f.clone(), arg_values)
                     }
                 };
 
-                let (function, mut arg_values) = function;
+                let (resolved_name, function, mut arg_values) = function;
 
                 // Shape direct-call args for variadic functions:
                 // fixed args + collected rest vector + env
-                let function_name = function.get_name().to_string_lossy().to_string();
+                //
+                // IMPORTANT: the signature lookup below must use the resolved lookup key
+                // above, not function.get_name(). If this call's callee name collides with
+                // an LLVM global already defined earlier in this module (e.g. a user
+                // redefining a name the auto-loaded stdlib already used for its own
+                // top-level function), LLVM silently renames the new global to keep names
+                // unique within the module (e.g. "identity" -> "identity.1").
+                // function.get_name() would then return that renamed symbol, which was
+                // never inserted into function_signatures (that map is always keyed by the
+                // Rust-level mangled name), so the lookup would silently miss, fall through
+                // with no rest-arg wrapping, and pass a raw scalar straight into the
+                // callee's rest-vector slot instead of a collected vector.
                 if let Some((fixed_params, has_rest)) =
-                    self.function_signatures.get(&function_name).copied()
+                    self.function_signatures.get(&resolved_name).copied()
                 {
                     if has_rest {
                         if arg_values.len() < fixed_params {
                             return Err(format!(
                                 "Arity mismatch: function '{}' expects at least {} argument(s), got {}",
-                                function_name,
+                                resolved_name,
                                 fixed_params,
                                 arg_values.len()
                             ));
@@ -5613,7 +5639,7 @@ impl<'ctx> CodeGen<'ctx> {
                     } else if arg_values.len() != fixed_params {
                         return Err(format!(
                             "Arity mismatch: function '{}' expects {}, got {}",
-                            function_name,
+                            resolved_name,
                             fixed_params,
                             arg_values.len()
                         ));
