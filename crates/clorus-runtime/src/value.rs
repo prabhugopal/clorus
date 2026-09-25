@@ -1505,6 +1505,15 @@ pub extern "C" fn clorus_is_var_i32(val: *mut Value) -> i32 { bool_to_i32(clorus
 /// - Booleans: boolean comparison
 /// - Nil: both must be nil
 /// - Other types: pointer equality for now
+/// Equality comparison, boxed as a Value (parity with clorus_lt/clorus_gt/etc,
+/// which all return a boxed Value rather than a raw bool). Used wherever `=`
+/// needs to be treated uniformly with the other comparison operators, e.g.
+/// wrapping it as a first-class function value.
+#[no_mangle]
+pub extern "C" fn clorus_eq(left: *mut Value, right: *mut Value) -> *mut Value {
+    Value::boolean(clorus_equals(left, right))
+}
+
 #[no_mangle]
 pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
     // Handle null pointers

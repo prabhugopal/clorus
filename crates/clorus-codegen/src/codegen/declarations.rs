@@ -120,6 +120,24 @@ impl<'ctx> CodeGen<'ctx> {
 
         // ===== Value Comparison =====
         self.declare_value2_to_bool_fn("clorus_equals"); // General equality function
+        self.declare_value_fn("clorus_eq", 2); // Same, boxed as a Value (parity with clorus_lt/clorus_gt/etc)
+
+        // ===== Variadic arithmetic/comparison wrappers =====
+        // Used only when +/-/*//=/<// etc. are captured as first-class
+        // function values (e.g. `(reduce + coll)`, `(def f +)`) rather than
+        // applied directly -- direct call sites are folded at compile time
+        // by compile_add et al. and never reach these. Each takes a single
+        // pre-collected args Vector plus an environment pointer, matching
+        // clorus_function_call's variadic (fixed_count=0) calling convention.
+        self.declare_value_fn("clorus_add_variadic", 2);
+        self.declare_value_fn("clorus_sub_variadic", 2);
+        self.declare_value_fn("clorus_mul_variadic", 2);
+        self.declare_value_fn("clorus_div_variadic", 2);
+        self.declare_value_fn("clorus_eq_variadic", 2);
+        self.declare_value_fn("clorus_lt_variadic", 2);
+        self.declare_value_fn("clorus_gt_variadic", 2);
+        self.declare_value_fn("clorus_lte_variadic", 2);
+        self.declare_value_fn("clorus_gte_variadic", 2);
 
         // ===== Collection Access Functions =====
         self.declare_value_fn("clorus_get", 2);

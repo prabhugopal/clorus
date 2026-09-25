@@ -1,0 +1,77 @@
+(ns tests.language.test-variadic-operators)
+
+;; Regression test: +/-/*//=/<// etc., when captured as first-class function
+;; values (not applied directly), were wrapped as fixed 2-arg function
+;; values, so calling them with any arg count other than exactly 2 silently
+;; returned nil instead of erroring (clorus_function_call's arity check
+;; rejected the mismatch quietly, since call-error logging is off by
+;; default). `=` was worse -- wrapped as a symbol ("clorus_eq") that was
+;; never actually declared anywhere, so `(def f =)` failed to compile at
+;; all. `/` couldn't be captured as a value either, for an unrelated reason:
+;; the qualified-name check used to detect `ns/sym` references was a plain
+;; `name.contains('/')`, which is also true for the bare symbol `/` itself.
+;;
+;; Direct call sites like `(+ 1 2 3)` were never affected -- those are
+;; folded entirely at compile time (compile_add et al. in
+;; clorus-codegen/src/codegen/arithmetic.rs) and never go through this path.
+;; This test exercises the value-capture path specifically, matching real
+;; Clojure's variadic semantics at each arity.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (def p +)
+    (assert-eq "(p) => 0" (p) 0)
+    (assert-eq "(p 5) => 5" (p 5) 5)
+    (assert-eq "(p 5 3) => 8" (p 5 3) 8)
+    (assert-eq "(p 1 2 3 4) => 10" (p 1 2 3 4) 10)
+
+    (def m -)
+    (assert-eq "(m 5) => -5" (m 5) -5)
+    (assert-eq "(m 10 3) => 7" (m 10 3) 7)
+    (assert-eq "(m 10 3 2) => 5" (m 10 3 2) 5)
+
+    (def mu *)
+    (assert-eq "(mu) => 1" (mu) 1)
+    (assert-eq "(mu 5) => 5" (mu 5) 5)
+    (assert-eq "(mu 2 3 4) => 24" (mu 2 3 4) 24)
+
+    (def d /)
+    (assert-eq "(d 5) => 0.2" (d 5) 0.2)
+    (assert-eq "(d 10 2) => 5" (d 10 2) 5.0)
+    (assert-eq "(d 100 5 2) => 10" (d 100 5 2) 10.0)
+
+    (def e =)
+    (assert-eq "(e) => true" (e) true)
+    (assert-eq "(e 5) => true" (e 5) true)
+    (assert-eq "(e 5 5) => true" (e 5 5) true)
+    (assert-eq "(e 5 5 5) => true" (e 5 5 5) true)
+    (assert-eq "(e 5 5 6) => false" (e 5 5 6) false)
+
+    (def lt <)
+    (assert-eq "(lt) => true" (lt) true)
+    (assert-eq "(lt 5) => true" (lt 5) true)
+    (assert-eq "(lt 1 2 3) => true" (lt 1 2 3) true)
+    (assert-eq "(lt 1 3 2) => false" (lt 1 3 2) false)
+
+    ;; The pattern that originally surfaced this: a captured operator used
+    ;; via reduce/apply, and a multi-arity closure completion arity calling
+    ;; a captured reducing function with 1 argument (the transducer
+    ;; `completing` shape).
+    (assert-eq "reduce +" (reduce + [1 2 3 4 5]) 15)
+    (assert-eq "reduce + single elem, no init" (reduce + [42]) 42)
+    (assert-eq "apply <" (apply < [1 2 3]) true)
+
+    (defn completing [f]
+      (fn
+        ([result] result)
+        ([result input] (f result input))))
+    (def plus-rf (completing +))
+    (assert-eq "completing 1-arity" (plus-rf 42) 42)
+    (assert-eq "completing 2-arity" (plus-rf 42 5) 47)
+
+    (println "All variadic operator tests passed!")))

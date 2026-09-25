@@ -364,6 +364,133 @@ pub extern "C" fn clorus_gte(a: *mut Value, b: *mut Value) -> *mut Value {
 }
 
 // ============================================================================
+// Variadic wrappers, for use when +/-/*//=/<// etc. are captured as
+// first-class function values (e.g. `(reduce + coll)`, `(def f +)`) rather
+// than applied directly. Direct call sites like `(+ 1 2 3)` are folded at
+// compile time instead (see compile_add et al. in clorus-codegen's
+// arithmetic.rs) and never reach these; these give a runtime-callable
+// function value the same variadic semantics, since clorus_function_call
+// can't unroll a compile-time loop. Called via the variadic calling
+// convention (see clorus_function_call/call_variadic_function): all
+// arguments arrive pre-collected into a single Vector Value, plus an
+// (unused, these ops never close over anything) environment pointer.
+// ============================================================================
+
+/// Left-fold a Vector of Values with Clojure's `(op a b c ...)` semantics:
+/// zero args -> `zero_args()`, one arg -> `one_arg(x)`, two or more ->
+/// pairwise `op` folded left-to-right. Shared by +/-/*// so each only needs
+/// to supply its own identity/unary-case/pairwise-op, not reimplement the
+/// arg-count dispatch.
+unsafe fn fold_variadic_arithmetic(
+    args_vec: *mut Value,
+    zero_args: fn() -> *mut Value,
+    one_arg: fn(*mut Value) -> *mut Value,
+    op: extern "C" fn(*mut Value, *mut Value) -> *mut Value,
+) -> *mut Value {
+    let count = crate::vector::clorus_vector_count(args_vec);
+    if count == 0 {
+        return zero_args();
+    }
+    let first = crate::vector::clorus_vector_nth(args_vec, 0);
+    if count == 1 {
+        return one_arg(first);
+    }
+    let mut acc = first;
+    for i in 1..count {
+        acc = op(acc, crate::vector::clorus_vector_nth(args_vec, i));
+    }
+    acc
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_add_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { fold_variadic_arithmetic(args, || Value::long(0), |x| x, clorus_add) }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_mul_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { fold_variadic_arithmetic(args, || Value::long(1), |x| x, clorus_mul) }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_sub_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe {
+        fold_variadic_arithmetic(
+            args,
+            || {
+                eprintln!("Arity error: - requires at least 1 argument");
+                Value::nil()
+            },
+            |x| clorus_sub(Value::long(0), x),
+            clorus_sub,
+        )
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_div_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe {
+        fold_variadic_arithmetic(
+            args,
+            || {
+                eprintln!("Arity error: / requires at least 1 argument");
+                Value::nil()
+            },
+            |x| clorus_div(Value::long(1), x),
+            clorus_div,
+        )
+    }
+}
+
+/// Chain a Vector of Values with Clojure's `(cmp a b c ...)` semantics: true
+/// iff every consecutive pair satisfies `pairwise` (e.g. `(< 1 2 3)` checks
+/// 1<2 and 2<3). Zero or one arg is vacuously true, matching real Clojure.
+/// Shared by =/</>/<=/>= so each only supplies its own pairwise comparison.
+unsafe fn chain_compare(
+    args_vec: *mut Value,
+    pairwise: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value,
+) -> *mut Value {
+    let count = crate::vector::clorus_vector_count(args_vec);
+    if count <= 1 {
+        return Value::boolean(true);
+    }
+    let mut prev = crate::vector::clorus_vector_nth(args_vec, 0);
+    for i in 1..count {
+        let cur = crate::vector::clorus_vector_nth(args_vec, i);
+        if crate::value::clorus_is_truthy(pairwise(prev, cur)) == 0 {
+            return Value::boolean(false);
+        }
+        prev = cur;
+    }
+    Value::boolean(true)
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_eq_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { chain_compare(args, crate::value::clorus_eq) }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_lt_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { chain_compare(args, clorus_lt) }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_gt_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { chain_compare(args, clorus_gt) }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_lte_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { chain_compare(args, clorus_lte) }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_gte_variadic(args: *mut Value, _env: *mut i8) -> *mut Value {
+    unsafe { chain_compare(args, clorus_gte) }
+}
+
+// ============================================================================
 // Bitwise Operations (Long only)
 // ============================================================================
 

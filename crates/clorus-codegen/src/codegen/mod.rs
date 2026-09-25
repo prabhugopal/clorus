@@ -156,6 +156,15 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    /// True if `name` is a namespace/alias-qualified reference (`ns/sym`),
+    /// as opposed to a bare symbol. A plain `.contains('/')` check is wrong
+    /// here: the bare symbol `/` (division) trivially "contains" a slash
+    /// without being qualified by anything, so every qualified-name check in
+    /// this file must special-case it rather than repeat the mistake.
+    fn is_qualified_name(name: &str) -> bool {
+        name.contains('/') && name != "/"
+    }
+
     fn next_generated_name(&mut self, kind: &str) -> String {
         let name = format!(
             "__clorus_{}_{}_{}",
@@ -607,7 +616,7 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // First, try to resolve qualified names (namespace/var or alias/var)
                 // Globals are now namespace-mangled like functions
-                let resolved_name = if name.contains('/') {
+                let resolved_name = if Self::is_qualified_name(name) {
                     let parts: Vec<&str> = name.split('/').collect();
                     if parts.len() == 2 {
                         let namespace_or_alias = parts[0];
@@ -675,17 +684,27 @@ impl<'ctx> CodeGen<'ctx> {
                 } else {
                     // Built-in arithmetic/comparison operators as first-class function values.
                     // This enables forms like `(reduce + [1 2 3])` with Clojure-like semantics.
-                    if !name.contains('/') {
+                    // These wrap the *_variadic runtime functions, not the raw 2-arg
+                    // primitives (clorus_add etc.) directly: real Clojure's `+`/`-`/`*`//`/
+                    // `=`/`<`/`>`/`<=`/`>=` all accept 0, 1, or N arguments with real
+                    // semantics at each arity (e.g. `(+ 5)` => 5, `(< 1 2 3)` => true),
+                    // and clorus_function_call enforces an exact arity match for any
+                    // non-variadic function value -- wrapping the 2-arg primitive as a
+                    // fixed arity=2 value would make `(reduce + coll)` silently return nil
+                    // the moment coll has anything other than exactly 2 elements. The
+                    // negative arity encodes "0 fixed args, then a rest vector" per
+                    // clorus_function_call's variadic calling convention.
+                    if !Self::is_qualified_name(name) {
                         let builtin_fn = match name.as_str() {
-                            "+" => Some(("clorus_add", 2)),
-                            "-" => Some(("clorus_sub", 2)),
-                            "*" => Some(("clorus_mul", 2)),
-                            "/" => Some(("clorus_div", 2)),
-                            "=" => Some(("clorus_eq", 2)),
-                            "<" => Some(("clorus_lt", 2)),
-                            ">" => Some(("clorus_gt", 2)),
-                            "<=" => Some(("clorus_lte", 2)),
-                            ">=" => Some(("clorus_gte", 2)),
+                            "+" => Some(("clorus_add_variadic", -1)),
+                            "-" => Some(("clorus_sub_variadic", -1)),
+                            "*" => Some(("clorus_mul_variadic", -1)),
+                            "/" => Some(("clorus_div_variadic", -1)),
+                            "=" => Some(("clorus_eq_variadic", -1)),
+                            "<" => Some(("clorus_lt_variadic", -1)),
+                            ">" => Some(("clorus_gt_variadic", -1)),
+                            "<=" => Some(("clorus_lte_variadic", -1)),
+                            ">=" => Some(("clorus_gte_variadic", -1)),
                             _ => None,
                         };
 
@@ -740,7 +759,7 @@ impl<'ctx> CodeGen<'ctx> {
 
                     // Try to find function - check both unmangled and mangled names
                     // Also handle qualified names (namespace/function or alias/function)
-                    let function = if name.contains('/') {
+                    let function = if Self::is_qualified_name(name) {
                         // Qualified name - resolve alias and look up function
                         let parts: Vec<&str> = name.split('/').collect();
                         if parts.len() == 2 {
@@ -892,7 +911,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Resolve global target (qualified, imported, or current namespace).
-                let resolved_name = if target.contains('/') {
+                let resolved_name = if Self::is_qualified_name(target) {
                     let parts: Vec<&str> = target.split('/').collect();
                     if parts.len() == 2 {
                         let namespace_or_alias = parts[0];
@@ -1033,7 +1052,7 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Var { name } => {
                 // Return Var object itself (no auto-deref).
                 // Supports #'x / #'ns/x for metadata and var operations.
-                let resolved_name = if name.contains('/') {
+                let resolved_name = if Self::is_qualified_name(name) {
                     let parts: Vec<&str> = name.split('/').collect();
                     if parts.len() == 2 {
                         let namespace_or_alias = parts[0];
@@ -2856,7 +2875,7 @@ impl<'ctx> CodeGen<'ctx> {
                 for (protocol_name, methods) in protocols {
                     // Extract protocol simple name (after / if qualified)
                     // E.g., "p/IComponent" -> "IComponent"
-                    let protocol_simple_name: &str = if protocol_name.contains('/') {
+                    let protocol_simple_name: &str = if Self::is_qualified_name(protocol_name) {
                         protocol_name.split('/').last().unwrap()
                     } else {
                         protocol_name.as_str()
@@ -3283,7 +3302,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // 2. Generate protocol method implementations
                 for (protocol_name, methods) in protocols {
                     // Extract protocol simple name (after / if qualified)
-                    let protocol_simple_name: &str = if protocol_name.contains('/') {
+                    let protocol_simple_name: &str = if Self::is_qualified_name(protocol_name) {
                         protocol_name.split('/').last().unwrap()
                     } else {
                         protocol_name.as_str()
@@ -3400,7 +3419,7 @@ impl<'ctx> CodeGen<'ctx> {
                 // Example: Point_Drawable_draw
 
                 // Extract protocol simple name (after / if qualified)
-                let protocol_simple_name: &str = if protocol_name.contains('/') {
+                let protocol_simple_name: &str = if Self::is_qualified_name(protocol_name) {
                     protocol_name.split('/').last().unwrap()
                 } else {
                     protocol_name.as_str()
@@ -5092,7 +5111,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Check if this is a qualified call (namespace/function or alias/function)
-                if func.contains('/') {
+                if Self::is_qualified_name(func) {
                     let parts: Vec<&str> = func.split('/').collect();
                     if parts.len() == 2 {
                         let namespace_or_alias = parts[0];
@@ -5469,7 +5488,7 @@ impl<'ctx> CodeGen<'ctx> {
                     || self.functions.contains_key(&function_to_lookup)
                     || self.functions.contains_key(func);
                 if !has_static_target {
-                    let resolved_name = if func.contains('/') {
+                    let resolved_name = if Self::is_qualified_name(func) {
                         let parts: Vec<&str> = func.split('/').collect();
                         if parts.len() == 2 {
                             let namespace_or_alias = parts[0];
