@@ -7,8 +7,8 @@
 
 | Suite | File Count |
 |---|---:|
-| `tests/language` | 79 |
-| `tests/stdlib` | 30 |
+| `tests/language` | 81 |
+| `tests/stdlib` | 31 |
 | `tests/integration` | 4 |
 | `tests/compiler` | 5 |
 | `tests/parity` harness files | 3 |

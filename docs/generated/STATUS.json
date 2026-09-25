@@ -440,9 +440,9 @@
     "test_inventory": {
       "compiler": 5,
       "integration": 4,
-      "language": 79,
+      "language": 81,
       "parity_harness": 3,
-      "stdlib": 30
+      "stdlib": 31
     }
   }
 }
