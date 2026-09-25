@@ -35,3 +35,55 @@
 ;; superset? - Is s1 a superset of s2?
 (defn superset? [s1 s2]
   (subset? s2 s1))
+
+;; rename-keys - Rename keys in a map according to kmap {old-key new-key}
+;; (rename-keys {:a 1 :b 2} {:a :x}) => {:x 1 :b 2}
+(defn rename-keys [m kmap]
+  (reduce (fn [acc entry]
+            (let [old (first entry)
+                  new (last entry)]
+              (if (contains? m old)
+                (assoc (dissoc acc old) new (get m old))
+                acc)))
+          m
+          kmap))
+
+;; select - Elements of xset matching pred (a relational-algebra "select")
+;; (select even? #{1 2 3 4}) => #{2 4}
+(defn select [pred xset]
+  (reduce (fn [acc x] (if (pred x) (conj acc x) acc))
+          (empty xset)
+          xset))
+
+;; project - For a set of maps (a relation), keep only the given keys in
+;; each map
+;; (project #{{:a 1 :b 2} {:a 3 :b 4}} [:a]) => #{{:a 1} {:a 3}}
+(defn project [xrel ks]
+  (reduce (fn [acc m] (conj acc (select-keys m ks)))
+          (empty xrel)
+          xrel))
+
+;; rename - For a set of maps (a relation), rename keys in each map
+;; according to kmap
+;; (rename #{{:a 1 :b 2}} {:a :x}) => #{{:x 1 :b 2}}
+(defn rename [xrel kmap]
+  (reduce (fn [acc m] (conj acc (rename-keys m kmap)))
+          (empty xrel)
+          xrel))
+
+;; map-invert - Swap keys and values in a map
+;; (map-invert {:a 1 :b 2}) => {1 :a 2 :b}
+(defn map-invert [m]
+  (reduce (fn [acc entry] (assoc acc (last entry) (first entry)))
+          {}
+          m))
+
+;; index - Index a relation (set of maps) by the given keys, grouping
+;; maps that share the same values for those keys
+;; (index #{{:a 1 :b 2} {:a 1 :b 3}} [:a]) => {{:a 1} #{{:a 1 :b 2} {:a 1 :b 3}}}
+(defn index [xrel ks]
+  (reduce (fn [acc x]
+            (let [ik (select-keys x ks)]
+              (assoc acc ik (conj (get acc ik #{}) x))))
+          {}
+          xrel))
