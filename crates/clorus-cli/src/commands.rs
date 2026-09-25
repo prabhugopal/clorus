@@ -1166,8 +1166,15 @@ fn load_and_compile_modules<'ctx>(
     loaded: &mut HashSet<String>,
     project_root: &Path,
     source_dirs: &[String],
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     use clorus_codegen::namespace_context::{ImportBinding, NamespaceContext};
+
+    // Wrapper function names created below, in compile order -- the caller
+    // must actually call these (they're not just declarations: each one's
+    // body may include side-effecting Var-backed-global initialization
+    // that other code compiled later relies on reading), so this list has
+    // to be executed, not discarded.
+    let mut wrapper_fn_names = Vec::new();
 
     for module_name in modules {
         if loaded.contains(module_name) {
@@ -1230,7 +1237,13 @@ fn load_and_compile_modules<'ctx>(
         // Extract and load transitive dependencies first
         let sub_modules = extract_required_modules(&exprs);
         if !sub_modules.is_empty() {
-            load_and_compile_modules(&sub_modules, codegen, loaded, project_root, source_dirs)?;
+            wrapper_fn_names.extend(load_and_compile_modules(
+                &sub_modules,
+                codegen,
+                loaded,
+                project_root,
+                source_dirs,
+            )?);
         }
 
         // Compile this module's expressions
@@ -1323,12 +1336,13 @@ fn load_and_compile_modules<'ctx>(
             let fn_name = format!("mod_{}_{}", module_name.replace('.', "_"), loaded.len());
             codegen.wrap_in_function(expr, &fn_name)
                 .map_err(|e| format!("Compile error in {}: {}", module_name, e))?;
+            wrapper_fn_names.push(fn_name);
         }
 
         loaded.insert(module_name.clone());
     }
 
-    Ok(())
+    Ok(wrapper_fn_names)
 }
 
 
@@ -1736,6 +1750,15 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
     };
     codegen.set_namespace(stdlib_ns);
 
+    // Wrapper function names created while compiling stdlib and required
+    // modules, in dependency order. These must actually be *called* later,
+    // not just compiled: a defn's Var-backed global (used whenever that
+    // function is referenced as a bare value, e.g. `(reduce conj to from)`)
+    // is only populated by the store instructions inside its own wrapper.
+    // A stdlib/module form that's compiled but whose wrapper never runs
+    // leaves that global uninitialized for anyone who later reads it.
+    let mut prelude_fn_names: Vec<String> = Vec::new();
+
     for (i, form) in all_forms.iter().take(stdlib_expr_count).enumerate() {
         // Skip namespace declarations
         if matches!(form.expr, Expr::Ns { .. }) {
@@ -1753,6 +1776,7 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
         let fn_name = format!("stdlib_init_{}", i);
         codegen.wrap_in_function(&form.expr, &fn_name)
             .map_err(|e| compile_error_with_context(form, e))?;
+        prelude_fn_names.push(fn_name);
     }
 
     if debug {
@@ -1797,7 +1821,13 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
     };
 
     if !source_modules.is_empty() {
-        load_and_compile_modules(&source_modules, &mut codegen, &mut loaded_modules, &project_root, &source_dirs)?;
+        prelude_fn_names.extend(load_and_compile_modules(
+            &source_modules,
+            &mut codegen,
+            &mut loaded_modules,
+            &project_root,
+            &source_dirs,
+        )?);
     }
 
     // Update namespace context for entry file
@@ -1897,10 +1927,20 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
         }
     }
 
-    let mut function_names = Vec::new();
+    // Stdlib expressions (the first stdlib_expr_count entries of all_forms)
+    // were already compiled once above, under the "user" namespace, so that
+    // load_and_compile_modules could resolve stdlib references while
+    // compiling required modules. Compiling them again here would redefine
+    // every stdlib function under whatever namespace context is now active
+    // (the entry file's own, if it declared one) -- LLVM would silently
+    // auto-rename the resulting duplicate globals rather than erroring, and
+    // any required module compiled above (which can only see the first
+    // copy) would keep calling into functions whose wrapper -- the one
+    // that's actually about to run below -- never touches them. Skip that
+    // portion and start numbering from where it left off.
+    let mut function_names = prelude_fn_names;
 
-    // Compile all expressions
-    for (i, form) in all_forms.iter().enumerate() {
+    for (i, form) in all_forms.iter().enumerate().skip(stdlib_expr_count) {
         let fn_name = format!("expr_{}", i);
         codegen.wrap_in_function(&form.expr, &fn_name)
             .map_err(|e| compile_error_with_context(form, e))?;
