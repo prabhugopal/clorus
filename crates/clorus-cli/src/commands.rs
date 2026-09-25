@@ -1091,8 +1091,15 @@ fn build_internal(mut lib_mode: bool, debug: bool, explicit_entry: Option<String
     // Add output path
     link_cmd.arg("-o").arg(&exe_path);
 
-    // Link C++ standard library (for LLVM runtime)
+    // Link C++ standard library (for LLVM runtime). macOS/BSD ship libc++
+    // as the system default; Linux ships libstdc++ and doesn't have libc++
+    // installed unless a caller explicitly added it (e.g. `libc++-18-dev`),
+    // so `-lc++` there fails with "cannot find -lc++" even though the
+    // system has a perfectly good C++ runtime under a different name.
+    #[cfg(target_os = "macos")]
     link_cmd.arg("-lc++");
+    #[cfg(not(target_os = "macos"))]
+    link_cmd.arg("-lstdc++");
 
     // Add system libraries from manifest
     for lib in &manifest.link.libraries {

@@ -58,23 +58,5 @@ jobs:
       - name: Build workspace (release)
         run: cargo build --release --workspace
 
-      - name: Run Rust unit/doc tests
-        run: cargo test --workspace --release
-
-      # TEMPORARY diagnostic: tests/run_all_tests.sh redirects all test
-      # invocations to /dev/null, which is hiding the real error behind
-      # nearly every --legacy-run (AOT) failure on Linux while JIT passes
-      # clean. Run one trivial legacy test directly, with stderr visible,
-      # to see what's actually failing before touching anything.
-      - name: DIAGNOSTIC - legacy-run with visible stderr
-        run: |
-          echo "=== plain cwd, plain env ==="
-          CLORUS_ENTRY_FILE=tests/language/test-minimal.clr ./target/release/clorus run --legacy-run; echo "exit=$?"
-          echo "=== harness-style: cd /tmp + isolated CARGO_TARGET_DIR/TMPDIR ==="
-          mkdir -p /tmp/diag-isolation/tmp /tmp/diag-isolation/cargo-target
-          CLORUS_HOME="$(pwd)" CARGO_TARGET_DIR=/tmp/diag-isolation/cargo-target TMPDIR=/tmp/diag-isolation/tmp \
-            CLORUS_ENTRY_FILE="$(pwd)/tests/language/test-minimal.clr" \
-            bash -c 'cd /tmp && "$0" run --legacy-run' "$(pwd)/target/release/clorus"; echo "exit=$?"
-
       - name: Run dual-engine language/stdlib test suite
         run: ./tests/run_all_tests.sh

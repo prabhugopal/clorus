@@ -69,8 +69,14 @@ pub fn build_dylib_for_repl(package: &ClipPackage) -> Result<PathBuf, String> {
         .arg(runtime_lib)                  // Runtime library
         .arg("-o").arg(&dylib_path);       // Output dynamic library
 
-    // Add C++ standard library (for LLVM runtime)
+    // Add C++ standard library (for LLVM runtime). See the matching note in
+    // clorus-cli/src/commands.rs's executable-link path: macOS ships libc++
+    // as the system default, Linux ships libstdc++ and doesn't have libc++
+    // installed by default.
+    #[cfg(target_os = "macos")]
     link_cmd.arg("-lc++");
+    #[cfg(not(target_os = "macos"))]
+    link_cmd.arg("-lstdc++");
 
     // Platform-specific flags
     #[cfg(target_os = "macos")]

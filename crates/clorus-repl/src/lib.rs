@@ -2071,8 +2071,16 @@ fn build_dylib_for_package(package: &ClipPackage) -> Result<std::path::PathBuf, 
     link_cmd
         .arg("-shared")
         .arg(object_path)
-        .arg("-o").arg(&dylib_path)
-        .arg("-lc++");
+        .arg("-o").arg(&dylib_path);
+
+    // Link C++ standard library (for LLVM runtime). See the matching note
+    // in clorus-cli/src/commands.rs's executable-link path: macOS ships
+    // libc++ as the system default, Linux ships libstdc++ and doesn't have
+    // libc++ installed by default.
+    #[cfg(target_os = "macos")]
+    link_cmd.arg("-lc++");
+    #[cfg(not(target_os = "macos"))]
+    link_cmd.arg("-lstdc++");
 
     #[cfg(not(target_os = "macos"))]
     {
