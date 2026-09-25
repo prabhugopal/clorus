@@ -1,0 +1,47 @@
+(ns tests.stdlib.test-transducers-completion-gap)
+
+;; Regression test for the transducer/stdlib completion gap documented in
+;; stdlib/README.md: remove/drop/take-while/drop-while/cat/mapcat/dedupe/
+;; partition-by, each as both a direct 2-arg eager-collection call and (where
+;; applicable) a composed 1-arg transducer, matching the established
+;; map/filter/take dual-arity pattern in stdlib/clorus/transducers.clr.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; Direct eager forms
+    (assert-eq "remove" (remove odd? [1 2 3 4 5]) [2 4])
+    (assert-eq "drop" (drop 2 [1 2 3 4 5]) [3 4 5])
+    (assert-eq "drop vector" (drop 2 [1 2 3 4 5]) [3 4 5])
+    (assert-eq "drop 0" (drop 0 [1 2 3]) [1 2 3])
+    (assert-eq "drop all" (drop 10 [1 2 3]) [])
+    (assert-eq "take-while" (take-while (fn [x] (< x 4)) [1 2 3 6 7 1]) [1 2 3])
+    (assert-eq "drop-while" (drop-while (fn [x] (< x 4)) [1 2 3 6 7 1]) [6 7 1])
+    (assert-eq "mapcat" (mapcat (fn [x] [x x]) [1 2 3]) [1 1 2 2 3 3])
+    (assert-eq "dedupe" (dedupe [1 1 2 2 3 1 1]) [1 2 3 1])
+    (assert-eq "dedupe no dups" (dedupe [1 2 3]) [1 2 3])
+    (assert-eq "partition-by" (partition-by odd? [1 3 2 4 5]) [[1 3] [2 4] [5]])
+
+    ;; Composed transducers via transduce
+    (assert-eq "transduce remove" (transduce (remove odd?) conj [] [1 2 3 4 5]) [2 4])
+    (assert-eq "transduce drop" (transduce (drop 2) conj [] [1 2 3 4 5]) [3 4 5])
+    (assert-eq "transduce take-while" (transduce (take-while (fn [x] (< x 4))) conj [] [1 2 3 6 7 1]) [1 2 3])
+    (assert-eq "transduce drop-while" (transduce (drop-while (fn [x] (< x 4))) conj [] [1 2 3 6 7 1]) [6 7 1])
+    (assert-eq "transduce mapcat" (transduce (mapcat (fn [x] [x x])) conj [] [1 2 3]) [1 1 2 2 3 3])
+    (assert-eq "transduce cat" (transduce cat conj [] [[1 2] [3 4] [5]]) [1 2 3 4 5])
+
+    ;; into with a transducer (matches how these compose downstream)
+    (assert-eq "into remove" (into [] (remove odd?) [1 2 3 4 5]) [2 4])
+    (assert-eq "into mapcat" (into [] (mapcat (fn [x] [x x])) [1 2 3]) [1 1 2 2 3 3])
+
+    ;; Composed pipeline: matches the general "several transducers stacked"
+    ;; usage pattern, exercising comp + reduced short-circuiting together.
+    (assert-eq "composed pipeline"
+               (transduce (comp (map inc) (filter even?) (take 2)) conj [] [1 2 3 4 5 6 7 8])
+               [2 4])
+
+    (println "All transducer completion-gap tests passed!")))

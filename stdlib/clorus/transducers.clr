@@ -98,6 +98,175 @@
               (rest remaining)
               (inc count))))))
 
+(defn drop
+  "Drop transducer - drops first n elements."
+  ([n]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (if (> (swap! counter inc) n)
+            (rf result input)
+            result))))))
+  ([n coll]
+   (if (vector? coll)
+     (let [len (count coll)
+           start (if (< n len) n len)]
+       (loop [i start
+              acc []]
+         (if (>= i len)
+           acc
+           (recur (+ i 1) (conj acc (nth coll i))))))
+     (loop [remaining coll
+            n n]
+       (if (or (<= n 0) (empty? remaining))
+         remaining
+         (recur (rest remaining) (dec n)))))))
+
+(defn take-while
+  "Take-while transducer - takes elements while pred is true."
+  ([pred]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (if (pred input)
+          (rf result input)
+          (reduced result))))))
+  ([pred coll]
+   (let [pred (ensure-fn "take-while" pred)
+         coll (ensure-coll "take-while" coll)]
+     (loop [remaining coll
+            acc []]
+       (if (empty? remaining)
+         acc
+         (let [x (first remaining)]
+           (if (pred x)
+             (recur (rest remaining) (conj acc x))
+             acc)))))))
+
+(defn drop-while
+  "Drop-while transducer - drops elements while pred is true, then passes the rest through."
+  ([pred]
+   (fn [rf]
+     (let [dropping (atom true)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (if (and @dropping (pred input))
+            result
+            (do (reset! dropping false)
+                (rf result input))))))))
+  ([pred coll]
+   (let [pred (ensure-fn "drop-while" pred)
+         coll (ensure-coll "drop-while" coll)]
+     (loop [remaining coll]
+       (if (empty? remaining)
+         []
+         (if (pred (first remaining))
+           (recur (rest remaining))
+           remaining))))))
+
+(defn remove
+  "Remove transducer - drops elements for which pred is true (complement of filter)."
+  ([pred]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (if (pred input)
+          result
+          (rf result input))))))
+  ([pred coll]
+   (let [pred (ensure-fn "remove" pred)]
+     (filter (complement pred) coll))))
+
+;; A unique sentinel distinguishable from any real collection element, used
+;; by `partition-by` to detect "no previous value yet" without relying on
+;; reference-identity comparison (not exposed by the runtime) or colliding
+;; with a legitimate `nil`/falsy first key.
+;;
+;; Note: `dedupe` is *not* defined here -- it's already a fixed-arity-1
+;; runtime builtin (clorus_dedupe, wired in codegen/calls.rs), which takes
+;; precedence over any same-named stdlib defn. It's eager-only (no
+;; transducer-producing 0-arity form); adding one would mean teaching that
+;; builtin's dispatch about multi-arity, which is out of scope here.
+(def ^:private transducer-none :clorus.transducers/__none__)
+
+(defn cat
+  "Cat transducer - concatenates a collection of collections, flattening one level.
+   Unlike the other transducers here this has no eager 2-arity form (matching
+   Clojure): it's meant to be composed, typically via `mapcat`."
+  [rf]
+  (fn
+    ([result] (rf result))
+    ([result input]
+     (reduce (fn [acc x]
+               (let [r (rf acc x)]
+                 (if (reduced? r) (unreduced r) r)))
+             result
+             input))))
+
+(defn mapcat
+  "Mapcat transducer - maps f over each element then concatenates the results."
+  ([f]
+   (comp (map f) cat))
+  ([f coll]
+   (loop [remaining coll
+          acc []]
+     (if (empty? remaining)
+       acc
+       (recur (rest remaining)
+              (concat acc (f (first remaining))))))))
+
+(defn partition-by
+  "Partition-by transducer - groups consecutive elements for which (f item) is equal."
+  ([f]
+   (fn [rf]
+     (let [group (atom [])
+           prev-key (atom transducer-none)]
+       (fn
+         ([result]
+          (let [g @group]
+            (rf (if (empty? g)
+                  result
+                  (let [r (rf result g)]
+                    (if (reduced? r) (unreduced r) r))))))
+         ([result input]
+          (let [k (f input)
+                pk @prev-key]
+            (if (or (= pk transducer-none) (= k pk))
+              (do (swap! group conj input)
+                  (reset! prev-key k)
+                  result)
+              (let [g @group]
+                (reset! group [input])
+                (reset! prev-key k)
+                (rf result g)))))))))
+  ([f coll]
+   (let [f (ensure-fn "partition-by" f)
+         coll (ensure-coll "partition-by" coll)]
+     (if (empty? coll)
+       []
+       (loop [remaining (rest coll)
+              current-key (f (first coll))
+              current-group [(first coll)]
+              result []]
+         (if (empty? remaining)
+           (conj result current-group)
+           (let [x (first remaining)
+                 k (f x)]
+             (if (= k current-key)
+               (recur (rest remaining)
+                      current-key
+                      (conj current-group x)
+                      result)
+               (recur (rest remaining)
+                      k
+                      [x]
+                      (conj result current-group))))))))))
+
 ;; =============================================================================
 ;; Transducer Application
 ;; =============================================================================
