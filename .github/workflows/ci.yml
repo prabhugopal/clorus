@@ -40,13 +40,13 @@ jobs:
           # of the main llvm-18/llvm-18-dev packages; llvm-sys still links
           # against it unconditionally, so without this llvm-sys fails with
           # "could not find native static library `Polly`".
-          sudo apt-get install -y libpolly-18-dev
+          sudo apt-get install -y libpolly-18-dev ripgrep
           echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> "$GITHUB_ENV"
 
       - name: Install LLVM 18 (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install llvm@18
+          brew install llvm@18 ripgrep
           echo "LLVM_SYS_181_PREFIX=$(brew --prefix llvm@18)" >> "$GITHUB_ENV"
 
       - name: Install Rust
