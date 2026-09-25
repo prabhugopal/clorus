@@ -1,0 +1,81 @@
+;; clojure.walk - Generic tree-walking for Clorus data structures
+;; Ported from Clojure's clojure.walk, minus the JVM-only IMapEntry/IRecord
+;; special cases (Clorus maps are already seqable as plain [k v] vectors,
+;; so the generic coll? branch below handles them without any extra help).
+
+(ns clorus.walk)
+
+;; seq->list - Rebuild a list from a seqable collection, preserving order.
+;; Needed because (conj a-list x) prepends (matching Clojure), so building a
+;; list via the generic (into (empty form) ...) path would reverse element
+;; order. Real Clojure's walk sidesteps this with (apply list ...); Clorus
+;; can't yet pass `list` itself as a first-class value to apply, so this
+;; reduces over the reversed input instead, prepending each element to land
+;; it back in its original position.
+(defn seq->list [coll]
+  (reduce (fn [acc x] (conj acc x)) (list) (reverse coll)))
+
+;; walk - The general tree-walking function underlying postwalk/prewalk.
+;; Applies `inner` to each element of `form` (recursively transforming
+;; children), then applies `outer` to the resulting top-level form.
+(defn walk [inner outer form]
+  (cond
+    (list? form) (outer (seq->list (map inner form)))
+    (coll? form) (outer (into (empty form) (map inner form)))
+    :else (outer form)))
+
+;; postwalk - Performs a depth-first, post-order traversal of form, calling f
+;; on each sub-form after its children have already been walked.
+;; Example: (postwalk (fn [x] (if (number? x) (inc x) x)) [1 [2 3]])
+;;          ; => [2 [3 4]]
+(defn postwalk [f form]
+  (walk (partial postwalk f) f form))
+
+;; prewalk - Like postwalk, but f is called on each sub-form BEFORE its
+;; children are walked (pre-order). Useful when f's replacement should
+;; itself be walked further.
+(defn prewalk [f form]
+  (walk (partial prewalk f) f (f form)))
+
+;; postwalk-replace - Recursively replaces any sub-form that is a key in
+;; smap with its corresponding value.
+;; Example: (postwalk-replace {:a :b} [:a {:x :a}]) ; => [:b {:x :b}]
+(defn postwalk-replace [smap form]
+  (postwalk (fn [x] (if (contains? smap x) (get smap x) x)) form))
+
+;; prewalk-replace - Like postwalk-replace, but replaces before descending
+;; into children (so a replacement's own children get walked too).
+(defn prewalk-replace [smap form]
+  (prewalk (fn [x] (if (contains? smap x) (get smap x) x)) form))
+
+;; keywordize-keys - Recursively transforms all map keys that are strings
+;; into keywords.
+;; Example: (keywordize-keys {"a" 1 "b" {"c" 2}}) ; => {:a 1 :b {:c 2}}
+(defn keywordize-keys [m]
+  (postwalk
+    (fn [x]
+      (if (map? x)
+        (into {}
+              (map (fn [entry]
+                     (let [k (first entry)
+                           v (nth entry 1)]
+                       (if (string? k) [(keyword k) v] entry)))
+                   x))
+        x))
+    m))
+
+;; stringify-keys - Recursively transforms all map keys that are keywords
+;; into strings.
+;; Example: (stringify-keys {:a 1 :b {:c 2}}) ; => {"a" 1 "b" {"c" 2}}
+(defn stringify-keys [m]
+  (postwalk
+    (fn [x]
+      (if (map? x)
+        (into {}
+              (map (fn [entry]
+                     (let [k (first entry)
+                           v (nth entry 1)]
+                       (if (keyword? k) [(name k) v] entry)))
+                   x))
+        x))
+    m))
