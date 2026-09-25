@@ -36,6 +36,11 @@ jobs:
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
           sudo ./llvm.sh 18
+          # apt.llvm.org splits Polly (LLVM's polyhedral loop optimizer) out
+          # of the main llvm-18/llvm-18-dev packages; llvm-sys still links
+          # against it unconditionally, so without this llvm-sys fails with
+          # "could not find native static library `Polly`".
+          sudo apt-get install -y libpolly-18-dev
           echo "LLVM_SYS_181_PREFIX=/usr/lib/llvm-18" >> "$GITHUB_ENV"
 
       - name: Install LLVM 18 (macOS)
