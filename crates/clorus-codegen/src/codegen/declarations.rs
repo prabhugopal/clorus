@@ -379,6 +379,10 @@ impl<'ctx> CodeGen<'ctx> {
         let slurp_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
         self.module.add_function("clorus_slurp", slurp_type, None);
 
+        // clorus_name(val: *mut Value) -> *mut c_char
+        let name_type = i8_ptr_type.fn_type(&[i8_ptr_type.into()], false);
+        self.module.add_function("clorus_name", name_type, None);
+
         // clorus_spit(path: *const c_char, content: *const c_char) -> i32
         let spit_type = i32_type.fn_type(&[i8_ptr_type.into(), i8_ptr_type.into()], false);
         self.module.add_function("clorus_spit", spit_type, None);

@@ -337,6 +337,8 @@ impl<'ctx> CodeGen<'ctx> {
             "char-at",
             "index-of",
             "last-index-of",
+            "keyword",
+            "name",
             // Type predicates (public)
             "string?",
             "number?",

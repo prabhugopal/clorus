@@ -94,6 +94,31 @@ pub extern "C" fn clorus_keyword_name(val: *mut Value) -> *mut c_char {
     }
 }
 
+/// Get the "name" of a keyword, symbol, or string, matching Clojure's
+/// (name x): the keyword/symbol name with no leading `:` or namespace
+/// separator, or the string itself unchanged. Returns null for any other
+/// type (real Clojure throws ClassCastException there).
+/// The returned string must be freed with clorus_free_cstring.
+#[no_mangle]
+pub extern "C" fn clorus_name(val: *mut Value) -> *mut c_char {
+    if val.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    unsafe {
+        let name = match (*val).header().tag() {
+            crate::value::ValueTag::Keyword => (*val).as_keyword(),
+            crate::value::ValueTag::Symbol => (*val).as_symbol(),
+            crate::value::ValueTag::String => (*val).as_string(),
+            _ => return std::ptr::null_mut(),
+        };
+        match std::ffi::CString::new(name) {
+            Ok(c_str) => c_str.into_raw(),
+            Err(_) => std::ptr::null_mut(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -255,6 +255,47 @@ impl<'ctx> CodeGen<'ctx> {
             }
             "derive" => self.compile_simple_2arg_call("derive", "clorus_derive", args),
             "underive" => self.compile_simple_2arg_call("underive", "clorus_underive", args),
+            "keyword" => {
+                // keyword takes 1 arg: a string (or anything string-like) to
+                // intern as a keyword -- (keyword "foo") => :foo. Different
+                // from the compiler's many internal clorus_keyword call
+                // sites, which all pass a compile-time-known literal for
+                // :foo syntax itself; this is the first path that lets
+                // Clorus code construct a keyword from a *runtime* string.
+                if args.len() != 1 {
+                    return Err("keyword requires 1 argument: name".to_string());
+                }
+                let str_val = self.compile_expr(&args[0])?;
+                let cstr_ptr = self.extract_cstring_from_value(str_val);
+                let keyword_fn = self
+                    .module
+                    .get_function("clorus_keyword")
+                    .ok_or("clorus_keyword not declared")?;
+                let result = self
+                    .builder
+                    .build_call(keyword_fn, &[cstr_ptr.into()], "keyword_call")
+                    .unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+            "name" => {
+                // name takes 1 arg: a keyword, symbol, or string -- returns
+                // its name with no leading `:`/namespace, or the string
+                // itself unchanged. (name :foo) => "foo".
+                if args.len() != 1 {
+                    return Err("name requires 1 argument: keyword, symbol, or string".to_string());
+                }
+                let val = self.compile_expr(&args[0])?;
+                let name_fn = self
+                    .module
+                    .get_function("clorus_name")
+                    .ok_or("clorus_name not declared")?;
+                let result = self
+                    .builder
+                    .build_call(name_fn, &[val.into()], "name_call")
+                    .unwrap();
+                let str_ptr = result.try_as_basic_value().left().unwrap().into_pointer_value();
+                Ok(self.box_owned_c_string(str_ptr))
+            }
             "slurp" => {
                 // slurp takes 1 arg: path (string)
                 if args.len() != 1 {
