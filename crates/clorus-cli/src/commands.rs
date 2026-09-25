@@ -886,7 +886,18 @@ fn build_internal(mut lib_mode: bool, debug: bool, explicit_entry: Option<String
             "generic",
             "",
             OptimizationLevel::Default,
-            RelocMode::Default,
+            // Every modern Linux distro (Ubuntu, Fedora, Debian, Arch) links
+            // executables as PIE by default, which requires PIC object code;
+            // `RelocMode::Default` resolves to static/non-PIC on the x86_64
+            // Linux target triple, so `cc`'s linker rejected the object file
+            // outright: "relocation R_X86_64_32 against `.rodata.str1.1'
+            // can not be used when making a PIE object". PIC object code
+            // links cleanly into both PIE and non-PIE executables (and is
+            // mandatory for the `-shared` library builds this same object
+            // file also feeds, in pack.rs and the REPL's dylib cache), so
+            // this is strictly more portable than the default, not just a
+            // Linux-only patch.
+            RelocMode::PIC,
             CodeModel::Default,
         )
         .ok_or("Failed to create target machine")?;
