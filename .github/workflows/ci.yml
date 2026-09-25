@@ -58,5 +58,19 @@ jobs:
       - name: Build workspace (release)
         run: cargo build --release --workspace
 
+      - name: Run Rust unit/doc tests
+        run: cargo test --workspace --release
+
+      # TEMPORARY diagnostic: the -lc++/-lstdc++ fix cleared the original
+      # linker error, but Ubuntu's legacy-mode failure count didn't move
+      # (still ~123) and stderr is redirected to /dev/null in
+      # run_all_tests.sh, so the new cause is invisible. Run one trivial
+      # legacy test directly with stderr visible, from the plain repo root
+      # (no cd, no isolation overrides) to see it.
+      - name: DIAGNOSTIC 2 - legacy-run with visible stderr
+        run: |
+          CLORUS_ENTRY_FILE=tests/language/test-minimal.clr ./target/release/clorus run --legacy-run
+          echo "exit=$?"
+
       - name: Run dual-engine language/stdlib test suite
         run: ./tests/run_all_tests.sh
