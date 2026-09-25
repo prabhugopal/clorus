@@ -5125,11 +5125,75 @@ impl<'ctx> CodeGen<'ctx> {
                         );
 
                         if let Some(function) = self.functions.get(&mangled_name) {
-                            // Found a Clorus function - compile arguments and call it
+                            // Found a Clorus function under this qualified name. Compile
+                            // args, then pick the exact arity variant instead of always
+                            // calling through `function` as-is: multi-arity functions
+                            // register their LAST-declared arity clause under this base
+                            // mangled_name (see compile_defn_multi_expr), which usually
+                            // has a different fixed-param/rest-param shape than whatever
+                            // arity this call site actually needs. Blindly calling
+                            // through that mismatched signature silently reads
+                            // garbage/uninitialized values for any parameter beyond what
+                            // was actually passed, rather than erroring -- this mirrors
+                            // the arity-variant selection and rest-vector shaping the
+                            // unqualified call path below already does.
                             let function = function.clone();
                             let mut arg_values = Vec::new();
                             for arg in args {
-                                arg_values.push(self.compile_expr(arg)?.into());
+                                arg_values.push(self.compile_expr(arg)?);
+                            }
+
+                            let arity_variant =
+                                format!("{}_arity_{}", mangled_name, arg_values.len());
+                            let (resolved_name, resolved_function) =
+                                if let Some(f) = self.functions.get(&arity_variant) {
+                                    (arity_variant, *f)
+                                } else if let Some(variadic_name) = self
+                                    .find_variadic_arity_variant(&mangled_name, arg_values.len())
+                                {
+                                    let f = *self.functions.get(&variadic_name).ok_or_else(|| {
+                                        format!(
+                                            "Undefined variadic function variant: {} for call {}",
+                                            variadic_name, func
+                                        )
+                                    })?;
+                                    (variadic_name, f)
+                                } else {
+                                    (mangled_name.clone(), function)
+                                };
+
+                            if let Some((fixed_params, has_rest)) =
+                                self.function_signatures.get(&resolved_name).copied()
+                            {
+                                if has_rest {
+                                    if arg_values.len() < fixed_params {
+                                        return Err(format!(
+                                            "Arity mismatch: function '{}' expects at least {} argument(s), got {}",
+                                            resolved_name,
+                                            fixed_params,
+                                            arg_values.len()
+                                        ));
+                                    }
+
+                                    let fixed_args: Vec<_> =
+                                        arg_values.iter().take(fixed_params).cloned().collect();
+                                    let rest_args: Vec<_> =
+                                        arg_values.iter().skip(fixed_params).copied().collect();
+                                    let rest_vec = self.build_rest_vector_from_values(&rest_args)?;
+
+                                    arg_values.clear();
+                                    for arg in fixed_args {
+                                        arg_values.push(arg);
+                                    }
+                                    arg_values.push(rest_vec);
+                                } else if arg_values.len() != fixed_params {
+                                    return Err(format!(
+                                        "Arity mismatch: function '{}' expects {}, got {}",
+                                        resolved_name,
+                                        fixed_params,
+                                        arg_values.len()
+                                    ));
+                                }
                             }
 
                             // All Clorus functions take an environment parameter as the last argument
@@ -5137,11 +5201,14 @@ impl<'ctx> CodeGen<'ctx> {
                             let i8_ptr_type =
                                 self.context.i8_type().ptr_type(AddressSpace::default());
                             let null_env = i8_ptr_type.const_null();
-                            arg_values.push(null_env.into());
+                            arg_values.push(null_env);
+
+                            let metadata_args: Vec<BasicMetadataValueEnum> =
+                                arg_values.iter().map(|v| (*v).into()).collect();
 
                             let call_result = self
                                 .builder
-                                .build_call(function, &arg_values, "call")
+                                .build_call(resolved_function, &metadata_args, "call")
                                 .unwrap();
 
                             return Ok(call_result
