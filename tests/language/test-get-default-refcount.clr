@@ -1,0 +1,58 @@
+(ns tests.language.test-get-default-refcount)
+
+;; Regression test: `(get coll key default)` returned `default` as a bare
+;; borrowed alias (no retain) whenever the lookup missed, while the "found"
+;; branch already returned an owned/retained reference from clorus_get. The
+;; caller releases whatever `get` returns exactly once either way, so a
+;; missed lookup dropped a reference the caller was never given -- freeing
+;; `default` out from under whoever actually owns it (its original binding,
+;; or the caller's own argument), corrupting the heap once that memory was
+;; reused. Reproduced via coral-ui's `theme/token`, whose 3-arg body is
+;; exactly the `let`-wrapped shape below:
+;;   (let [v (if override (get override k :__missing) :__missing)]
+;;     (if (= v :__missing) (get @active-theme k default) v))
+;; -- both the `get`-default-aliasing bug itself and a related gap where
+;; `expr_may_yield_bare_symbol` didn't look through `let`/`letfn` tail
+;; positions (so even a correctly-aliasing `get` wouldn't have been rescued
+;; by that compensating mechanism at the function-body level).
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+;; Mirrors theme/token's exact 3-arg shape: a `let` whose body is an `if`
+;; whose one branch falls through to `(get m k default)` with `default` a
+;; plain function parameter (the bare-alias hazard) and the other branch
+;; returns a `let`-bound local directly.
+(defn token [override k default]
+  (let [v (if override (get override k :__missing) :__missing)]
+    (if (= v :__missing)
+      (get {:other 1} k default)
+      v)))
+
+(defn -main [& _args]
+  (do
+    ;; Call `token` many times with a *shared* map value as `override` and a
+    ;; *shared* literal as `default`, across a key that's always missing (so
+    ;; the aliasing default-return path is always taken) -- matching the
+    ;; "one map/value referenced from many places" trigger shape from Coral.
+    (def shared-theme {:radius 8})
+    (def n 2000)
+    (loop [i 0]
+      (when (< i n)
+        (assert-eq "token falls through to default" (token shared-theme :missing-key 42) 42)
+        (recur (+ i 1))))
+
+    ;; Direct 3-arg `get` with a non-literal default, both when the key is
+    ;; missing (aliasing path) and present (owned path), interleaved so any
+    ;; refcount imbalance shows up as a crash or wrong value under repetition.
+    (def d 99)
+    (def m {:present 1})
+    (loop [i 0]
+      (when (< i n)
+        (assert-eq "get missing -> default" (get m :absent d) 99)
+        (assert-eq "get present -> value" (get m :present d) 1)
+        (recur (+ i 1))))
+
+    (println "All get-default refcount tests passed!")))

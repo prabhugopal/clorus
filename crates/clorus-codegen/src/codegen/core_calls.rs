@@ -425,9 +425,27 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_conditional_branch(is_nil, then_block, else_block)
                         .unwrap();
 
-                    // Then: return default
+                    // Then: return default. `clorus_get` always hands back an
+                    // owned/retained reference on the other branch (see
+                    // clorus_get's map/vector/set cases), so this branch must
+                    // match that contract too -- otherwise a non-literal
+                    // default (a parameter or other existing binding, e.g.
+                    // `(get m k default)` inside a function taking `default`
+                    // as an argument) is returned as a bare borrowed alias.
+                    // The caller then releases a reference it was never
+                    // given, which frees the value out from under whoever
+                    // actually owns it -- reproduced via coral-ui's
+                    // `theme/token`, whose 3-arg body falls through to
+                    // `(get @active-theme k default)`.
                     self.builder.position_at_end(then_block);
                     let default_ptr = self.compile_expr(&args[2])?;
+                    let retain_fn = self
+                        .module
+                        .get_function("clorus_retain")
+                        .ok_or("clorus_retain not declared")?;
+                    self.builder
+                        .build_call(retain_fn, &[default_ptr.into()], "retain_get_default")
+                        .unwrap();
                     self.builder
                         .build_unconditional_branch(merge_block)
                         .unwrap();

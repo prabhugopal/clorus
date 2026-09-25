@@ -511,6 +511,13 @@ impl<'ctx> CodeGen<'ctx> {
                 .last()
                 .map(Self::expr_may_yield_bare_symbol)
                 .unwrap_or(false),
+            // `let`/`letfn` don't create a new ownership boundary -- their
+            // tail position is whatever their body's tail position is (e.g.
+            // `(let [v (if override (get override k :__missing) :__missing)]
+            // (if (= v :__missing) (get @active-theme k default) v))`, whose
+            // outer body must be inspected the same as a bare `if`).
+            Expr::Let { body, .. } => Self::expr_may_yield_bare_symbol(body),
+            Expr::Letfn { body, .. } => Self::expr_may_yield_bare_symbol(body),
             _ => false,
         }
     }
