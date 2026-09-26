@@ -5936,6 +5936,48 @@ impl<'ctx> CodeGen<'ctx> {
                 // Compile condition (returns Value*)
                 let cond_val_ptr = self.compile_expr(condition)?;
 
+                // An exception in the condition itself must propagate
+                // immediately, never reach clorus_is_truthy (which would
+                // just treat the exception wrapper as an ordinary, always-
+                // truthy value -- confirmed: `(if (raises-exception) "then"
+                // "else")` silently ran the "then" branch instead of
+                // aborting). Neither branch gets evaluated in that case.
+                let is_exception_fn = self
+                    .module
+                    .get_function("clorus_is_exception_i32")
+                    .ok_or("clorus_is_exception_i32 not declared")?;
+                let cond_is_exception = self
+                    .builder
+                    .build_call(is_exception_fn, &[cond_val_ptr.into()], "if_cond_is_exception")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let cond_is_exception_bool = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        cond_is_exception,
+                        self.context.i32_type().const_zero(),
+                        "if_cond_is_exception_bool",
+                    )
+                    .unwrap();
+
+                let function = self
+                    .builder
+                    .get_insert_block()
+                    .and_then(|block| block.get_parent())
+                    .expect("No parent function");
+
+                let cond_exception_bb = self.context.append_basic_block(function, "if_cond_exception");
+                let cond_normal_bb = self.context.append_basic_block(function, "if_cond_normal");
+                self.builder
+                    .build_conditional_branch(cond_is_exception_bool, cond_exception_bb, cond_normal_bb)
+                    .unwrap();
+
+                self.builder.position_at_end(cond_normal_bb);
+
                 // Use clorus_is_truthy to check if condition is truthy
                 let is_truthy_fn = self
                     .module
@@ -5961,13 +6003,6 @@ impl<'ctx> CodeGen<'ctx> {
                         "ifcond",
                     )
                     .unwrap();
-
-                // Get current function
-                let function = self
-                    .builder
-                    .get_insert_block()
-                    .and_then(|block| block.get_parent())
-                    .expect("No parent function");
 
                 // Create basic blocks
                 let then_bb = self.context.append_basic_block(function, "then");
@@ -6003,41 +6038,27 @@ impl<'ctx> CodeGen<'ctx> {
                 }
                 let else_bb = self.builder.get_insert_block().unwrap();
 
+                // The condition-is-exception path always reaches merge_bb
+                // unconditionally (it never touches then/else at all), so
+                // merge_bb is always reachable now regardless of whether
+                // the then/else branches themselves terminate abnormally.
+                self.builder.position_at_end(cond_exception_bb);
+                self.builder.build_unconditional_branch(merge_bb).unwrap();
+
                 // Build merge block with phi node (phi node type is now Value*)
                 self.builder.position_at_end(merge_bb);
 
-                // Check if merge block is reachable (at least one branch reaches here)
-                if !then_has_terminator || !else_has_terminator {
-                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
-                    let phi = self.builder.build_phi(value_ptr_type, "iftmp").unwrap();
-
-                    // Add incoming values only from branches that reach here
-                    if !then_has_terminator {
-                        phi.add_incoming(&[(&then_val, then_bb)]);
-                    }
-                    if !else_has_terminator {
-                        phi.add_incoming(&[(&else_val, else_bb)]);
-                    }
-
-                    Ok(phi.as_basic_value().into_pointer_value())
-                } else {
-                    // Both branches have terminators (recur/return/throw), merge block is unreachable
-                    // Return a dummy value - this code path is unreachable but needed for compilation
-                    // The merge block will be removed by LLVM's dead code elimination
-                    let nil_fn = self
-                        .module
-                        .get_function("clorus_value_nil")
-                        .ok_or("clorus_value_nil not declared")?;
-                    let dummy_call = self
-                        .builder
-                        .build_call(nil_fn, &[], "unreachable_value")
-                        .unwrap();
-                    Ok(dummy_call
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value())
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let phi = self.builder.build_phi(value_ptr_type, "iftmp").unwrap();
+                phi.add_incoming(&[(&cond_val_ptr, cond_exception_bb)]);
+                if !then_has_terminator {
+                    phi.add_incoming(&[(&then_val, then_bb)]);
                 }
+                if !else_has_terminator {
+                    phi.add_incoming(&[(&else_val, else_bb)]);
+                }
+
+                Ok(phi.as_basic_value().into_pointer_value())
             }
 
             Expr::Ns {
