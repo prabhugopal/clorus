@@ -1,6 +1,59 @@
 use super::*;
 
 impl<'ctx> CodeGen<'ctx> {
+    /// Extracts an instance's runtime type name (the same `:__type__` map
+    /// key real protocol method dispatch reads -- see the `Defprotocol`
+    /// dispatch codegen) as a C string pointer, for `satisfies?`/
+    /// `implements?`'s value-oriented argument. A value with no `:__type__`
+    /// (e.g. a plain map) yields a null C string, which
+    /// `clorus_protocol_satisfies_type_i32` safely treats as "no match".
+    fn extract_instance_type_cstr(
+        &mut self,
+        val: PointerValue<'ctx>,
+        keyword_fn: inkwell::values::FunctionValue<'ctx>,
+        map_get_fn: inkwell::values::FunctionValue<'ctx>,
+        string_data_fn: inkwell::values::FunctionValue<'ctx>,
+    ) -> Result<PointerValue<'ctx>, String> {
+        let type_key_str = self
+            .builder
+            .build_global_string_ptr("__type__", "satisfies_type_key")
+            .unwrap();
+        let type_key = self
+            .builder
+            .build_call(
+                keyword_fn,
+                &[type_key_str.as_pointer_value().into()],
+                "satisfies_type_key_kw",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+
+        let type_val = self
+            .builder
+            .build_call(
+                map_get_fn,
+                &[val.into(), type_key.into()],
+                "satisfies_type_val",
+            )
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+
+        Ok(self
+            .builder
+            .build_call(string_data_fn, &[type_val.into()], "satisfies_type_cstr")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value())
+    }
+
     /// Helper: compile string expression to C string pointer.
     /// Handles both string literals and values that evaluate to strings.
     pub(super) fn compile_string_to_ptr(
@@ -124,61 +177,47 @@ impl<'ctx> CodeGen<'ctx> {
                 .module
                 .get_function("clorus_value_boolean")
                 .ok_or("clorus_value_boolean not declared")?;
+            // `extends?` takes a TYPE (a bare type-name symbol/string, e.g.
+            // `(extends? P QImpl)`/`(extends? P "QImpl")` -- QImpl itself
+            // isn't a bound value, only its `->QImpl` constructor is).
+            // `implements?`/`satisfies?` take a VALUE (an instance, e.g.
+            // `(satisfies? P ok)` where `ok` is a local bound to `(->QImpl
+            // 7)`) -- `satisfies?` additionally accepts a bare type name
+            // too, as a convenience. Both conventions can use a bare
+            // `Expr::Symbol` (`QImpl` vs `ok` are syntactically identical),
+            // so a literal string/keyword is always a type name, but a
+            // symbol must be resolved dynamically: try compiling it as an
+            // ordinary (bound) expression first -- an unbound name (like a
+            // deftype's own type name, which binds no variable) fails with
+            // "Undefined variable" and *never* emits any IR before that
+            // Err (checked: every branch up to that point is a table
+            // lookup), so falling back to treating its text as a literal
+            // type name on failure is safe.
             let type_cstr = match &args[1] {
-                Expr::Symbol(s) => {
-                    let ty_name = s.split('/').last().unwrap_or(s);
-                    let ty_name_str = self
-                        .builder
-                        .build_global_string_ptr(ty_name, "protocol_type_name")
-                        .unwrap();
-                    ty_name_str.as_pointer_value()
-                }
                 Expr::String(s) | Expr::Keyword(s) => {
-                    let ty_name_str = self
-                        .builder
+                    self.builder
                         .build_global_string_ptr(s, "protocol_type_name")
-                        .unwrap();
-                    ty_name_str.as_pointer_value()
+                        .unwrap()
+                        .as_pointer_value()
                 }
+                Expr::Symbol(s) => match self.compile_expr(&args[1]) {
+                    Ok(val) => self.extract_instance_type_cstr(
+                        val,
+                        keyword_fn,
+                        map_get_fn,
+                        string_data_fn,
+                    )?,
+                    Err(_) => {
+                        let ty_name = s.split('/').last().unwrap_or(s);
+                        self.builder
+                            .build_global_string_ptr(ty_name, "protocol_type_name")
+                            .unwrap()
+                            .as_pointer_value()
+                    }
+                },
                 _ => {
                     let val = self.compile_expr(&args[1])?;
-                    let type_key_str = self
-                        .builder
-                        .build_global_string_ptr("__type__", "satisfies_type_key")
-                        .unwrap();
-                    let type_key = self
-                        .builder
-                        .build_call(
-                            keyword_fn,
-                            &[type_key_str.as_pointer_value().into()],
-                            "satisfies_type_key_kw",
-                        )
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
-
-                    let type_val = self
-                        .builder
-                        .build_call(
-                            map_get_fn,
-                            &[val.into(), type_key.into()],
-                            "satisfies_type_val",
-                        )
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
-
-                    self.builder
-                        .build_call(string_data_fn, &[type_val.into()], "satisfies_type_cstr")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value()
+                    self.extract_instance_type_cstr(val, keyword_fn, map_get_fn, string_data_fn)?
                 }
             };
 

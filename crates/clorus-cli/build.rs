@@ -30,6 +30,18 @@ fn main() {
     // a PIE executable's global symbols are resolvable via `dlsym` there by
     // default -- which is why this class of bug never reproduces on macOS.
     //
+    // NOTE: `-rdynamic`/Mach-O's default only EXPORTS symbols that are
+    // actually present in the final link -- it cannot export a symbol the
+    // linker already dead-code-eliminated for being unreachable from any
+    // Rust-level call site (e.g. `clorus_register_protocol_method`, only
+    // ever invoked from JIT-*generated* machine code, which the linker's
+    // reachability analysis can't see). That half of the problem is fixed
+    // separately, by `clorus_runtime::keep_alive::retain_all_runtime_symbols`
+    // being called once at process start (see `run_jit_internal` in
+    // `src/commands.rs`) -- see that module's doc comment for why a
+    // reachability-based fix was chosen over `--whole-archive`/`-force_load`
+    // (duplicate-symbol link errors against the normal rlib dependency).
+    //
     // Scoped to the actual link target (not the build-script's host OS) so
     // cross-compilation behaves correctly.
     let target = std::env::var("TARGET").unwrap_or_default();

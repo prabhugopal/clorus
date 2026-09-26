@@ -1576,22 +1576,20 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
     println!("     Running `{}`", entry);
     println!();
 
-    // Load clorus-runtime library FIRST (required for Value* operations)
-    let _runtime_lib = match load_runtime_library() {
-        Ok(lib) => {
-            if debug {
-                println!("   [DEBUG] Loaded clorus-runtime library");
-            }
-            Some(lib)
-        }
-        Err(e) => {
-            if debug {
-                println!("   [DEBUG] clorus-runtime not loaded: {}", e);
-                println!("   [DEBUG] String and collection operations may not work");
-            }
-            None
-        }
-    };
+    // Make every clorus-runtime extern "C" function Rust-reachable from this
+    // very process, instead of dlopen'ing a separate `libclorus_runtime`
+    // copy for the JIT to call into. That used to be required (nothing in
+    // this crate's own code calls e.g. `clorus_register_protocol_method`,
+    // so the linker dropped it from a normal build), but it meant register
+    // and lookup calls for the same global runtime state (e.g. the protocol
+    // registry) could resolve to TWO INDEPENDENT copies -- whichever symbols
+    // this binary's own Rust code happened to also reach got one copy here,
+    // everything else only existed in the separately dlopen'd dylib's own
+    // copy of the same statics. Confirmed via `nm`/`otool`: this silently
+    // broke `satisfies?`/`extends?` under JIT (registered in the dylib's
+    // registry, looked up against this binary's own always-empty one) while
+    // AOT (a single binary, one copy of everything) worked correctly.
+    std::hint::black_box(clorus_runtime::keep_alive::retain_all_runtime_symbols());
 
     // Load clorus-std library for rust.fs functions
     // This makes clorus_fs_* symbols available to the JIT
@@ -2223,123 +2221,6 @@ pub fn replx(args: &[String]) -> Result<(), String> {
     clorus_replx::run_with_config(config)
 }
 
-
-/// Load clorus-runtime dynamic library to make Value* operations available to JIT
-/// The library must stay loaded for the duration of execution
-fn load_runtime_library() -> Result<libloading::Library, String> {
-    use std::env;
-
-    // Determine library file name based on platform
-    #[cfg(target_os = "macos")]
-    let lib_name = "libclorus_runtime.dylib";
-
-    #[cfg(target_os = "linux")]
-    let lib_name = "libclorus_runtime.so";
-
-    #[cfg(target_os = "windows")]
-    let lib_name = "clorus_runtime.dll";
-
-    // Try to find the library in multiple locations
-    let mut lib_path = None;
-
-    // Prefer matching profile in development to avoid symbol/version skew.
-    #[cfg(debug_assertions)]
-    let local_candidates = [
-        Path::new("target/debug/deps").join(lib_name),
-        Path::new("target/debug").join(lib_name),
-        Path::new("target/release/deps").join(lib_name),
-        Path::new("target/release").join(lib_name),
-    ];
-    #[cfg(not(debug_assertions))]
-    let local_candidates = [
-        Path::new("target/release/deps").join(lib_name),
-        Path::new("target/release").join(lib_name),
-        Path::new("target/debug/deps").join(lib_name),
-        Path::new("target/debug").join(lib_name),
-    ];
-
-    for candidate in local_candidates {
-        if candidate.exists() {
-            lib_path = Some(candidate);
-            break;
-        }
-    }
-
-    // 3. Try to find it relative to the clorus executable (for installed version)
-    if lib_path.is_none() {
-        if let Ok(exe_path) = env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                // Check ../lib/ directory (typical installation layout)
-                let installed_path = exe_dir.parent()
-                    .map(|p| p.join("lib").join(lib_name));
-                if let Some(p) = installed_path {
-                    if p.exists() {
-                        lib_path = Some(p);
-                    }
-                }
-
-                // Check same directory as executable
-                if lib_path.is_none() {
-                    let same_dir = exe_dir.join(lib_name);
-                    if same_dir.exists() {
-                        lib_path = Some(same_dir);
-                    }
-                }
-            }
-        }
-    }
-
-    // 4. Try workspace target directory (for development)
-    if lib_path.is_none() {
-        // Walk up to find workspace root
-        let mut current = env::current_dir().ok();
-        while let Some(dir) = current {
-            #[cfg(debug_assertions)]
-            let workspace_candidates = [
-                dir.join("target/debug/deps").join(lib_name),
-                dir.join("target/debug").join(lib_name),
-                dir.join("target/release/deps").join(lib_name),
-                dir.join("target/release").join(lib_name),
-            ];
-            #[cfg(not(debug_assertions))]
-            let workspace_candidates = [
-                dir.join("target/release/deps").join(lib_name),
-                dir.join("target/release").join(lib_name),
-                dir.join("target/debug/deps").join(lib_name),
-                dir.join("target/debug").join(lib_name),
-            ];
-
-            for candidate in workspace_candidates {
-                if candidate.exists() {
-                    lib_path = Some(candidate);
-                    break;
-                }
-            }
-            if lib_path.is_some() {
-                break;
-            }
-            current = dir.parent().map(|p| p.to_path_buf());
-        }
-    }
-
-    let lib_path = lib_path.ok_or_else(|| {
-        format!(
-            "clorus-runtime library not found.
-Searched:
-  - target/release/deps/{}
-  - target/release/{}
-  - target/debug/deps/{}
-  - target/debug/{}
-  - Installed library directory
-  - Workspace target directories
-
-To fix: cargo build -p clorus-runtime --release",
-            lib_name, lib_name, lib_name, lib_name
-        )
-    })?;
-
-    load_dynamic_library(&lib_path)
-}
 
 /// Load clorus-std dynamic library to make fs functions available to JIT
 /// The library must stay loaded for the duration of execution

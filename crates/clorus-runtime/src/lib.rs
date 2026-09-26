@@ -29,6 +29,7 @@ pub mod protocols;  // Protocol dispatch for deftype/defrecord
 pub mod hash;  // Structural hashing helpers
 pub mod hierarchy;  // derive/underive/isa? hierarchy relations
 pub mod net;  // TCP socket primitives
+pub mod keep_alive;  // Retains every extern "C" fn for JIT hosts -- see build.rs
 
 // Re-export main types
 pub use value::{Value, ValueTag};
