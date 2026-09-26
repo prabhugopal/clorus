@@ -16,4 +16,3 @@
     (println "generic metadata passed")
     0))
 
-(-main)

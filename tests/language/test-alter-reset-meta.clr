@@ -28,4 +28,3 @@
     (println "alter-meta! / reset-meta! passed")
     0))
 
-(-main)

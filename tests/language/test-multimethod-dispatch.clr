@@ -29,4 +29,3 @@
     (println "multimethod dispatch passed")
     0))
 
-(-main)

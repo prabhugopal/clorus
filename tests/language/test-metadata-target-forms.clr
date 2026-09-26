@@ -27,4 +27,3 @@
     (println "metadata target forms passed")
     0))
 
-(-main)

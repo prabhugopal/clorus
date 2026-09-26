@@ -33,4 +33,3 @@
       (println "protocol introspection passed")
       0)))
 
-(-main)

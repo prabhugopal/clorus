@@ -32,4 +32,3 @@
     (println "defn metadata prefix passed")
     0))
 
-(-main)

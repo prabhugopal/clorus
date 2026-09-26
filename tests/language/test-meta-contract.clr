@@ -38,4 +38,3 @@
     (println "metadata contract passed")
     0))
 
-(-main)

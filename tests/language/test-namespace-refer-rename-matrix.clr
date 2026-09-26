@@ -21,4 +21,3 @@
     (assert-eq "rename right->local-right" (local-right) :right-b)
     "PASS"))
 
-(-main)

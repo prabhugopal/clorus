@@ -24,4 +24,3 @@
     (println "hierarchy isa passed")
     0))
 
-(-main)

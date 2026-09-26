@@ -28,4 +28,3 @@
     (println "core helpers tests passed")
     0))
 
-(-main)

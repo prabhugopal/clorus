@@ -27,4 +27,3 @@
       (println "satisfies? passed")
       0)))
 
-(-main)

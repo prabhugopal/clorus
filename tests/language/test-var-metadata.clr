@@ -23,4 +23,3 @@
     (println "var metadata passed")
     0))
 
-(-main)

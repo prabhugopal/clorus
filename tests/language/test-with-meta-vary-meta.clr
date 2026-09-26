@@ -26,4 +26,3 @@
     (println "with-meta / vary-meta passed")
     0))
 
-(-main)

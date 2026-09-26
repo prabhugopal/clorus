@@ -48,4 +48,3 @@
     (println "multimethod introspection passed")
     0))
 
-(-main)

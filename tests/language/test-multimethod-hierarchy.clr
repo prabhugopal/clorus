@@ -36,4 +36,3 @@
     (println "multimethod hierarchy passed")
     0))
 
-(-main)

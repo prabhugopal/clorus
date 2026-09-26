@@ -31,4 +31,3 @@
     (println "All tests passed! Multi-arity closure capture works!")
     0))
 
-(-main)

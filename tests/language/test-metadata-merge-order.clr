@@ -23,4 +23,3 @@
     (println "metadata merge order passed")
     0))
 
-(-main)

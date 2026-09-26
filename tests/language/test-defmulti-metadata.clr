@@ -20,4 +20,3 @@
     (println "defmulti metadata passed")
     0))
 
-(-main)

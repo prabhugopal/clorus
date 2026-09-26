@@ -18,4 +18,3 @@
     (println "defn metadata forms passed")
     0))
 
-(-main)

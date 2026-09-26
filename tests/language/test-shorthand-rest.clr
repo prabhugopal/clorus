@@ -15,4 +15,3 @@
     (println "shorthand rest tests passed")
     0))
 
-(-main)

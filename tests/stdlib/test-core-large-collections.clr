@@ -28,4 +28,3 @@
     (assert-eq "partition-all last chunk size" (count (last parts)) 20)
     0))
 
-(-main)

@@ -31,4 +31,3 @@
     (println "multimethod admin passed")
     0))
 
-(-main)

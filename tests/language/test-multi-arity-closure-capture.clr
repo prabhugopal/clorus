@@ -33,4 +33,3 @@
     (println "All tests complete!")
     0))
 
-(-main)

@@ -34,4 +34,3 @@
     (println "defn var metadata passed")
     0))
 
-(-main)

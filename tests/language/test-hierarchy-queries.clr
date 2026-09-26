@@ -43,4 +43,3 @@
     (println "hierarchy queries passed")
     0))
 
-(-main)

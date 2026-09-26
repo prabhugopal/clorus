@@ -30,4 +30,3 @@
     (println "variadic rest semantics passed")
     0))
 
-(-main)
