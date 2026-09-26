@@ -397,17 +397,21 @@ unsafe fn fold_variadic_arithmetic(
     one_arg: fn(*mut Value) -> *mut Value,
     op: extern "C" fn(*mut Value, *mut Value) -> *mut Value,
 ) -> *mut Value {
-    let count = crate::vector::clorus_vector_count(args_vec);
+    // Nil-safe: `(+)` etc. called with zero args now passes nil, not an
+    // empty vector (see clorus_vector_rest's doc comment); the raw
+    // clorus_vector_count/clorus_vector_nth assume an actual
+    // PersistentVector and crash on anything else, including nil.
+    let count = crate::collections::clorus_count(args_vec);
     if count == 0 {
         return zero_args();
     }
-    let first = crate::vector::clorus_vector_nth(args_vec, 0);
+    let first = crate::collections::clorus_nth(args_vec, 0);
     if count == 1 {
         return one_arg(first);
     }
     let mut acc = first;
     for i in 1..count {
-        acc = op(acc, crate::vector::clorus_vector_nth(args_vec, i));
+        acc = op(acc, crate::collections::clorus_nth(args_vec, i));
     }
     acc
 }
@@ -460,13 +464,14 @@ unsafe fn chain_compare(
     args_vec: *mut Value,
     pairwise: unsafe extern "C" fn(*mut Value, *mut Value) -> *mut Value,
 ) -> *mut Value {
-    let count = crate::vector::clorus_vector_count(args_vec);
+    // Nil-safe -- see fold_variadic_arithmetic's comment.
+    let count = crate::collections::clorus_count(args_vec);
     if count <= 1 {
         return Value::boolean(true);
     }
-    let mut prev = crate::vector::clorus_vector_nth(args_vec, 0);
+    let mut prev = crate::collections::clorus_nth(args_vec, 0);
     for i in 1..count {
-        let cur = crate::vector::clorus_vector_nth(args_vec, i);
+        let cur = crate::collections::clorus_nth(args_vec, i);
         if crate::value::clorus_is_truthy(pairwise(prev, cur)) == 0 {
             return Value::boolean(false);
         }

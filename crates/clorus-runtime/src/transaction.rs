@@ -449,11 +449,18 @@ fn commit_transaction(tx: &mut Transaction) -> bool {
 
         for commute in commutes {
             unsafe {
-                let extra_count = crate::vector::clorus_vector_count(commute.args_vec) as usize;
+                // commute.args_vec is nil, not an empty vector, when
+                // `(commute r f)` is called with no extra args (see
+                // clorus_vector_rest's doc comment and the identical fix
+                // in ref_type.rs's apply_commute_function) -- the raw
+                // clorus_vector_count/clorus_vector_nth assume their input
+                // is always an actual PersistentVector and crash on
+                // anything else, including nil.
+                let extra_count = crate::collections::clorus_count(commute.args_vec) as usize;
                 let mut args: Vec<*mut Value> = Vec::with_capacity(extra_count + 1);
                 args.push(current_value);
                 for i in 0..extra_count {
-                    let arg = crate::vector::clorus_vector_nth(commute.args_vec, i as u64);
+                    let arg = crate::collections::clorus_nth(commute.args_vec, i as i64);
                     args.push(arg);
                 }
 

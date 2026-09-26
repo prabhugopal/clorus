@@ -298,13 +298,17 @@ pub extern "C" fn clorus_call_with_vector(
     args_vector: *mut Value,
 ) -> *mut Value {
     unsafe {
-        // Get vector count
-        let count = crate::vector::clorus_vector_count(args_vector);
+        // Nil-safe: real Clojure's `(apply f nil)` calls f with no args, and
+        // the raw clorus_vector_count/clorus_vector_nth assume their input
+        // is always an actual PersistentVector, crashing on nil (see
+        // clorus_vector_rest's doc comment for why nil -- not an empty
+        // vector -- is now a normal, common "no args" representation).
+        let count = crate::collections::clorus_count(args_vector) as u64;
 
         // Extract arguments from vector into array
         let mut args_array: Vec<*mut Value> = Vec::with_capacity(count as usize);
         for i in 0..count {
-            let arg = crate::vector::clorus_vector_nth(args_vector, i);
+            let arg = crate::collections::clorus_nth(args_vector, i as i64);
             args_array.push(arg);
         }
 

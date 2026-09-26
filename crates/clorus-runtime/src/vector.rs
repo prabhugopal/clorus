@@ -666,17 +666,25 @@ pub extern "C" fn clorus_vector_count(vec_val: *mut Value) -> u64 {
 /// Used for rest parameter destructuring: [a b & rest]
 #[no_mangle]
 pub extern "C" fn clorus_vector_rest(vec_val: *mut Value, start_index: u64) -> *mut Value {
+    // Only ever used to bind a `[k & ks]`-style destructuring pattern's
+    // rest name (its one caller, in codegen's patterns.rs). Real Clojure
+    // binds that name to nil, not an empty collection, when there's
+    // nothing left -- e.g. `(let [[k & ks] [:a]] ks)` => nil -- so `(if
+    // ks ...)` correctly detects "no more", matching the same fix already
+    // applied to variadic `& rest` function parameters
+    // (build_rest_vector_from_values). Confirmed breaking dissoc-in's
+    // recursive path-walking exactly like the variadic-arg case did.
     if vec_val.is_null() {
-        return clorus_vector_empty();
+        return Value::nil();
     }
 
     unsafe {
         let vec_ptr = (*vec_val).as_ptr() as *mut PersistentVector;
         let count = (*vec_ptr).count();
 
-        // If start_index >= count, return empty vector
+        // If start_index >= count, nothing remains.
         if start_index >= count {
-            return clorus_vector_empty();
+            return Value::nil();
         }
 
         // Build new vector with remaining elements

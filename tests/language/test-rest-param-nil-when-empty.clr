@@ -1,0 +1,35 @@
+(ns tests.language.test-rest-param-nil-when-empty)
+
+;; Regression test: a `& rest` parameter (whether from a variadic function
+;; call or a `[k & ks]`-style destructuring pattern) must bind to nil, not
+;; an empty vector, when there are zero extra values -- matching real
+;; Clojure (`(defn f [a & r] r) (f 1)` => nil) and the common recursive
+;; "consume one, recurse on the rest" idiom: `(if ks (recurse) (base-case))`
+;; only works if `ks` is falsy once exhausted. This used to always produce
+;; `[]` (truthy), so that idiom's base case was never reached -- confirmed
+;; breaking stdlib's dissoc-in and the STM `commute` primitive (which
+;; crashed outright: its raw vector accessor assumed its "extra args"
+;; collection was always a real vector, never nil).
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn variadic-rest [a & r] r)
+
+(defn -main [& _args]
+  (do
+    (assert-eq "variadic rest nil when empty" (variadic-rest 1) nil)
+    (assert-eq "variadic rest present when non-empty" (variadic-rest 1 2 3) [2 3])
+
+    (let [[k & ks] [:a]]
+      (assert-eq "destructure rest nil when exhausted" ks nil))
+    (let [[k & ks] [:a :b :c]]
+      (assert-eq "destructure rest present when not exhausted" ks [:b :c]))
+
+    (let [r (ref 0)]
+      (dosync (commute r (fn [x] (+ x 1))))
+      (assert-eq "commute with no extra args doesn't crash" @r 1))
+
+    "PASS"))

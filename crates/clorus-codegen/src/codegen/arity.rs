@@ -27,6 +27,29 @@ impl<'ctx> CodeGen<'ctx> {
         &self,
         values: &[PointerValue<'ctx>],
     ) -> Result<PointerValue<'ctx>, String> {
+        // Real Clojure binds a `& rest` param to nil, not an empty
+        // collection, when zero extra args are passed -- e.g. `(defn f [k
+        // & ks] ...)` called as `(f :x)` gives ks = nil, so `(if ks ...)`
+        // correctly detects "no more". Confirmed breaking dissoc-in (and
+        // likely every other "consume one, recurse on the rest" idiom):
+        // this used to always build an (empty but non-nil) vector, which
+        // `if`/`and`/`or` treat as truthy, so a base-case check like
+        // `(if ks (recurse) (done))` never took the "done" branch.
+        if values.is_empty() {
+            let nil_fn = self
+                .module
+                .get_function("clorus_value_nil")
+                .ok_or("clorus_value_nil not declared")?;
+            return Ok(self
+                .builder
+                .build_call(nil_fn, &[], "rest_vec_nil")
+                .unwrap()
+                .try_as_basic_value()
+                .left()
+                .unwrap()
+                .into_pointer_value());
+        }
+
         let vector_empty_fn = self
             .module
             .get_function("clorus_vector_empty")

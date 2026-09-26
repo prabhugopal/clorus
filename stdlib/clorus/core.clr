@@ -881,7 +881,7 @@
 ;; dissoc-in - Remove nested key path from map and prune empty maps.
 ;; Example: (dissoc-in {:a {:b 1 :c 2}} [:a :b]) ; => {:a {:c 2}}
 (defn dissoc-in [m [k & ks]]
-  (let [m (ensure-map "dissoc-in" m)]
+  (let [m (ensure-map-or-nil "dissoc-in" m)]
     (if ks
     (let [next-map (get m k)]
       (if next-map

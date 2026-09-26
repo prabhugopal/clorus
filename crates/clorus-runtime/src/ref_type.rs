@@ -115,11 +115,19 @@ unsafe fn apply_commute_function(
     func_val: *mut Value,
     args_vec: *mut Value,
 ) -> *mut Value {
-    let extra_count = crate::vector::clorus_vector_count(args_vec) as usize;
+    // args_vec is nil, not an empty vector, when `(commute r f)` is called
+    // with no extra args (real Clojure's `& rest` binds to nil when
+    // empty -- see clorus_vector_rest's doc comment) -- the raw
+    // clorus_vector_count/clorus_vector_nth assume their input is always
+    // an actual PersistentVector and crash on anything else, including
+    // nil, so this uses the generic, nil-safe clorus_count/clorus_nth
+    // (also correct for a list/etc. extra-args collection, not just a
+    // vector).
+    let extra_count = crate::collections::clorus_count(args_vec) as usize;
     let mut args: Vec<*mut Value> = Vec::with_capacity(extra_count + 1);
     args.push(base_value);
     for i in 0..extra_count {
-        let arg = crate::vector::clorus_vector_nth(args_vec, i as u64);
+        let arg = crate::collections::clorus_nth(args_vec, i as i64);
         args.push(arg);
     }
     crate::function::clorus_function_call(func_val, args.as_ptr(), args.len() as i32)
