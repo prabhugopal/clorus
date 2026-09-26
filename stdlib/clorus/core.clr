@@ -514,29 +514,29 @@
         (+ truncated 1.0)
         truncated))))
 
-;; rem - Integer division remainder
+;; rem - Integer division remainder, truncated toward zero (sign always
+;; matches the dividend `a`) -- distinct from `mod`, whose sign matches the
+;; divisor. Defined via `quot` so it never depends on `mod`'s sign
+;; convention: a = b*(quot a b) + (rem a b).
 (defn rem [a b]
   (let [a (ensure-number "rem" a)
         b (ensure-number "rem" b)]
-    (mod a b)))
+    (- a (* b (quot a b)))))
 
 ;; floor - Round down to nearest integer
 ;; Example: (floor 3.7) => 3.0, (floor -3.7) => -4.0
 (defn floor [x]
-  (let [x (ensure-number "floor" x)
-        truncated (- x (mod x 1.0))]
-    (if (and (< x 0.0) (not (= x truncated)))
-      (- truncated 1.0)
-      truncated)))
+  (let [x (ensure-number "floor" x)]
+    (- x (mod x 1.0))))
 
 ;; ceil - Round up to nearest integer
 ;; Example: (ceil 3.2) => 4.0, (ceil -3.2) => -3.0
 (defn ceil [x]
   (let [x (ensure-number "ceil" x)
         truncated (- x (mod x 1.0))]
-    (if (and (> x 0.0) (not (= x truncated)))
-      (+ truncated 1.0)
-      truncated)))
+    (if (= x truncated)
+      truncated
+      (+ truncated 1.0))))
 
 ;; round - Round to nearest integer
 ;; Example: (round 3.5) => 4.0, (round 3.4) => 3.0

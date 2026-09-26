@@ -210,7 +210,10 @@ pub extern "C" fn clorus_div(a: *mut Value, b: *mut Value) -> *mut Value {
 // Modulo
 // ============================================================================
 
-/// Modulo operation (remainder)
+/// Clojure-style `mod`: floored division remainder, sign always matches the
+/// divisor (e.g. `(mod -7 3)` => 2, `(mod 7 -3)` => -2) -- distinct from
+/// `rem`/Rust's `%`, whose sign matches the dividend instead. Zero when
+/// exactly divisible, regardless of convention.
 #[no_mangle]
 pub extern "C" fn clorus_mod(a: *mut Value, b: *mut Value) -> *mut Value {
     if a.is_null() || b.is_null() {
@@ -229,22 +232,29 @@ pub extern "C" fn clorus_mod(a: *mut Value, b: *mut Value) -> *mut Value {
                     eprintln!("Modulo by zero");
                     return Value::nil();
                 }
-                let result = (*a).as_long() % divisor;
+                let r = (*a).as_long() % divisor;
+                let result = if r != 0 && (r < 0) != (divisor < 0) { r + divisor } else { r };
                 Value::long(result)
             }
             // Long % Double → Double
             (ValueTag::Long, ValueTag::Double) => {
-                let result = ((*a).as_long() as f64) % (*b).as_double();
+                let divisor = (*b).as_double();
+                let r = ((*a).as_long() as f64) % divisor;
+                let result = if r != 0.0 && (r < 0.0) != (divisor < 0.0) { r + divisor } else { r };
                 Value::double(result)
             }
             // Double % Long → Double
             (ValueTag::Double, ValueTag::Long) => {
-                let result = (*a).as_double() % ((*b).as_long() as f64);
+                let divisor = (*b).as_long() as f64;
+                let r = (*a).as_double() % divisor;
+                let result = if r != 0.0 && (r < 0.0) != (divisor < 0.0) { r + divisor } else { r };
                 Value::double(result)
             }
             // Double % Double → Double
             (ValueTag::Double, ValueTag::Double) => {
-                let result = (*a).as_double() % (*b).as_double();
+                let divisor = (*b).as_double();
+                let r = (*a).as_double() % divisor;
+                let result = if r != 0.0 && (r < 0.0) != (divisor < 0.0) { r + divisor } else { r };
                 Value::double(result)
             }
             _ => {
