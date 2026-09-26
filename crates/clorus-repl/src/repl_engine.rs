@@ -16,16 +16,52 @@ fn repl_debug_enabled() -> bool {
     env::var("CLORUS_DEBUG_REPL").is_ok()
 }
 
-/// Registers the running executable's own symbols with LLVM's JIT symbol
-/// resolver, once per process. Without this, JIT-compiled code calling a
-/// clorus-runtime `extern "C"` function (defined in this same binary, not
-/// a separate shared library) can fail to resolve it.
-fn ensure_process_symbols_loaded() {
+/// One-time LLVM JIT setup, done before the first execution engine is
+/// created. Two things, both about the same underlying issue: this
+/// process (the `clorus` executable) links as a PIE (position-independent
+/// executable) on every mainstream Linux distro, and LLVM's JIT machinery
+/// doesn't automatically account for that by default.
+///
+/// - `LLVMLoadLibraryPermanently(NULL)` registers the executable's own
+///   dynamic symbols with LLVM's JIT symbol resolver, so JIT-compiled code
+///   calling a clorus-runtime `extern "C"` function (defined in this same
+///   binary, not a separate shared library) can find it. Confirmed on its
+///   own NOT sufficient to fix the crash below -- kept anyway since it's
+///   correct/harmless and may matter for other symbols.
+/// - `-relocation-model=pic` forces the *internal* target machine MCJIT
+///   builds for JIT-compiled code to also emit PIC, matching the PIE host
+///   process. Without it, MCJIT falls back to the per-target "default"
+///   reloc model, which on x86_64 Linux is static/non-PIC -- the exact
+///   same category of mismatch as the one fixed in commands.rs's AOT
+///   object-file generation (RelocMode::Default -> RelocMode::PIC there),
+///   just on the JIT side, where there's no linker to reject a bad
+///   relocation outright -- RuntimeDyld just applies it, silently
+///   producing a wrong (here: null) address instead. This is what
+///   actually reproduces as: a JIT-compiled function that takes another
+///   JIT-compiled function's address as a *value* (not a call) --
+///   `clorus_function_new(ptr @some_fn, ...)`, generated for every `defn`
+///   -- calling through a null pointer inside `executed_init_0` on Linux
+///   only, confirmed via a CI gdb backtrace + LLVM IR dump. inkwell's
+///   `create_jit_execution_engine`/`create_mcjit_execution_engine_with_memory_manager`
+///   don't expose reloc-model control directly, so this goes through
+///   LLVM's global `-relocation-model` command-line flag instead, which
+///   every target's `createTargetMachine` consults when nothing more
+///   specific overrides it.
+fn ensure_jit_configured_for_pie_host() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| unsafe {
         // A null filename tells LLVM to load the main executable's own
         // symbols rather than a named library.
         inkwell::llvm_sys::support::LLVMLoadLibraryPermanently(std::ptr::null());
+
+        let prog_name = std::ffi::CString::new("clorus-repl").unwrap();
+        let reloc_flag = std::ffi::CString::new("-relocation-model=pic").unwrap();
+        let argv = [prog_name.as_ptr(), reloc_flag.as_ptr()];
+        inkwell::llvm_sys::support::LLVMParseCommandLineOptions(
+            argv.len() as i32,
+            argv.as_ptr(),
+            std::ptr::null(),
+        );
     });
 }
 
@@ -951,7 +987,7 @@ impl<'ctx> ReplEngine<'ctx> {
         // filename means "the main executable itself", per LLVM's
         // documented behavior for this call. Idempotent; safe to call more
         // than once (guarded anyway to keep it to one call per process).
-        ensure_process_symbols_loaded();
+        ensure_jit_configured_for_pie_host();
         // Create JIT engine
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
