@@ -316,25 +316,23 @@ run_repl_regressions() {
             continue
         fi
 
-        if [ "$(uname -s)" = "Linux" ]; then
-            # Known, open, tracked issue -- not swept under the rug: this
-            # exact script segfaults in JIT mode on Linux only (never
-            # macOS), root-caused to a null function-pointer call inside a
-            # JIT-compiled init wrapper, specifically when the clorus-core
-            # dylib isn't pre-installed (never the case on a fresh
-            # checkout). Three independent fix attempts (JIT symbol
-            # registration, forced PIC relocation, explicit global
-            # mapping) all produced the bit-for-bit identical crash,
-            # meaning the working theory of the cause is wrong, not just
-            # the fix -- next step needs live interactive Linux debugging
-            # (disassembly at the exact crash site), not another blind
-            # attempt. Skipping here so this one narrow, isolated gap
-            # doesn't block the rest of CI from being a meaningful signal
-            # while that continues separately.
-            echo -e "${YELLOW}⚠ SKIP (known issue, Linux JIT REPL segfault)${NC}"
-            ((SKIPPED+=1))
-            continue
-        fi
+        # Formerly skipped here on Linux: this exact script used to segfault
+        # in JIT mode on Linux only (never macOS), when the clorus-core
+        # dylib isn't pre-installed. Root-caused via live interactive gdb:
+        # MCJIT-emitted calls to `clorus-runtime`'s statically-linked
+        # `extern "C" clorus_*` functions were resolved via dlsym-style
+        # process symbol lookup, which on ELF/Linux only searches the
+        # dynamic symbol table (.dynsym) -- and by default a normal
+        # (non-cdylib) executable's own global symbols are never added
+        # there. Every runtime call therefore resolved to a NULL address,
+        # which LLVM silently baked in as a literal `movabs $0x0, %rax;
+        # call *%rax` -- a guaranteed segfault on the very first such call.
+        # Fixed by linking the `clorus`/`repl-dev`/`replx` binaries with
+        # `-rdynamic` (see crates/clorus-cli/build.rs et al.), which exports
+        # their own global symbols into .dynsym so JIT-time symbol
+        # resolution can actually find them. macOS's Mach-O/dyld already
+        # exposes a PIE executable's symbols this way, which is why this
+        # never reproduced there. This test now runs unconditionally.
 
         # Pipe scripted input to REPL and validate key behaviors:
         # - defmacro returns var-ish symbol name

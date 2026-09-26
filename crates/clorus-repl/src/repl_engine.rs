@@ -24,14 +24,22 @@ fn repl_debug_enabled() -> bool {
 /// same binary, not a `dlopen`-loaded shared library) may not be able to
 /// find it.
 ///
-/// NOTE: tried, on its own, as a fix for a Linux-only JIT REPL segfault
-/// (repl/core-map-defmacro test) -- confirmed via CI to have zero effect on
-/// that crash (bit-identical crash address before and after). Kept because
-/// it's independently correct regardless, not because it's proven to fix
-/// anything here. See `bind_external_runtime_functions` below for the
-/// explicit-mapping approach that was also tried and also didn't resolve
-/// it; that segfault remains open and needs live Linux debugging
-/// (disassembly at the exact crash site) to root-cause properly.
+/// NOTE: this alone does NOT fix the Linux-only JIT REPL segfault
+/// (repl/core-map-defmacro test) -- confirmed via CI, and later root-caused
+/// via live gdb, to have zero effect on that crash on its own (bit-identical
+/// crash address with or without it). The reason: on ELF/Linux,
+/// `LLVMLoadLibraryPermanently(NULL)` ultimately resolves symbols the same
+/// way `dlsym(RTLD_DEFAULT, ...)` would -- by searching the dynamic symbol
+/// table (`.dynsym`) of the executable and its loaded shared libraries. A
+/// normal (non-cdylib) Rust executable does not export its own global
+/// symbols into `.dynsym` by default, so every `clorus_*` runtime function
+/// was invisible to this lookup regardless. The actual fix is linking the
+/// binary with `-rdynamic` (see `crates/clorus-cli/build.rs`,
+/// `crates/clorus-repl/build.rs`, `crates/clorus-replx/build.rs`), which
+/// puts those symbols into `.dynsym` in the first place. With that fix in
+/// place, this call and `bind_external_runtime_functions` below are
+/// harmless, correct, and now actually able to find those symbols too --
+/// just no longer load-bearing on their own.
 fn ensure_jit_configured_for_pie_host() {
     static INIT: std::sync::Once = std::sync::Once::new();
     INIT.call_once(|| unsafe {
@@ -53,9 +61,22 @@ fn ensure_jit_configured_for_pie_host() {
 ///
 /// NOTE: tried as a fix for the same Linux-only JIT REPL segfault as
 /// `ensure_jit_configured_for_pie_host` above -- also confirmed via CI to
-/// have zero effect (same bit-identical crash). Kept because explicit
-/// mapping is strictly more robust than relying on MCJIT's default
-/// resolver regardless, not because it's proven to fix anything here.
+/// have zero effect on its own (same bit-identical crash). Root cause
+/// (found via live gdb -- disassembling the crash site showed the
+/// JIT-compiled call sites had a literal `movabs $0x0, %rax; call *%rax`
+/// baked in): `UnixLibrary::this()` here is a `dlopen(NULL, ...)`-style
+/// handle, and `.get()` on it resolves names via `dlsym`, which on
+/// ELF/Linux only searches `.dynsym`. Because this executable wasn't built
+/// with `-rdynamic`, none of its own `clorus_*` runtime functions were in
+/// `.dynsym` -- despite being real, `#[no_mangle] pub extern "C"` and
+/// physically present in the binary -- so every lookup here failed and fell
+/// through, and MCJIT's own resolver failed identically for the same
+/// reason, silently emitting a null call target. Fixed at the link level
+/// (`-rdynamic`, see `crates/clorus-cli/build.rs` et al.), which exports
+/// this executable's symbols into `.dynsym` so this lookup (and MCJIT's own
+/// resolver) can actually find them. Kept as-is: explicit mapping is still
+/// strictly more robust than relying on MCJIT's default resolver, and now
+/// that `-rdynamic` is in place, this path does resolve real addresses.
 fn bind_external_runtime_functions(engine: &inkwell::execution_engine::ExecutionEngine, module: &inkwell::module::Module) {
     use libloading::os::unix::Library as UnixLibrary;
 
