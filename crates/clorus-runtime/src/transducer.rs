@@ -9,22 +9,34 @@ use crate::map::{clorus_map_empty, clorus_map_assoc};
 
 /// Create a reduced value wrapper
 /// Returns a map {:type :reduced :value val}
+///
+/// Keyword interning here must match how an ordinary `:type`/`:reduced`
+/// keyword LITERAL in Clorus source interns (colon-less name -- see e.g.
+/// core_calls.rs's satisfies?/extends? fix, or var.rs's :name injection,
+/// for the same convention elsewhere). stdlib's own reduced/reduced?/
+/// unreduced (transducers.clr) build and read this exact map shape using
+/// ordinary `:type`/`:reduced`/`:value` keyword literals, which is what
+/// take/take-while/etc. actually call -- these native functions previously
+/// interned with the colon INCLUDED in the name string, making them a
+/// completely different (never-matching) keyword than stdlib's, so
+/// clorus_is_reduced always returned false for a real reduced value and
+/// silently discarded every early-termination signal.
 #[no_mangle]
 pub extern "C" fn clorus_reduced(val: *mut Value) -> *mut Value {
     // Create empty map
     let map = clorus_map_empty();
 
     // Create :type keyword
-    let type_kw = clorus_keyword(b":type\0".as_ptr() as *const i8);
+    let type_kw = clorus_keyword(b"type\0".as_ptr() as *const i8);
 
     // Create :reduced keyword (the value for :type)
-    let reduced_kw = clorus_keyword(b":reduced\0".as_ptr() as *const i8);
+    let reduced_kw = clorus_keyword(b"reduced\0".as_ptr() as *const i8);
 
     // Assoc :type :reduced
     let map = clorus_map_assoc(map, type_kw, reduced_kw);
 
     // Create :value keyword
-    let value_kw = clorus_keyword(b":value\0".as_ptr() as *const i8);
+    let value_kw = clorus_keyword(b"value\0".as_ptr() as *const i8);
 
     // Assoc :value val
     let map = clorus_map_assoc(map, value_kw, val);
@@ -47,7 +59,7 @@ pub extern "C" fn clorus_is_reduced(val: *mut Value) -> bool {
         }
 
         // Get :type key
-        let type_kw = clorus_keyword(b":type\0".as_ptr() as *const i8);
+        let type_kw = clorus_keyword(b"type\0".as_ptr() as *const i8);
 
         // Get value for :type
         let type_val = crate::map::clorus_map_get(val, type_kw);
@@ -75,7 +87,7 @@ pub extern "C" fn clorus_deref_reduced(val: *mut Value) -> *mut Value {
     }
 
     // Get :value key
-    let value_kw = clorus_keyword(b":value\0".as_ptr() as *const i8);
+    let value_kw = clorus_keyword(b"value\0".as_ptr() as *const i8);
 
     // Get and return the value
     crate::map::clorus_map_get(val, value_kw)

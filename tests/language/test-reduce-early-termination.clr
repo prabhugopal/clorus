@@ -1,0 +1,43 @@
+(ns tests.language.test-reduce-early-termination)
+
+;; Regression test: reduce's codegen had no `reduced`-awareness at all --
+;; it always ran the reducing function over the entire collection,
+;; regardless of what the function returned. A `(reduced x)`-wrapped
+;; result is supposed to stop iteration immediately (the mechanism
+;; take/take-while/etc. rely on as transducers), so this silently ran
+;; every remaining element even after the reducing function had already
+;; signaled "stop".
+;;
+;; Fixing that also surfaced a real bug in the *other*, never-previously-
+;; called native reduced/is_reduced implementation (transducer.rs): it
+;; interned its :type/:reduced/:value keywords WITH a leading colon in the
+;; name string, while every ordinary keyword literal in Clorus source
+;; (including stdlib's own pure-Clorus reduced?/unreduced) interns
+;; colon-less -- two different keywords that never matched, so
+;; clorus_is_reduced always returned false for a real reduced value.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "reduce stops at reduced"
+               (reduce (fn [acc x]
+                         (if (>= x 3)
+                           (reduced acc)
+                           (conj acc x)))
+                       []
+                       [1 2 3 4 5])
+               [1 2])
+
+    (assert-eq "reduce without reduced runs to completion"
+               (reduce (fn [acc x] (conj acc x)) [] [1 2 3])
+               [1 2 3])
+
+    (assert-eq "transduce take stops early"
+               (transduce (take 2) conj [] [10 20 30 40])
+               [10 20])
+
+    "PASS"))

@@ -284,19 +284,30 @@
       (f result input)))))
 
 (defn transduce
-  "Apply transducer to collection with completion arity support."
+  "Apply transducer to collection with completion arity support.
+   rf-fn is passed straight through to xform, not wrapped via `completing`:
+   xform's own composed reducing fn delegates its 1-arity completion call
+   to rf-fn's 1-arity clause when rf-fn is itself multi-arity (e.g. a
+   `(fn ([result] ...) ([result input] ...))`), so that clause actually
+   runs -- completing's own default (a plain identity fn, discarding
+   rf-fn) would always win instead, since transduce always supplied it.
+   A plain 2-arity-only rf-fn has no completion clause to call; calling
+   it with 1 arg returns nil (this runtime's existing arity-mismatch
+   convention, not a thrown exception), which is treated as an explicit
+   opt-out and falls back to the accumulated result unchanged."
   ([xform rf-fn coll]
    (transduce xform rf-fn [] coll))
   ([xform rf-fn init coll]
-   (let [rf (xform (completing rf-fn))]
-     (rf
-      (reduce (fn [acc input]
-                (let [r (rf acc input)]
-                  (if (reduced? r)
-                    (unreduced r)
-                    r)))
-              init
-              coll)))))
+   ;; rf is passed straight to reduce (not wrapped to unwrap `reduced`
+   ;; itself) -- reduce's own codegen already detects and unwraps a
+   ;; `reduced` result to stop early; unwrapping it here first would just
+   ;; strip that marker before reduce ever saw it, silently defeating
+   ;; take/take-while's early termination (confirmed: reduce kept
+   ;; iterating the whole collection regardless).
+   (let [rf (xform rf-fn)
+         result (reduce rf init coll)
+         completed (rf result)]
+     (if (nil? completed) result completed))))
 
 (defn into
   "Build collection using transducer."

@@ -1650,6 +1650,94 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_pointer_value();
                 self.builder.build_store(acc_alloca, new_acc).unwrap();
 
+                // Early termination: a reducing function signals "stop" by
+                // returning a `(reduced x)`-wrapped value (used pervasively
+                // by transducers -- take/take-while wrap their result once
+                // their condition first fails). Without this check, reduce
+                // ignored that signal entirely and kept iterating the whole
+                // collection regardless -- confirmed via transduce+take-while
+                // silently including elements *after* the point it should
+                // have stopped, since nothing ever unwrapped-and-broke on
+                // the wrapper. Reduced values are {:type :reduced :value x}
+                // maps (see clorus_reduced/clorus_is_reduced and stdlib's
+                // reduced?/unreduced, which share this same representation).
+                let is_reduced_fn = self
+                    .module
+                    .get_function("clorus_is_reduced")
+                    .ok_or("clorus_is_reduced not declared")?;
+                let is_reduced = self
+                    .builder
+                    .build_call(is_reduced_fn, &[new_acc.into()], "is_reduced")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let is_reduced_bool = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        is_reduced,
+                        // clorus_is_reduced was declared via
+                        // declare_value_to_bool_fn, which uses LLVM i8 (C
+                        // ABI bool) for the return type, not i1 -- comparing
+                        // against bool_type()'s i1 zero was a real operand
+                        // type mismatch, invisible under JIT/-O0 but fatal
+                        // during AOT's SelectionDAG type legalization
+                        // (confirmed via lldb: crashed inside
+                        // DAGTypeLegalizer::SExtOrZExtPromotedOperands).
+                        self.context.i8_type().const_zero(),
+                        "is_reduced_bool",
+                    )
+                    .unwrap();
+
+                let unwrap_block = self.context.append_basic_block(current_fn, "reduce_unwrap");
+                let continue_block = self.context.append_basic_block(current_fn, "reduce_continue");
+                self.builder
+                    .build_conditional_branch(is_reduced_bool, unwrap_block, continue_block)
+                    .unwrap();
+
+                self.builder.position_at_end(unwrap_block);
+                let keyword_fn = self
+                    .module
+                    .get_function("clorus_keyword")
+                    .ok_or("clorus_keyword not declared")?;
+                let map_get_fn = self
+                    .module
+                    .get_function("clorus_map_get")
+                    .ok_or("clorus_map_get not declared")?;
+                let value_key_str = self
+                    .builder
+                    .build_global_string_ptr("value", "reduced_value_key")
+                    .unwrap();
+                let value_key = self
+                    .builder
+                    .build_call(
+                        keyword_fn,
+                        &[value_key_str.as_pointer_value().into()],
+                        "reduced_value_kw",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                let unwrapped = self
+                    .builder
+                    .build_call(
+                        map_get_fn,
+                        &[new_acc.into(), value_key.into()],
+                        "reduced_unwrapped",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                self.builder.build_store(acc_alloca, unwrapped).unwrap();
+                self.builder.build_unconditional_branch(end_block).unwrap();
+
+                self.builder.position_at_end(continue_block);
                 let next_index = self
                     .builder
                     .build_int_add(
