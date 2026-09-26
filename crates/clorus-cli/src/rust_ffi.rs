@@ -1935,7 +1935,7 @@ Use an explicit `.clri` interface with supported types or a local bridge crate."
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::with_cwd;
+    use crate::test_support::{cwd_lock, with_cwd};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -4947,6 +4947,12 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_rejects_unknown_extension() {
+        // resolve_interface_path checks `path.is_dir()` (CWD-relative)
+        // before checking the extension, so this needs the same cwd_lock
+        // serialization as every other test below that touches a relative
+        // "interfaces/demo-lib.*" path -- see the comment on
+        // `resolve_interface_path_explicit_trims_whitespace`.
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
         let err = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.txt".to_string()),
@@ -4959,6 +4965,7 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_rejects_unknown_extension_after_trimming() {
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
         let err = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path("  interfaces/demo-lib.txt  ".to_string()),
@@ -4970,6 +4977,8 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_rejects_empty_path() {
+        // No filesystem/CWD access on this path (empty check returns
+        // first) -- no lock needed.
         let err = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path("   ".to_string()),
@@ -4980,6 +4989,22 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_trims_whitespace() {
+        // resolve_interface_path does `Path::new(trimmed).is_dir()`
+        // relative to the process's *current working directory* --  a
+        // global, per-process (not per-thread) resource. Two other tests
+        // in this file (resolve_interface_path_explicit_rejects_directory_*)
+        // deliberately create a real directory at this exact relative path
+        // ("interfaces/demo-lib.clri") and temporarily chdir into a temp
+        // root via `with_cwd` while checking for the directory-rejection
+        // error. Without this same `cwd_lock`, cargo test's default
+        // parallel execution can interleave this test's call with one of
+        // those, making the CWD-relative "interfaces/demo-lib.clri" check
+        // here see the *other* test's directory instead of a
+        // non-existent path -- causing this test to intermittently and
+        // non-deterministically fail with "points to a directory" even
+        // though its own working directory was never touched. Reproduced
+        // as exactly this failure in CI.
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
         let resolved = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path("  interfaces/demo-lib.clri  ".to_string()),
@@ -4990,6 +5015,7 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_accepts_clri_extension() {
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
         let resolved = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.clri".to_string()),
@@ -5000,6 +5026,7 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_accepts_legacy_extension() {
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
         let resolved = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path("interfaces/demo-lib.clorus-ffi".to_string()),
@@ -5010,6 +5037,7 @@ mod tests {
 
     #[test]
     fn resolve_interface_path_explicit_accepts_legacy_extension_after_trimming() {
+        let _guard = cwd_lock().lock().expect("cwd lock poisoned");
         let resolved = RustFfiProcessor::resolve_interface_path(
             "demo-lib",
             crate::manifest::InterfaceSpec::Path(
