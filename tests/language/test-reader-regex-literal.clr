@@ -9,6 +9,11 @@
   (do
     ;; #"..." reader literal lowers to (re-pattern "...")
     (assert-eq "reader literal simple" #"abc" "abc")
-    (assert-eq "reader literal escapes" #"a\\sb" "a\\sb")
+    ;; Regex literals preserve backslashes verbatim (matching real Clojure --
+    ;; #"..." does NOT collapse `\\` the way a plain string literal does, so
+    ;; `\s` in a regex literal is one backslash + 's', letting the regex
+    ;; engine see \s as the whitespace class). A plain string needs `\\` to
+    ;; produce that same single raw backslash.
+    (assert-eq "reader literal escapes" #"a\sb" "a\\sb")
     (assert-eq "re-pattern call" (re-pattern "x+y") "x+y")
     "PASS"))

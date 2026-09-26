@@ -810,23 +810,19 @@ impl<'ctx> CodeGen<'ctx> {
                         // name the auto-loaded stdlib already used), LLVM silently renames the new
                         // global to keep module-wide names unique, and that renamed name was never a
                         // function_signatures key.
+                        // A local defn in the current namespace must shadow
+                        // a :refer/:rename import of the same name (matching
+                        // Clojure: a namespace's own definitions always win
+                        // over anything referred in) -- so the current-
+                        // namespace mangled lookup has to be tried BEFORE
+                        // falling back to imports, not after. Getting this
+                        // order backwards meant `(defn union [...] ...)`
+                        // shadowing a `:refer [union]` from clorus.set was
+                        // silently ignored: every unqualified call to
+                        // `union` kept resolving to the imported one.
                         self.functions
                             .get_key_value(name)
                             .map(|(k, f)| (k.clone(), *f))
-                            .or_else(|| {
-                                if let Some(binding) = self.namespace.imports.get(name) {
-                                    let mangled_name = format!(
-                                        "clorus_{}_{}",
-                                        binding.namespace.replace('.', "_").replace('-', "_"),
-                                        binding.symbol.replace('-', "_")
-                                    );
-                                    self.functions
-                                        .get(&mangled_name)
-                                        .map(|f| (mangled_name, *f))
-                                } else {
-                                    None
-                                }
-                            })
                             .or_else(|| {
                                 // Try mangled name for current namespace
                                 let mangled_name = if self.namespace.current == "user" {
@@ -841,6 +837,20 @@ impl<'ctx> CodeGen<'ctx> {
                                 self.functions
                                     .get(&mangled_name)
                                     .map(|f| (mangled_name, *f))
+                            })
+                            .or_else(|| {
+                                if let Some(binding) = self.namespace.imports.get(name) {
+                                    let mangled_name = format!(
+                                        "clorus_{}_{}",
+                                        binding.namespace.replace('.', "_").replace('-', "_"),
+                                        binding.symbol.replace('-', "_")
+                                    );
+                                    self.functions
+                                        .get(&mangled_name)
+                                        .map(|f| (mangled_name, *f))
+                                } else {
+                                    None
+                                }
                             })
                     };
 
@@ -5520,25 +5530,35 @@ impl<'ctx> CodeGen<'ctx> {
                         .into_pointer_value());
                 }
 
-                // Check if this is a referred symbol (imported via :refer)
-                // If so, resolve to the full qualified name
-                let function_to_lookup = if let Some(binding) = self.namespace.imports.get(func) {
+                // A local defn in the current namespace must shadow a
+                // :refer/:rename import of the same name (matching Clojure:
+                // a namespace's own definitions always win over anything
+                // referred in), so the current-namespace mangled name has
+                // to be tried BEFORE falling back to imports -- not after.
+                // Checking imports first meant `(defn union [...] ...)`
+                // shadowing a `:refer [union]` from clorus.set was silently
+                // ignored: every direct call `(union a b)` kept resolving
+                // to the imported one instead of the local definition.
+                let current_ns_mangled = if self.namespace.current == "user" {
+                    func.to_string()
+                } else {
+                    format!(
+                        "clorus_{}_{}",
+                        self.namespace.current.replace('.', "_").replace('-', "_"),
+                        func.replace('-', "_")
+                    )
+                };
+                let function_to_lookup = if self.functions.contains_key(&current_ns_mangled) {
+                    current_ns_mangled
+                } else if let Some(binding) = self.namespace.imports.get(func) {
                     // This is a referred symbol - create the mangled name
                     format!(
                         "clorus_{}_{}",
                         binding.namespace.replace('.', "_").replace('-', "_"),
                         binding.symbol.replace('-', "_")
                     )
-                } else if self.namespace.current != "user" {
-                    // Try current namespace's function (for local calls)
-                    format!(
-                        "clorus_{}_{}",
-                        self.namespace.current.replace('.', "_").replace('-', "_"),
-                        func.replace('-', "_")
-                    )
                 } else {
-                    // Default namespace - use simple name
-                    func.to_string()
+                    current_ns_mangled
                 };
 
                 // Prefer direct/static function calls when possible (important for defn->defn calls),
