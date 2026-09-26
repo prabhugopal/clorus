@@ -2008,6 +2008,11 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
         function_names.push(fn_name);
     }
 
+    if std::env::var("CLORUS_DUMP_IR").is_ok() {
+        let ir = codegen.get_module().print_to_string().to_string();
+        std::fs::write("/tmp/clorus_dump.ll", ir).ok();
+    }
+
     // Create JIT engine
     let engine = codegen.get_module()
         .create_jit_execution_engine(OptimizationLevel::None)

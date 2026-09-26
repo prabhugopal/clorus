@@ -339,6 +339,29 @@ pub extern "C" fn clorus_list_count(list_val: *mut Value) -> u64 {
     }
 }
 
+/// Converts any seq-able collection (vector, list, ...) into a real list,
+/// preserving element order. Used by syntax-quote codegen: unquote-splicing
+/// is only implemented in terms of vector-building (clorus_concat), so a
+/// `` `(1 ~@xs 4) `` accumulates as a vector throughout and gets converted to
+/// a real list at the very end, via the same generic clorus_count/clorus_nth
+/// polymorphic accessors used elsewhere for cross-type sequence ops.
+#[no_mangle]
+pub extern "C" fn clorus_vector_to_list(coll_val: *mut Value) -> *mut Value {
+    unsafe {
+        let count = crate::collections::clorus_count(coll_val);
+        let mut result = PersistentList::empty();
+        for i in (0..count).rev() {
+            let item = crate::collections::clorus_nth(coll_val, i);
+            result = result.cons(item);
+            if !item.is_null() {
+                crate::value::clorus_release(item);
+            }
+        }
+        let new_ptr = Box::into_raw(Box::new(result)) as *mut u8;
+        Value::from_ptr(ValueTag::List, new_ptr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

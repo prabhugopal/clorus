@@ -123,47 +123,52 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(vec_val)
             }
 
-            // Lists are converted to vectors (since we don't have List literals at runtime yet)
+            // `'(1 2)` must stay a real list (list? true, prints with
+            // parens) -- PersistentList already exists at runtime (see
+            // clorus_list_cons/clorus_list_first), so building it as a
+            // vector here was a stale workaround, not a real constraint.
+            // Built by consing elements on in reverse (cons always
+            // prepends), since there's no unquote/splicing to worry about
+            // in a plain quote.
             Expr::List(elements) => {
-                let vec_empty_fn = self
+                let list_empty_fn = self
                     .module
-                    .get_function("clorus_vector_empty")
-                    .ok_or("clorus_vector_empty not declared")?;
-                let empty_vec_call = self
+                    .get_function("clorus_list_empty")
+                    .ok_or("clorus_list_empty not declared")?;
+                let mut list_val = self
                     .builder
-                    .build_call(vec_empty_fn, &[], "quoted_list_empty")
-                    .unwrap();
-                let mut vec_val = empty_vec_call
+                    .build_call(list_empty_fn, &[], "quoted_list_empty")
+                    .unwrap()
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_pointer_value();
 
-                let vec_conj_fn = self
+                let list_cons_fn = self
                     .module
-                    .get_function("clorus_vector_conj")
-                    .ok_or("clorus_vector_conj not declared")?;
+                    .get_function("clorus_list_cons")
+                    .ok_or("clorus_list_cons not declared")?;
 
-                for (i, elem) in elements.iter().enumerate() {
+                for (i, elem) in elements.iter().enumerate().rev() {
                     let elem_val = self.compile_quoted(elem)?;
 
-                    let conj_call = self
+                    let cons_call = self
                         .builder
                         .build_call(
-                            vec_conj_fn,
-                            &[vec_val.into(), elem_val.into()],
-                            &format!("quoted_list_conj_{}", i),
+                            list_cons_fn,
+                            &[list_val.into(), elem_val.into()],
+                            &format!("quoted_list_cons_{}", i),
                         )
                         .unwrap();
 
-                    vec_val = conj_call
+                    list_val = cons_call
                         .try_as_basic_value()
                         .left()
                         .unwrap()
                         .into_pointer_value();
                 }
 
-                Ok(vec_val)
+                Ok(list_val)
             }
 
             // Maps: recursively quote keys and values
@@ -210,26 +215,28 @@ impl<'ctx> CodeGen<'ctx> {
                 Ok(map_val)
             }
 
-            // Sets are treated like vectors when quoted
+            // `'#{1 2}` must stay a real set (set? true, dedupes/prints as
+            // a set) -- ClorusHashSet already exists at runtime (clorus_set_*),
+            // so building it as a vector here was likewise a stale
+            // workaround rather than a real constraint.
             Expr::Set(elements) => {
-                let vec_empty_fn = self
+                let set_empty_fn = self
                     .module
-                    .get_function("clorus_vector_empty")
-                    .ok_or("clorus_vector_empty not declared")?;
-                let empty_vec_call = self
+                    .get_function("clorus_set_empty")
+                    .ok_or("clorus_set_empty not declared")?;
+                let mut set_val = self
                     .builder
-                    .build_call(vec_empty_fn, &[], "quoted_set_empty")
-                    .unwrap();
-                let mut vec_val = empty_vec_call
+                    .build_call(set_empty_fn, &[], "quoted_set_empty")
+                    .unwrap()
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_pointer_value();
 
-                let vec_conj_fn = self
+                let set_conj_fn = self
                     .module
-                    .get_function("clorus_vector_conj")
-                    .ok_or("clorus_vector_conj not declared")?;
+                    .get_function("clorus_set_conj")
+                    .ok_or("clorus_set_conj not declared")?;
 
                 for (i, elem) in elements.iter().enumerate() {
                     // Recursively quote each element
@@ -238,20 +245,20 @@ impl<'ctx> CodeGen<'ctx> {
                     let conj_call = self
                         .builder
                         .build_call(
-                            vec_conj_fn,
-                            &[vec_val.into(), elem_val.into()],
+                            set_conj_fn,
+                            &[set_val.into(), elem_val.into()],
                             &format!("quoted_set_conj_{}", i),
                         )
                         .unwrap();
 
-                    vec_val = conj_call
+                    set_val = conj_call
                         .try_as_basic_value()
                         .left()
                         .unwrap()
                         .into_pointer_value();
                 }
 
-                Ok(vec_val)
+                Ok(set_val)
             }
 
             // Nested quotes: '(quote x) => just return (quote x) as data
@@ -474,14 +481,50 @@ impl<'ctx> CodeGen<'ctx> {
             // Collections: recursively process, checking for unquote-splicing
             Expr::Vector(elements) => self.compile_syntax_quoted_sequence(elements, true),
 
-            Expr::List(elements) => {
-                // Lists become vectors (like regular quote)
-                self.compile_syntax_quoted_sequence(elements, true)
-            }
+            Expr::List(elements) => self.compile_syntax_quoted_sequence(elements, false),
 
             Expr::Set(elements) => {
-                // Sets become vectors (like regular quote)
-                self.compile_syntax_quoted_sequence(elements, true)
+                // No unquote-splicing support here (matching this method's
+                // scope before this fix) -- nested unquote via
+                // compile_syntax_quoted still works, e.g. `` #{1 ~x} ``.
+                let set_empty_fn = self
+                    .module
+                    .get_function("clorus_set_empty")
+                    .ok_or("clorus_set_empty not declared")?;
+                let mut set_val = self
+                    .builder
+                    .build_call(set_empty_fn, &[], "sq_set_empty")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                let set_conj_fn = self
+                    .module
+                    .get_function("clorus_set_conj")
+                    .ok_or("clorus_set_conj not declared")?;
+
+                for (i, elem) in elements.iter().enumerate() {
+                    let elem_val = self.compile_syntax_quoted(elem)?;
+
+                    let conj_call = self
+                        .builder
+                        .build_call(
+                            set_conj_fn,
+                            &[set_val.into(), elem_val.into()],
+                            &format!("sq_set_conj_{}", i),
+                        )
+                        .unwrap();
+
+                    set_val = conj_call
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                }
+
+                Ok(set_val)
             }
 
             Expr::Map(entries) => {
@@ -588,18 +631,23 @@ impl<'ctx> CodeGen<'ctx> {
                 // Create a list with the function name and arguments
                 let mut all_elems = vec![Expr::Symbol(func.clone())];
                 all_elems.extend(args.clone());
-                self.compile_syntax_quoted_sequence(&all_elems, true)
+                self.compile_syntax_quoted_sequence(&all_elems, false)
             }
 
             _ => Err(format!("Cannot syntax-quote expression: {:?}", expr)),
         }
     }
 
-    /// Helper: compile a sequence for syntax-quote, handling unquote-splicing
+    /// Helper: compile a sequence for syntax-quote, handling unquote-splicing.
+    /// Builds as a vector throughout regardless of `as_vector` (splicing via
+    /// clorus_concat only knows how to produce one), then converts to a real
+    /// list at the end when `as_vector` is false -- `` `(1 ~@xs 4) `` must
+    /// come out list-shaped (list? true, prints with parens) even though the
+    /// splice machinery works in terms of vectors internally.
     fn compile_syntax_quoted_sequence(
         &mut self,
         elements: &[Expr],
-        _as_vector: bool,
+        as_vector: bool,
     ) -> Result<PointerValue<'ctx>, String> {
         let vec_empty_fn = self
             .module
@@ -701,7 +749,22 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
 
-        Ok(vec_val)
+        if as_vector {
+            Ok(vec_val)
+        } else {
+            let vector_to_list_fn = self
+                .module
+                .get_function("clorus_vector_to_list")
+                .ok_or("clorus_vector_to_list not declared")?;
+            Ok(self
+                .builder
+                .build_call(vector_to_list_fn, &[vec_val.into()], "sq_seq_to_list")
+                .unwrap()
+                .try_as_basic_value()
+                .left()
+                .unwrap()
+                .into_pointer_value())
+        }
     }
 
 }

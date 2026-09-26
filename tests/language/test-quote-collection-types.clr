@@ -1,0 +1,39 @@
+(ns tests.language.test-quote-collection-types)
+
+;; Regression test: quote ('...) and syntax-quote (`...) of a list must
+;; produce a real list (list? true, prints with parens), not a vector.
+;; Both compile_quoted and compile_syntax_quoted used to build every
+;; collection type via clorus_vector_empty/clorus_vector_conj regardless
+;; of whether the source form was `(...)`  or `[...]`, so `'(1 2)` and
+;; `` `(1 2) `` silently became vectors -- printing as [1 2] and failing
+;; list?. Sets had the identical bug (built as vectors instead of real
+;; sets). Vectors themselves were always correct; this checks all three
+;; collection types stay distinct under both quoting forms, plus that
+;; unquote-splicing still yields a list when the enclosing form is a list.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "quote list is a list" (list? '(1 2)) true)
+    (assert-eq "quote list is not a vector" (vector? '(1 2)) false)
+    (assert-eq "quote vector stays a vector" (vector? '[1 2]) true)
+    (assert-eq "quote set stays a set" (set? '#{1 2}) true)
+
+    (assert-eq "syntax-quote list is a list" (list? `(1 2)) true)
+    (assert-eq "syntax-quote list is not a vector" (vector? `(1 2)) false)
+    (assert-eq "syntax-quote vector stays a vector" (vector? `[1 2]) true)
+    (assert-eq "syntax-quote set stays a set" (set? `#{1 2}) true)
+
+    (let [xs '(2 3)]
+      (assert-eq "syntax-quote splice into a list stays a list"
+                 (list? `(1 ~@xs 4))
+                 true)
+      (assert-eq "syntax-quote splice into a list has correct elements"
+                 `(1 ~@xs 4)
+                 '(1 2 3 4)))
+
+    "PASS"))
