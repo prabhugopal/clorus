@@ -252,6 +252,31 @@ pub extern "C" fn clorus_list_cons(list_val: *mut Value, elem: *mut Value) -> *m
             return Value::from_ptr(ValueTag::List, new_ptr);
         }
 
+        if (*list_val).header().tag() != ValueTag::List {
+            // `cons` works on any seq-able collection (vector, set, map,
+            // ...), not just lists -- (*list_val).as_ptr() is only a valid
+            // PersistentList* when the tag actually is List; blindly
+            // reinterpreting a PersistentVector's (or any other type's)
+            // internal pointer as a PersistentList corrupts memory the
+            // instant its fields are read (confirmed: `(cons 1 [2 3])`
+            // segfaulted). Build the result generically instead, via the
+            // same polymorphic clorus_count/clorus_nth every other
+            // cross-type sequence op (see collections/concat.rs) already
+            // uses, so it works for whatever collection type shows up.
+            let count = crate::collections::clorus_count(list_val);
+            let mut result = PersistentList::empty();
+            for i in (0..count).rev() {
+                let item = crate::collections::clorus_nth(list_val, i);
+                result = result.cons(item);
+                if !item.is_null() {
+                    crate::value::clorus_release(item);
+                }
+            }
+            result = result.cons(elem);
+            let new_ptr = Box::into_raw(Box::new(result)) as *mut u8;
+            return Value::from_ptr(ValueTag::List, new_ptr);
+        }
+
         let list_ptr = (*list_val).as_ptr() as *mut PersistentList;
         let list = &*list_ptr;
 

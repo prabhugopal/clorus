@@ -581,7 +581,11 @@
 (defn butlast [coll]
   (if (empty? (rest coll))
     []
-    (conj (butlast (rest coll)) (first coll))))
+    ;; cons always prepends regardless of collection type, unlike conj
+    ;; (which appends for a vector) -- conj here silently reversed the
+    ;; result, since this recursion builds up the tail first and needs
+    ;; each earlier element added to the FRONT of what's already built.
+    (cons (first coll) (butlast (rest coll)))))
 
 ;; stable merge helper for numeric sort
 (defn merge-sorted-numeric [left right]
