@@ -769,7 +769,11 @@ fn build_internal(mut lib_mode: bool, debug: bool, explicit_entry: Option<String
     // Construct the expected mangled name based on namespace
     let mut main_fn_name = "-main".to_string();
 
-    // Check if there's a namespace declaration to construct qualified name
+    // Use the *last* `Ns` form, not the first: required modules' forms are
+    // prepended before the entry file's own, so the entry file's `Ns` is
+    // always last. Taking the first `Ns` picked up a required module's
+    // namespace whenever any `:require` was present, so "-main" was looked
+    // up in the wrong namespace and never called.
     for expr in &all_exprs {
         if let clorus_syntax::Expr::Ns { name, .. } = expr {
             if name != "user" {
@@ -778,8 +782,9 @@ fn build_internal(mut lib_mode: bool, debug: bool, explicit_entry: Option<String
                 main_fn_name = format!("clorus_{}_{}",
                     name.replace('.', "_").replace('-', "_"),
                     "-main".replace('-', "_"));
+            } else {
+                main_fn_name = "-main".to_string();
             }
-            break;
         }
     }
 
