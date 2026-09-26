@@ -65,6 +65,29 @@ fn ensure_jit_configured_for_pie_host() {
     });
 }
 
+/// Binds every function this module *declares* but doesn't *define* (i.e.
+/// every external clorus-runtime `extern "C"` function it calls) to that
+/// function's real address in the current process, via
+/// `ExecutionEngine::add_global_mapping`. Declared-only functions with no
+/// resolvable address in this process are left alone -- MCJIT's own
+/// default resolver still gets a chance at them, this only removes the
+/// reliance on it for symbols we can resolve ourselves.
+fn bind_external_runtime_functions(engine: &inkwell::execution_engine::ExecutionEngine, module: &inkwell::module::Module) {
+    use libloading::os::unix::Library as UnixLibrary;
+
+    let this_process = UnixLibrary::this();
+    for function in module.get_functions() {
+        if function.count_basic_blocks() != 0 {
+            continue; // has a body -- defined in this module, not external
+        }
+        let name = function.get_name().to_string_lossy().into_owned();
+        let addr = unsafe { this_process.get::<unsafe extern "C" fn()>(name.as_bytes()) };
+        if let Ok(symbol) = addr {
+            engine.add_global_mapping(&function, *symbol as usize);
+        }
+    }
+}
+
 /// Result of evaluating an expression in the REPL
 pub struct EvalResult {
     pub value: *mut u8,
@@ -992,6 +1015,20 @@ impl<'ctx> ReplEngine<'ctx> {
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
             .map_err(|e| format!("JIT error: {}", e))?;
+
+        // Explicitly bind every external clorus-runtime function this module
+        // declares (but doesn't define) to its real address in this process,
+        // rather than relying on MCJIT's own default resolver to find it.
+        // This is the same pattern crates/clorus/tests/value_star_test.rs
+        // already uses (there, hand-listing ~13 arithmetic/value functions
+        // with the comment "avoids unresolved symbol calls on macOS");
+        // generalized here to every declared function automatically, since
+        // this module can reference any of the ~100+ runtime functions
+        // stdlib compilation touches, not a small fixed set. See the
+        // segfault this fixes: a JIT-compiled call to one of these,
+        // resolving to a null address, reproduced only on Linux, only
+        // through this eval_internal path.
+        bind_external_runtime_functions(&engine, codegen.get_module());
 
         if repl_debug_enabled() {
             eprintln!("DEBUG eval_internal: Executing {} init statements...", init_fn_names.len());
