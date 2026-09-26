@@ -1744,9 +1744,24 @@ fn substitute_in_syntax_quote(
 fn expand_syntax_quote(expr: &Expr, registry: &mut MacroRegistry) -> Expr {
     match expr {
         Expr::Unquote { expr: inner } => {
-            // Unquote: expand macros in the unquoted expression
-            expand_macros_with_registry(inner, registry)
+            // Unquote: expand macros in the unquoted expression, but the
+            // Unquote wrapper itself must survive -- it's what tells
+            // codegen's compile_syntax_quoted to evaluate this element
+            // instead of quoting it literally. Dropping it here silently
+            // turned every `~x` into a plain `x` (i.e. the literal symbol,
+            // not its value) by the time codegen saw it, while
+            // UnquoteSplicing had no arm in this match at all and fell
+            // through to the catch-all below (which does preserve the
+            // node unchanged) -- that asymmetry is exactly why `~@xs`
+            // worked but `~x` didn't.
+            Expr::Unquote {
+                expr: Box::new(expand_macros_with_registry(inner, registry)),
+            }
         }
+
+        Expr::UnquoteSplicing { expr: inner } => Expr::UnquoteSplicing {
+            expr: Box::new(expand_macros_with_registry(inner, registry)),
+        },
 
         Expr::List(items) => {
             Expr::List(items.iter().map(|e| expand_syntax_quote(e, registry)).collect())

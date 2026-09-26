@@ -30,12 +30,20 @@
                    (mutate-both! 31 21)))
                [31 21])
 
+    ;; The inner `(binding [*x* 30] ...)` only pushes a new frame for *x* --
+    ;; *y* is never re-bound by it, so `(set! *y* 21)` inside that scope
+    ;; mutates the OUTER binding's *y* frame directly (there is no separate
+    ;; inner frame for *y* to have been mutated instead). That mutation is
+    ;; not undone when the inner binding exits, since it never touched *y*'s
+    ;; frame -- only *x* gets restored (to the outer binding's value, 10).
+    ;; This matches real Clojure: set!/binding restoration is per-var, not
+    ;; "every var reverts when any enclosing binding form exits."
     (assert-eq "outer frame restored after inner exit"
                (binding [*x* 10 *y* 20]
                  (binding [*x* 30]
                    (mutate-both! 31 21))
                  [*x* *y*])
-               [10 20])
+               [10 21])
 
     (assert-eq "root restored after nested binding" [*x* *y*] [1 100])
 

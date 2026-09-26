@@ -362,6 +362,18 @@ pub extern "C" fn clorus_var_meta(var_ptr: *mut Var) -> *mut Value {
         let map_assoc_fn = crate::map::clorus_map_assoc;
 
         let mut out = map_empty_fn();
+
+        // Every var carries :name in its metadata unconditionally, exactly
+        // like real Clojure (`(:name (meta #'x))` always works, whether or
+        // not `x` was ever declared with explicit metadata) -- the var's
+        // own `name` field is authoritative, so this can't drift out of
+        // sync the way a separately-tracked :name meta entry could.
+        let name_key = Value::keyword("name");
+        let name_val = Value::symbol(&var.name);
+        out = map_assoc_fn(out, name_key, name_val);
+        crate::value::clorus_release(name_key);
+        crate::value::clorus_release(name_val);
+
         if let Ok(meta) = var.metadata.lock() {
             for (k, v) in meta.iter() {
                 let key_val = Value::keyword(k);

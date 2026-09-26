@@ -60,13 +60,23 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::Nil => Ok(self.box_number(self.context.f64_type().const_float(0.0))),
 
-            // Symbols become strings for now (TODO: add Symbol value type)
             Expr::Symbol(s) => {
                 let c_str = self
                     .builder
                     .build_global_string_ptr(s, "quoted_symbol")
                     .expect("Failed to build global string for quoted symbol");
-                Ok(self.box_string(c_str.as_pointer_value()))
+                let symbol_fn = self
+                    .module
+                    .get_function("clorus_symbol")
+                    .ok_or("clorus_symbol not declared")?;
+                Ok(self
+                    .builder
+                    .build_call(symbol_fn, &[c_str.as_pointer_value().into()], "quoted_symbol_val")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
             }
 
             // Vectors: recursively quote each element
@@ -393,12 +403,31 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Symbol(s) => {
-                // TODO: Namespace resolution - for now, just return as string
+                // TODO: real Clojure syntax-quote auto-namespace-qualifies
+                // unqualified symbols (`` `foo `` in ns `my.ns` => `` 'my.ns/foo ``,
+                // except auto-gensym'd `foo#` symbols) -- not implemented
+                // here yet. Fixed for now: this must at least produce a
+                // real Symbol value (matching plain `'foo`, see
+                // compile_quoted above), not a String -- `(= 'z ``z)` was
+                // silently always false despite both printing as `z`,
+                // since `=` correctly distinguishes a String from a Symbol
+                // even when their text happens to match.
                 let c_str = self
                     .builder
                     .build_global_string_ptr(s, "syntax_quoted_symbol")
                     .unwrap();
-                Ok(self.box_string(c_str.as_pointer_value()))
+                let symbol_fn = self
+                    .module
+                    .get_function("clorus_symbol")
+                    .ok_or("clorus_symbol not declared")?;
+                Ok(self
+                    .builder
+                    .build_call(symbol_fn, &[c_str.as_pointer_value().into()], "syntax_quoted_symbol_val")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
             }
 
             Expr::Keyword(k) => {
@@ -589,26 +618,62 @@ impl<'ctx> CodeGen<'ctx> {
             .module
             .get_function("clorus_vector_conj")
             .ok_or("clorus_vector_conj not declared")?;
+        let concat_fn = self
+            .module
+            .get_function("clorus_concat")
+            .ok_or("clorus_concat not declared")?;
 
         for (i, elem) in elements.iter().enumerate() {
             match elem {
                 Expr::UnquoteSplicing { expr: inner } => {
-                    // Evaluate the inner expression and splice its elements
-                    // For now, just evaluate and add as-is (proper splicing needs iteration)
+                    // Splice: the inner expression's own elements get added
+                    // individually, not the collection itself as one nested
+                    // element -- `~@[2 3]` in `(1 ~@xs 4)` must produce
+                    // (1 2 3 4), not (1 [2 3] 4). clorus_concat flattens a
+                    // vector-of-collections into one vector, so wrap the
+                    // accumulator-so-far and the spliced collection as a
+                    // 2-element vector and concat that.
                     let spliced_val = self.compile_expr(inner)?;
 
-                    // TODO: Iterate over spliced_val and add each element
-                    // For MVP, just add the whole collection
-                    let conj_call = self
+                    let pair = self
+                        .builder
+                        .build_call(vec_empty_fn, &[], &format!("sq_seq_splice_pair_{}", i))
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                    let pair = self
                         .builder
                         .build_call(
                             vec_conj_fn,
-                            &[vec_val.into(), spliced_val.into()],
-                            &format!("sq_seq_splice_{}", i),
+                            &[pair.into(), vec_val.into()],
+                            &format!("sq_seq_splice_pair_acc_{}", i),
                         )
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                    let pair = self
+                        .builder
+                        .build_call(
+                            vec_conj_fn,
+                            &[pair.into(), spliced_val.into()],
+                            &format!("sq_seq_splice_pair_spliced_{}", i),
+                        )
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+
+                    let concat_call = self
+                        .builder
+                        .build_call(concat_fn, &[pair.into()], &format!("sq_seq_splice_{}", i))
                         .unwrap();
 
-                    vec_val = conj_call
+                    vec_val = concat_call
                         .try_as_basic_value()
                         .left()
                         .unwrap()
