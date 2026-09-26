@@ -1449,10 +1449,63 @@ impl<'ctx> CodeGen<'ctx> {
                 // Track local variables for cleanup
                 let mut local_vars = Vec::new();
 
-                // Process each binding with destructuring
+                let is_exception_fn = self
+                    .module
+                    .get_function("clorus_is_exception_i32")
+                    .ok_or("clorus_is_exception_i32 not declared")?;
+                let release_fn = self
+                    .module
+                    .get_function("clorus_release")
+                    .ok_or("clorus_release not declared")?;
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+
+                let function = self
+                    .builder
+                    .get_insert_block()
+                    .and_then(|block| block.get_parent())
+                    .expect("No parent function");
+                let exception_bb = self.context.append_basic_block(function, "let_exception");
+                let mut exception_incoming: Vec<(
+                    PointerValue<'ctx>,
+                    inkwell::basic_block::BasicBlock<'ctx>,
+                )> = Vec::new();
+
+                // Process each binding with destructuring. An exception in a
+                // binding's own value must abort the whole `let` immediately
+                // (never destructure it, never compile later bindings or the
+                // body) instead of being destructured/bound like ordinary
+                // data -- see the session finding that exceptions only ever
+                // propagated through Do and try/catch, silently passing
+                // through everywhere else (let, if, call arguments) as if
+                // they were plain values.
                 for (pattern, value_expr) in bindings {
-                    // Compile the value
                     let value = self.compile_expr(value_expr)?;
+
+                    let is_exception = self
+                        .builder
+                        .build_call(is_exception_fn, &[value.into()], "let_binding_is_exception")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_int_value();
+                    let is_exception_bool = self
+                        .builder
+                        .build_int_compare(
+                            IntPredicate::NE,
+                            is_exception,
+                            self.context.i32_type().const_zero(),
+                            "let_binding_is_exception_bool",
+                        )
+                        .unwrap();
+
+                    let continue_bb = self.context.append_basic_block(function, "let_continue");
+                    self.builder
+                        .build_conditional_branch(is_exception_bool, exception_bb, continue_bb)
+                        .unwrap();
+                    exception_incoming.push((value, self.builder.get_insert_block().unwrap()));
+
+                    self.builder.position_at_end(continue_bb);
 
                     // See retain_if_bare_symbol_alias's doc comment: a let
                     // binding that's a bare symbol read gives an existing,
@@ -1479,14 +1532,8 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap();
 
                 // Release local variables before exiting scope
-                let release_fn = self
-                    .module
-                    .get_function("clorus_release")
-                    .ok_or("clorus_release not declared")?;
-
                 for (var_name, var_ptr) in &local_vars {
                     // Load the Value* from the variable
-                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                     let val = self
                         .builder
                         .build_load(value_ptr_type, *var_ptr, &format!("{}_cleanup", var_name))
@@ -1502,7 +1549,37 @@ impl<'ctx> CodeGen<'ctx> {
                 // Restore previous scope (let creates local scope)
                 self.variables = saved_vars;
 
-                Ok(result)
+                let normal_bb = self.builder.get_insert_block().unwrap();
+                let merge_bb = self.context.append_basic_block(function, "let_merge");
+                self.builder.build_unconditional_branch(merge_bb).unwrap();
+
+                self.builder.position_at_end(exception_bb);
+                // Note: locals bound by earlier bindings before the one
+                // that raised are intentionally not released here (which
+                // binding actually failed, and therefore how many locals
+                // exist, differs per incoming branch, so a single shared
+                // cleanup can't target the right subset without a separate
+                // exception path per binding). This is a bounded, error-
+                // path-only leak, not a correctness bug -- the exception is
+                // about to propagate upward regardless.
+                let exception_phi = self
+                    .builder
+                    .build_phi(value_ptr_type, "let_exception_value")
+                    .unwrap();
+                for (val, bb) in &exception_incoming {
+                    exception_phi.add_incoming(&[(val, *bb)]);
+                }
+                self.builder.build_unconditional_branch(merge_bb).unwrap();
+                let exception_end_bb = self.builder.get_insert_block().unwrap();
+
+                self.builder.position_at_end(merge_bb);
+                let phi = self.builder.build_phi(value_ptr_type, "let_result").unwrap();
+                phi.add_incoming(&[
+                    (&result, normal_bb),
+                    (&exception_phi.as_basic_value().into_pointer_value(), exception_end_bb),
+                ]);
+
+                Ok(phi.as_basic_value().into_pointer_value())
             }
 
             Expr::Binding { bindings, body } => {
