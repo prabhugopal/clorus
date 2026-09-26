@@ -1016,6 +1016,17 @@ impl<'ctx> ReplEngine<'ctx> {
         // documented behavior for this call. Idempotent; safe to call more
         // than once (guarded anyway to keep it to one call per process).
         ensure_jit_configured_for_pie_host();
+        // Makes every clorus-runtime extern "C" function Rust-reachable
+        // from this process (see clorus_runtime::keep_alive and its
+        // build.rs for the full rationale). Without this, a function only
+        // ever called from JIT-generated code (e.g.
+        // clorus_register_protocol_method, never called from any Rust code
+        // in this crate) gets dropped by the linker entirely -- distinct
+        // from, and not fixed by, ensure_jit_configured_for_pie_host or
+        // bind_external_runtime_functions below, which can only resolve a
+        // symbol that survived the link in the first place. Idempotent;
+        // cheap enough to call on every eval.
+        std::hint::black_box(clorus_runtime::keep_alive::retain_all_runtime_symbols());
         // Create JIT engine
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
