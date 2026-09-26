@@ -61,36 +61,5 @@ jobs:
       - name: Run Rust unit/doc tests
         run: cargo test --workspace --release
 
-      # TEMPORARY diagnostic: repl/core-map-defmacro segfaults in JIT mode
-      # on Linux only (confirmed not reproducible on macOS, including with
-      # the clorus-core dylib artificially hidden to match Linux's "not
-      # found" fallback path exactly). The first attempt at this diagnostic
-      # ran from the plain repo root, where target/release/libclorus_core.so
-      # resolves fine -- so it never actually hit the fallback path or
-      # crashed. This one exactly matches the harness's own invocation (cd
-      # /tmp, CLORUS_HOME set to the repo root rather than relying on CWD)
-      # to force the same "not found" fallback and reproduce it for real.
-      - name: DIAGNOSTIC - REPL segfault IR dump + backtrace (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y gdb
-          cat > /tmp/repl_input.txt <<'EOF'
-          (defmacro show-env [] &env)
-          (show-env)
-          (map #(* % 2) [1 2 3 4])
-          (map (constantly 9) [1 2 3])
-          (filter odd? [1 2 3 4 5])
-          (take 3 [10 20 30 40])
-          (drop 2 [10 20 30 40])
-          :q
-          EOF
-          REPO_ROOT="$(pwd)"
-          BIN_ABS="$REPO_ROOT/target/release/clorus"
-          cd /tmp
-          CLORUS_HOME="$REPO_ROOT" CLORUS_DEBUG_IR=1 CLORUS_REPL_NO_AUTO_LOAD=1 CLORUS_REPL_LOAD_STDLIB=1 \
-            gdb -batch -ex run -ex bt --args "$BIN_ABS" repl < /tmp/repl_input.txt || true
-          echo "=== dumped IR ==="
-          cat /tmp/clorus_repl_ir.ll || echo "(no IR file written)"
-
       - name: Run dual-engine language/stdlib test suite
         run: ./tests/run_all_tests.sh
