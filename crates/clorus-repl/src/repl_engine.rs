@@ -16,6 +16,19 @@ fn repl_debug_enabled() -> bool {
     env::var("CLORUS_DEBUG_REPL").is_ok()
 }
 
+/// Registers the running executable's own symbols with LLVM's JIT symbol
+/// resolver, once per process. Without this, JIT-compiled code calling a
+/// clorus-runtime `extern "C"` function (defined in this same binary, not
+/// a separate shared library) can fail to resolve it.
+fn ensure_process_symbols_loaded() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| unsafe {
+        // A null filename tells LLVM to load the main executable's own
+        // symbols rather than a named library.
+        inkwell::llvm_sys::support::LLVMLoadLibraryPermanently(std::ptr::null());
+    });
+}
+
 /// Result of evaluating an expression in the REPL
 pub struct EvalResult {
     pub value: *mut u8,
@@ -928,6 +941,17 @@ impl<'ctx> ReplEngine<'ctx> {
         if repl_debug_enabled() {
             eprintln!("DEBUG eval_internal: Creating JIT engine...");
         }
+        // Explicitly register the current process's own symbols with LLVM's
+        // JIT symbol resolver before creating the engine. Segfaults on
+        // Linux only (never macOS) calling into a null address from a
+        // freshly JIT-compiled function that references one of clorus-
+        // runtime's extern "C" functions -- consistent with the current
+        // process's own symbols not being resolvable to the JIT's default
+        // external-symbol lookup on Linux without this. Passing a null
+        // filename means "the main executable itself", per LLVM's
+        // documented behavior for this call. Idempotent; safe to call more
+        // than once (guarded anyway to keep it to one call per process).
+        ensure_process_symbols_loaded();
         // Create JIT engine
         let engine = codegen.get_module()
             .create_jit_execution_engine(OptimizationLevel::None)
