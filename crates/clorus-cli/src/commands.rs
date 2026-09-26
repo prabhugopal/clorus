@@ -851,23 +851,63 @@ fn build_internal(mut lib_mode: bool, debug: bool, explicit_entry: Option<String
         }
     }
 
-    // Print the final result if we have one (from -main or last expression)
+    // Print the final result if we have one (from -main or last expression).
+    // An uncaught exception (nothing in the whole call chain had a matching
+    // try/catch) must abort with a non-zero exit code instead of being
+    // printed as if it were an ordinary successful value.
     if let Some(result_ptr) = last_result {
-        // Get the print_value function which handles all types
+        let is_exception_fn = codegen.get_module()
+            .get_function("clorus_is_exception_i32")
+            .expect("clorus_is_exception_i32 should be declared by runtime");
+        let report_exception_fn = codegen.get_module()
+            .get_function("clorus_report_uncaught_exception")
+            .expect("clorus_report_uncaught_exception should be declared by runtime");
         let print_value_fn = codegen.get_module()
             .get_function("clorus_print_value")
             .expect("clorus_print_value should be declared by runtime");
 
-        builder.build_call(
-            print_value_fn,
-            &[result_ptr.into()],
-            "print_result"
-        ).unwrap();
-    }
+        let is_exception = builder
+            .build_call(is_exception_fn, &[result_ptr.into()], "main_is_exception")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+        let is_exception_bool = builder
+            .build_int_compare(
+                inkwell::IntPredicate::NE,
+                is_exception,
+                context.i32_type().const_zero(),
+                "main_is_exception_bool",
+            )
+            .unwrap();
 
-    // Return 0 (success)
-    let zero = context.i32_type().const_int(0, false);
-    builder.build_return(Some(&zero)).unwrap();
+        let current_fn = builder.get_insert_block().unwrap().get_parent().unwrap();
+        let exception_bb = context.append_basic_block(current_fn, "main_uncaught_exception");
+        let normal_bb = context.append_basic_block(current_fn, "main_normal_result");
+        builder
+            .build_conditional_branch(is_exception_bool, exception_bb, normal_bb)
+            .unwrap();
+
+        builder.position_at_end(exception_bb);
+        let exit_code = builder
+            .build_call(report_exception_fn, &[result_ptr.into()], "report_uncaught")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_int_value();
+        builder.build_return(Some(&exit_code)).unwrap();
+
+        builder.position_at_end(normal_bb);
+        builder.build_call(print_value_fn, &[result_ptr.into()], "print_result").unwrap();
+        let zero = context.i32_type().const_int(0, false);
+        builder.build_return(Some(&zero)).unwrap();
+    } else {
+        // Return 0 (success)
+        let zero = context.i32_type().const_int(0, false);
+        builder.build_return(Some(&zero)).unwrap();
+    }
     } // end if !lib_mode
 
     // Create target directory if it doesn't exist
@@ -2086,8 +2126,32 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
     // Display the result
     if !last_result_ptr.is_null() {
         unsafe {
-            use clorus_runtime::value::{Value, ValueTag, clorus_value_as_long, clorus_value_as_double, clorus_value_as_bool, clorus_value_as_cstring, clorus_free_cstring};
+            use clorus_runtime::value::{Value, ValueTag, clorus_value_as_long, clorus_value_as_double, clorus_value_as_bool, clorus_value_as_cstring, clorus_free_cstring, clorus_is_exception, clorus_exception_payload};
             let value = last_result_ptr as *mut Value;
+
+            // An exception that reached here uncaught (nothing in the -main
+            // call chain had a matching try/catch) must abort the process
+            // with a non-zero exit code, not be printed as an ordinary
+            // value -- otherwise a program-ending assertion/error is
+            // indistinguishable from a normal successful result.
+            if clorus_is_exception(value) {
+                use clorus_runtime::string::clorus_pr_str;
+                let payload = clorus_exception_payload(value);
+                let rendered = clorus_pr_str(payload);
+                let message = if !rendered.is_null() {
+                    let c_str = clorus_value_as_cstring(rendered);
+                    if !c_str.is_null() {
+                        let s = std::ffi::CStr::from_ptr(c_str).to_string_lossy().into_owned();
+                        clorus_free_cstring(c_str);
+                        s
+                    } else {
+                        "<unprintable exception payload>".to_string()
+                    }
+                } else {
+                    "<nil>".to_string()
+                };
+                return Err(format!("Uncaught exception: {}", message));
+            }
 
             match (*value).header().tag() {
                 ValueTag::Long => {

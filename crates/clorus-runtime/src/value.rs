@@ -906,6 +906,37 @@ pub extern "C" fn clorus_is_exception_i32(val: *mut Value) -> i32 {
     if clorus_is_exception(val) { 1 } else { 0 }
 }
 
+/// Called from AOT-generated `main` when the program's final result is an
+/// uncaught exception (nothing in the whole call chain had a matching
+/// try/catch). Prints the exception's payload to stderr and returns the
+/// process exit code the generated `main` should return -- an uncaught
+/// exception must never be indistinguishable from a normal successful
+/// result, or from exit code 0.
+#[no_mangle]
+pub extern "C" fn clorus_report_uncaught_exception(val: *mut Value) -> i32 {
+    if !clorus_is_exception(val) {
+        return 0;
+    }
+    let payload = clorus_exception_payload(val);
+    let rendered = crate::string::clorus_pr_str(payload);
+    let message = unsafe {
+        if rendered.is_null() {
+            "<nil>".to_string()
+        } else {
+            let c_str = clorus_value_as_cstring(rendered);
+            if c_str.is_null() {
+                "<unprintable exception payload>".to_string()
+            } else {
+                let s = CStr::from_ptr(c_str).to_string_lossy().into_owned();
+                clorus_free_cstring(c_str);
+                s
+            }
+        }
+    };
+    eprintln!("Error: Uncaught exception: {}", message);
+    1
+}
+
 /// Extract opaque pointer from Value (for LLVM codegen FFI calls)
 #[no_mangle]
 pub extern "C" fn clorus_extract_opaque_pointer(val: *mut Value) -> *mut u8 {

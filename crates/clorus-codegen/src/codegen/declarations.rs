@@ -99,6 +99,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_value_exception", 1);
         self.declare_value_fn("clorus_exception_payload", 1);
         self.declare_value_to_i32_fn("clorus_is_exception_i32");
+        self.declare_value_to_i32_fn("clorus_report_uncaught_exception");
         self.declare_value_fn("clorus_var_new", 2);
         self.declare_value_fn("clorus_var_get", 1);
         self.declare_value_fn("clorus_var_set", 2);

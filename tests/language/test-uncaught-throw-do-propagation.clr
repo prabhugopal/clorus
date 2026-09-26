@@ -1,0 +1,27 @@
+(ns tests.language.test-uncaught-throw-do-propagation)
+
+;; Regression test for a bug where `(throw ...)` as a non-final statement
+;; inside a `(do ...)` was silently swallowed: codegen for Do only checked
+;; the LAST statement's value for an exception wrapper, so an earlier
+;; throw's value was computed then discarded as the loop moved to the next
+;; statement -- execution continued exactly as if throw had returned nil.
+;; This made every `assert`-via-`throw` helper called from inside a `do`
+;; (the pattern this whole test suite uses) silently no-op on failure.
+
+(defn -main [& _args]
+  (do
+    (def log (atom []))
+    (def caught
+      (try
+        (do
+          (swap! log conj :before)
+          (throw "boom")
+          (swap! log conj :after-should-not-run))
+        (catch e e)))
+    (if (not (= @log [:before]))
+      (throw (str "do did not stop at throw: log=" @log))
+      nil)
+    (if (not (= caught "boom"))
+      (throw (str "try/catch did not receive the thrown value: caught=" caught))
+      nil)
+    (println "uncaught-throw-do-propagation test passed!")))

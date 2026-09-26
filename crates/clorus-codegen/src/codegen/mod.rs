@@ -2525,18 +2525,81 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Do { exprs } => {
-                // Compile all expressions in sequence
-                // Return the value of the last expression
+                // Compile all expressions in sequence, returning the value of
+                // the last one -- but a non-final statement can itself be (or
+                // contain, via nested do/try) an uncaught exception wrapper.
+                // Every such statement must be checked and, if it's an
+                // exception, propagated immediately instead of discarded:
+                // otherwise `(do (throw ...) (rest ...))` silently runs
+                // `rest` as if `throw` had returned nil.
                 if exprs.is_empty() {
                     return Err("do expression cannot be empty".to_string());
                 }
 
-                let mut result = None;
-                for expr in exprs {
-                    result = Some(self.compile_expr(expr)?);
+                if exprs.len() == 1 {
+                    return self.compile_expr(&exprs[0]);
                 }
 
-                Ok(result.unwrap())
+                let is_exception_fn = self
+                    .module
+                    .get_function("clorus_is_exception_i32")
+                    .ok_or("clorus_is_exception_i32 not declared")?;
+
+                let function = self
+                    .builder
+                    .get_insert_block()
+                    .and_then(|block| block.get_parent())
+                    .expect("No parent function");
+
+                let merge_bb = self.context.append_basic_block(function, "do_merge");
+                let mut incoming: Vec<(PointerValue<'ctx>, inkwell::basic_block::BasicBlock<'ctx>)> =
+                    Vec::new();
+
+                let last_idx = exprs.len() - 1;
+                for (i, expr) in exprs.iter().enumerate() {
+                    let value = self.compile_expr(expr)?;
+
+                    if i == last_idx {
+                        self.builder.build_unconditional_branch(merge_bb).unwrap();
+                        let end_bb = self.builder.get_insert_block().unwrap();
+                        incoming.push((value, end_bb));
+                    } else {
+                        let is_exception = self
+                            .builder
+                            .build_call(is_exception_fn, &[value.into()], "do_is_exception")
+                            .unwrap()
+                            .try_as_basic_value()
+                            .left()
+                            .unwrap()
+                            .into_int_value();
+                        let is_exception_bool = self
+                            .builder
+                            .build_int_compare(
+                                inkwell::IntPredicate::NE,
+                                is_exception,
+                                self.context.i32_type().const_zero(),
+                                "do_is_exception_bool",
+                            )
+                            .unwrap();
+
+                        let next_bb = self.context.append_basic_block(function, "do_next");
+                        self.builder
+                            .build_conditional_branch(is_exception_bool, merge_bb, next_bb)
+                            .unwrap();
+                        let branch_bb = self.builder.get_insert_block().unwrap();
+                        incoming.push((value, branch_bb));
+
+                        self.builder.position_at_end(next_bb);
+                    }
+                }
+
+                self.builder.position_at_end(merge_bb);
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let phi = self.builder.build_phi(value_ptr_type, "do_result").unwrap();
+                for (val, bb) in incoming {
+                    phi.add_incoming(&[(&val, bb)]);
+                }
+                Ok(phi.as_basic_value().into_pointer_value())
             }
 
             Expr::Dosync { exprs } => {
