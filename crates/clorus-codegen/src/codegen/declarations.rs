@@ -149,6 +149,14 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_i64_fn("clorus_count");
         self.declare_value_to_i32_fn("clorus_value_is_nil");
 
+        // ===== TCP socket primitives (crate::net in clorus-runtime) =====
+        self.declare_value_fn("clorus_tcp_listen", 1);
+        self.declare_value_fn("clorus_tcp_connect", 2);
+        self.declare_value_fn("clorus_tcp_accept", 1);
+        self.declare_value_fn("clorus_tcp_read", 2);
+        self.declare_value_fn("clorus_tcp_write", 2);
+        self.declare_value_fn("clorus_tcp_close", 1);
+
         // ===== Function-Related (Complex signatures - declared manually) =====
         let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
 

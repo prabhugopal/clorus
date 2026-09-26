@@ -28,6 +28,7 @@ pub mod arithmetic;  // Type-aware arithmetic operations
 pub mod protocols;  // Protocol dispatch for deftype/defrecord
 pub mod hash;  // Structural hashing helpers
 pub mod hierarchy;  // derive/underive/isa? hierarchy relations
+pub mod net;  // TCP socket primitives
 
 // Re-export main types
 pub use value::{Value, ValueTag};

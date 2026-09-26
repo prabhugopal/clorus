@@ -83,6 +83,7 @@ fn metadata_type_name(val: *mut Value) -> &'static str {
             ValueTag::OpaquePointer => "opaque-pointer",
             ValueTag::Var => "var",
             ValueTag::Exception => "exception",
+            ValueTag::Socket => "socket",
         }
     }
 }
@@ -248,6 +249,7 @@ pub enum ValueTag {
     MultiArityFunction = 17,  // Multi-arity function with runtime dispatch
     OpaquePointer = 18,  // FFI opaque pointer (window, etc.)
     Exception = 19,      // Language-level exception payload wrapper
+    Socket = 20,         // TCP listener or stream handle (see crate::net)
 }
 
 /// Header for all heap-allocated values
@@ -1249,6 +1251,17 @@ unsafe fn deallocate_value(val: *mut Value) {
             // Just free the Value wrapper, not the pointer itself
             drop(Box::from_raw(val));
         }
+        ValueTag::Socket => {
+            // Refcount-based cleanup is a safety net, not the primary
+            // mechanism -- Clorus code is expected to call (net/close!)
+            // explicitly (same idiom as Go's `defer conn.Close()` or
+            // Clojure's `with-open`), but if every reference disappears
+            // without an explicit close, this still closes the underlying
+            // fd instead of leaking it forever.
+            let socket_ptr = (*val).as_ptr() as *mut crate::net::SocketHandle;
+            crate::net::release_socket_handle(socket_ptr);
+            drop(Box::from_raw(val));
+        }
         ValueTag::Exception => {
             let payload = (*val).as_exception_payload();
             if !payload.is_null() {
@@ -1656,7 +1669,8 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
 
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer | ValueTag::Exception => (*left).as_ptr() == (*right).as_ptr(),
+            ValueTag::OpaquePointer | ValueTag::Exception | ValueTag::Socket =>
+                (*left).as_ptr() == (*right).as_ptr(),
         }
     }
 }

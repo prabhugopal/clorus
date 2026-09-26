@@ -1258,6 +1258,15 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
         ValueTag::OpaquePointer => {
             "#<opaque-pointer>".to_string()
         }
+        ValueTag::Socket => {
+            let handle = (*val).as_ptr() as *const crate::net::SocketHandle;
+            match &*handle {
+                crate::net::SocketHandle::Listener(Some(_)) => "#<tcp-listener>".to_string(),
+                crate::net::SocketHandle::Listener(None) => "#<tcp-listener: closed>".to_string(),
+                crate::net::SocketHandle::Stream(Some(_)) => "#<tcp-stream>".to_string(),
+                crate::net::SocketHandle::Stream(None) => "#<tcp-stream: closed>".to_string(),
+            }
+        }
     }
 }
 

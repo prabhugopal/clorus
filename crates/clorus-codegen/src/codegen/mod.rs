@@ -393,6 +393,13 @@ impl<'ctx> CodeGen<'ctx> {
             // I/O operations
             "print",
             "println",
+            // TCP socket primitives
+            "tcp-listen",
+            "tcp-connect",
+            "tcp-accept",
+            "tcp-read",
+            "tcp-write",
+            "tcp-close",
         ];
 
         CORE_FUNCTIONS.contains(&func)

@@ -212,6 +212,19 @@ impl<'ctx> CodeGen<'ctx> {
             ("parents", "clorus_parents", 1),
             ("ancestors", "clorus_ancestors", 1),
             ("descendants", "clorus_descendants", 1),
+            // TCP socket primitives (crate::net in clorus-runtime) -- the
+            // "lang" tier of networking, callable directly. All return nil
+            // on failure or wrong-typed/closed handle input; stdlib.clorus/
+            // net.clr wraps these with proper exception-raising and
+            // higher-level convenience (e.g. looping writes until all
+            // bytes are sent), the same relationship "clojure.java.io"
+            // helpers have to the raw java.io/java.net classes underneath.
+            ("tcp-listen", "clorus_tcp_listen", 1),
+            ("tcp-connect", "clorus_tcp_connect", 2),
+            ("tcp-accept", "clorus_tcp_accept", 1),
+            ("tcp-read", "clorus_tcp_read", 2),
+            ("tcp-write", "clorus_tcp_write", 2),
+            ("tcp-close", "clorus_tcp_close", 1),
         ];
 
         for (name, runtime_fn, arity) in SIMPLE_BUILTINS {

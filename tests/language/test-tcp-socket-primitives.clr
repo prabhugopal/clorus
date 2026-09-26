@@ -1,0 +1,47 @@
+(ns tests.language.test-tcp-socket-primitives)
+
+;; Regression test for the new TCP socket primitives (crate::net in
+;; clorus-runtime): listen, accept, read, write, close. Runs a real TCP
+;; server on a background thread (via go/future-style primitives -- see
+;; below) and a real client connection against it in the same process,
+;; over an actual loopback socket, not a mock.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (def listener (tcp-listen 18080))
+    (assert-eq "listener created" (nil? listener) false)
+
+    ;; Accept the one expected connection on a background thread, echoing
+    ;; back whatever it reads once, then closing both ends.
+    (def server-thread
+      (go
+        (let [conn (tcp-accept listener)]
+          (let [received (tcp-read conn 1024)]
+            (tcp-write conn received))
+          (tcp-close conn))))
+
+    ;; No sleep/timing coordination needed here: TcpListener::bind already
+    ;; puts the socket into the OS's LISTEN state (with a real accept
+    ;; backlog) before this function returns, so a client can connect
+    ;; immediately -- the connection just sits in the backlog queue until
+    ;; the go-block's tcp-accept call above dequeues it, whether that
+    ;; happens before or after the client's connect call below.
+
+    ;; Client side: plain std::net socket connect, matching what any real
+    ;; HTTP client would do against this server. Since Clorus itself is
+    ;; the thing being tested here, drive the client through the same new
+    ;; primitives rather than pulling in an external tool.
+    (def client (tcp-connect "127.0.0.1" 18080))
+    (assert-eq "client connected" (nil? client) false)
+    (tcp-write client "hello-clorus-tcp")
+    (def echoed (tcp-read client 1024))
+    (assert-eq "echoed data matches" echoed "hello-clorus-tcp")
+    (tcp-close client)
+    (tcp-close listener)
+
+    (println "TCP socket primitives test passed!")))
