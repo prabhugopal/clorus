@@ -325,7 +325,15 @@ mod tests {
 
     #[test]
     fn test_debug_mode() {
-        assert!(!is_debug_mode());
+        // DEBUG_MODE is a process-global, one-way flag (no disable
+        // function exists -- enabling it is meant to be permanent for the
+        // process's lifetime, matching how the `--debug` CLI flag uses it).
+        // `cargo test` runs all tests in this module in the same process,
+        // in an unspecified order, so another test (e.g. test_event_recording)
+        // may have already called enable_debug_mode() before this one runs --
+        // asserting the flag starts false is asserting something this test
+        // doesn't control and the code never promised. The only real
+        // contract to verify is that enabling it makes it observably on.
         enable_debug_mode();
         assert!(is_debug_mode());
     }
