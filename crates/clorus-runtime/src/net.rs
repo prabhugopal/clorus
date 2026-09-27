@@ -11,6 +11,22 @@
 use crate::value::{Value, ValueTag};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Monotonic sequence number for CLORUS_DEBUG_NET tracing, so events from
+/// concurrent `go`-block threads can be ordered definitively -- stdout
+/// (Clorus's own `println`) and stderr (this tracing) can interleave in
+/// whatever order the OS happens to flush them, which is not necessarily
+/// the real happens-before order across threads.
+static NET_DEBUG_SEQ: AtomicU64 = AtomicU64::new(0);
+
+fn net_debug_enabled() -> bool {
+    std::env::var("CLORUS_DEBUG_NET").is_ok()
+}
+
+fn net_debug_seq() -> u64 {
+    NET_DEBUG_SEQ.fetch_add(1, Ordering::SeqCst)
+}
 
 /// A TCP listener or stream, wrapped behind `ValueTag::Socket`.
 ///
@@ -38,6 +54,15 @@ unsafe fn socket_handle(val: *mut Value) -> Option<*mut SocketHandle> {
 /// Does not free the `Box<SocketHandle>` itself -- see `SocketHandle`'s
 /// doc comment for why.
 unsafe fn close_in_place(handle: *mut SocketHandle) {
+    if net_debug_enabled() {
+        let desc = match &*handle {
+            SocketHandle::Listener(Some(l)) => format!("listener {:?}", l),
+            SocketHandle::Listener(None) => "listener (already-closed=true)".to_string(),
+            SocketHandle::Stream(Some(s)) => format!("stream {:?}", s),
+            SocketHandle::Stream(None) => "stream (already-closed=true)".to_string(),
+        };
+        eprintln!("[net #{}] close_in_place({:p}) -- {}", net_debug_seq(), handle, desc);
+    }
     match &mut *handle {
         SocketHandle::Listener(slot) => {
             drop(slot.take());
@@ -54,6 +79,9 @@ unsafe fn close_in_place(handle: *mut SocketHandle) {
 pub unsafe fn release_socket_handle(handle: *mut SocketHandle) {
     if handle.is_null() {
         return;
+    }
+    if net_debug_enabled() {
+        eprintln!("[net #{}] release_socket_handle({:p}) -- refcount hit zero", net_debug_seq(), handle);
     }
     close_in_place(handle);
     drop(Box::from_raw(handle));
@@ -106,8 +134,18 @@ pub extern "C" fn clorus_tcp_connect(host_val: *mut Value, port_val: *mut Value)
             return Value::nil();
         }
         match TcpStream::connect((host.as_str(), port as u16)) {
-            Ok(stream) => wrap_handle(SocketHandle::Stream(Some(stream))),
-            Err(_) => Value::nil(),
+            Ok(stream) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_connect: connected {:?}", net_debug_seq(), stream);
+                }
+                wrap_handle(SocketHandle::Stream(Some(stream)))
+            }
+            Err(e) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_connect: error: {}", net_debug_seq(), e);
+                }
+                Value::nil()
+            }
         }
     }
 }
@@ -125,8 +163,18 @@ pub extern "C" fn clorus_tcp_accept(listener_val: *mut Value) -> *mut Value {
             return Value::nil();
         };
         match listener.accept() {
-            Ok((stream, _addr)) => wrap_handle(SocketHandle::Stream(Some(stream))),
-            Err(_) => Value::nil(),
+            Ok((stream, addr)) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_accept: accepted from {:?}, stream={:?}", net_debug_seq(), addr, stream);
+                }
+                wrap_handle(SocketHandle::Stream(Some(stream)))
+            }
+            Err(e) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_accept: error: {}", net_debug_seq(), e);
+                }
+                Value::nil()
+            }
         }
     }
 }
@@ -148,19 +196,36 @@ pub extern "C" fn clorus_tcp_read(stream_val: *mut Value, max_bytes_val: *mut Va
             return crate::string::clorus_string(std::ptr::null());
         }
         let Some(handle) = socket_handle(stream_val) else {
+            if net_debug_enabled() {
+                eprintln!("[net #{}] tcp_read: stream_val={:p} not a socket handle", net_debug_seq(), stream_val);
+            }
             return Value::nil();
         };
+        if net_debug_enabled() {
+            eprintln!("[net #{}] tcp_read: ENTER stream_val={:p} handle={:p}", net_debug_seq(), stream_val, handle);
+        }
         let SocketHandle::Stream(Some(stream)) = &mut *handle else {
+            if net_debug_enabled() {
+                eprintln!("[net #{}] tcp_read: handle={:p} has no live stream (already closed)", net_debug_seq(), handle);
+            }
             return Value::nil();
         };
         let mut buf = vec![0u8; max_bytes as usize];
         match stream.read(&mut buf) {
             Ok(n) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_read: DONE handle={:p} read n={}", net_debug_seq(), handle, n);
+                }
                 let s = String::from_utf8_lossy(&buf[..n]).into_owned();
                 let c_str = std::ffi::CString::new(s).unwrap_or_default();
                 crate::string::clorus_string(c_str.as_ptr())
             }
-            Err(_) => Value::nil(),
+            Err(e) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_read: DONE handle={:p} error: {}", net_debug_seq(), handle, e);
+                }
+                Value::nil()
+            }
         }
     }
 }
@@ -181,9 +246,22 @@ pub extern "C" fn clorus_tcp_write(stream_val: *mut Value, data: *mut Value) -> 
             return Value::nil();
         }
         let bytes = crate::string::value_to_rust_string(data);
+        if net_debug_enabled() {
+            eprintln!("[net #{}] tcp_write: ENTER handle={:p} {} bytes", net_debug_seq(), handle, bytes.len());
+        }
         match stream.write(bytes.as_bytes()) {
-            Ok(n) => Value::long(n as i64),
-            Err(_) => Value::nil(),
+            Ok(n) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_write: DONE handle={:p} wrote n={}", net_debug_seq(), handle, n);
+                }
+                Value::long(n as i64)
+            }
+            Err(e) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_write: DONE handle={:p} error: {}", net_debug_seq(), handle, e);
+                }
+                Value::nil()
+            }
         }
     }
 }
@@ -198,6 +276,9 @@ pub extern "C" fn clorus_tcp_write(stream_val: *mut Value, data: *mut Value) -> 
 pub extern "C" fn clorus_tcp_close(handle_val: *mut Value) -> *mut Value {
     unsafe {
         if let Some(handle) = socket_handle(handle_val) {
+            if net_debug_enabled() {
+                eprintln!("[net #{}] tcp_close (explicit): handle={:p}", net_debug_seq(), handle);
+            }
             close_in_place(handle);
         }
     }

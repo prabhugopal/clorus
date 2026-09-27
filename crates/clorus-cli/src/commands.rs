@@ -1396,7 +1396,31 @@ fn load_and_compile_modules<'ctx>(
             }
 
             // Compile the expression (defn, def, etc.)
-            let fn_name = format!("mod_{}_{}", module_name.replace('.', "_"), loaded.len());
+            //
+            // Must be unique PER FORM, not per module: `loaded.len()` counts
+            // how many MODULES have finished loading, which stays constant
+            // for every single form inside the module currently being
+            // compiled (loaded.insert(module_name) only happens once, after
+            // this whole per-form loop). Every form in a module got the
+            // exact same wrapper name as a result -- LLVM silently renamed
+            // the collisions (mod_x_0, mod_x_0.1, mod_x_0.2, ...), but the
+            // returned wrapper_fn_names list still held the ORIGINAL,
+            // pre-rename name for every one of them, so run_jit_internal's
+            // caller looked up and called the SAME (first) wrapper 5 times
+            // instead of each of the module's 5 forms' own wrapper once.
+            // Concretely: a module's own `(def x 1)` was never actually
+            // executed, since its wrapper was never the one looked up --
+            // confirmed root cause of `x` reading as nil from a function in
+            // that same module when the module is loaded via another
+            // file's :require (the actual HTTP server bug this session
+            // chased through several wrong hypotheses: nested-go-block
+            // capture, socket-handle aliasing, etc. -- none of which were
+            // it). wrapper_fn_names.len() counts forms wrapped so far
+            // across this whole call (including nested transitive
+            // sub-module requires, via the `.extend()` above), which is
+            // unique per form the same way `i` already is for `expr_{}` in
+            // run_jit_internal's own entry-file loop.
+            let fn_name = format!("mod_{}_{}", module_name.replace('.', "_"), wrapper_fn_names.len());
             codegen.wrap_in_function(expr, &fn_name)
                 .map_err(|e| format!("Compile error in {}: {}", module_name, e))?;
             wrapper_fn_names.push(fn_name);
@@ -2048,6 +2072,9 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
     // Execute expressions that define globals/functions (def, defn)
     // Then execute all expressions and print the last result
     let mut last_result_ptr: *mut u8 = std::ptr::null_mut();
+    if std::env::var("CLORUS_DEBUG_MODULES").is_ok() {
+        eprintln!("[DEBUG-modules] function_names ({} total): {:?}", function_names.len(), function_names);
+    }
     for (i, fn_name) in function_names.iter().enumerate() {
         unsafe {
             type EvalFunc = unsafe extern "C" fn() -> *mut u8;

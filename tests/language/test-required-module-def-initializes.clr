@@ -1,0 +1,35 @@
+(ns tests.language.test-required-module-def-initializes
+  (:require [clorus.http :as http]))
+
+;; Regression test for a compiler bug in load_and_compile_modules
+;; (crates/clorus-cli/src/commands.rs): every top-level form in a
+;; :require'd module was wrapped into an LLVM function named
+;; "mod_<module>_<loaded.len()>" -- but `loaded.len()` counts how many
+;; MODULES have finished loading, which stays constant for every form
+;; inside the module currently being compiled (the module is only added
+;; to `loaded` once, after all its forms are done). Every form in a
+;; module therefore got the identical wrapper name; LLVM silently
+;; renamed the collisions, but the wrapper name list returned to the
+;; caller still held the original, pre-rename name for all of them, so
+;; the caller looked up and called the SAME (first) wrapper N times
+;; instead of each form's own wrapper once. A module's own `(def x 1)`
+;; was never actually executed as a result -- it stayed nil.
+;;
+;; clorus.http actually hits this for real: (def max-request-bytes
+;; 1048576), read by read-full-request in that same module, is exactly
+;; this shape. This was the real root cause behind this session's HTTP
+;; server investigation (chased through several wrong hypotheses first:
+;; nested-go-block variable capture, socket-handle aliasing -- neither
+;; of which was it).
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "required module's own def initializes correctly"
+               http/max-request-bytes
+               1048576)
+    "PASS"))

@@ -1,0 +1,41 @@
+(ns tests.stdlib.test-http-parsing
+  (:require [clorus.http :as http]))
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (def raw-get (str "GET /hello?x=1 HTTP/1.1\r\n"
+                       "Host: localhost\r\n"
+                       "User-Agent: test\r\n"
+                       "\r\n"))
+    (def req (http/parse-http-request raw-get))
+    (assert-eq "method" (:request-method req) :get)
+    (assert-eq "uri" (:uri req) "/hello")
+    (assert-eq "query-string" (:query-string req) "x=1")
+    (assert-eq "host header" (get (:headers req) "host") "localhost")
+    (assert-eq "body empty" (:body req) "")
+
+    (def raw-post (str "POST /submit HTTP/1.1\r\n"
+                        "Host: localhost\r\n"
+                        "Content-Length: 11\r\n"
+                        "\r\n"
+                        "hello=world"))
+    (def post-req (http/parse-http-request raw-post))
+    (assert-eq "post method" (:request-method post-req) :post)
+    (assert-eq "post body" (:body post-req) "hello=world")
+
+    (def rendered (http/render-http-response {:status 200
+                                               :headers {"Content-Type" "text/plain"}
+                                               :body "hi"}))
+    (assert-eq "status line" (index-of rendered "HTTP/1.1 200 OK") 0)
+    (assert-eq "content-length present" (nil? (index-of rendered "Content-Length: 2")) false)
+    (assert-eq "body present" (nil? (index-of rendered "hi")) false)
+
+    (def rendered-404 (http/render-http-response {:status 404 :body "nope"}))
+    (assert-eq "404 status line" (index-of rendered-404 "HTTP/1.1 404 Not Found") 0)
+
+    (println "HTTP parsing tests passed!")))

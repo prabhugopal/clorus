@@ -1,0 +1,250 @@
+(ns clorus.http
+  (:require [clorus.string :refer [blank?]]))
+
+;; Minimal HTTP/1.1 server, written entirely in Clorus on top of the native
+;; TCP primitives (tcp-listen/accept/read/write/close in clorus-runtime).
+;; This is the "std" tier of the split discussed for networking: sockets
+;; are runtime-native (like Go's `net`), HTTP itself is ordinary Clorus
+;; source (like Go's `net/http` being pure Go on top of `net`, or Clojure's
+;; Ring being pure Clojure on top of whatever adapter -- Jetty, http-kit --
+;; does the actual socket work).
+;;
+;; Handler contract (Ring-style): a handler is a function from a request
+;; map to a response map.
+;;   request:  {:request-method :get/:post/:put/:delete/:head/... (or a
+;;                keyword-ified copy of whatever verb was sent)
+;;              :uri "/path" (no query string)
+;;              :query-string "a=1&b=2" or nil
+;;              :headers {"host" "..." "content-type" "..." ...} (all
+;;                header names lowercased, matching Ring)
+;;              :body "..." (raw string, "" if none)}
+;;   response: {:status 200
+;;              :headers {"Content-Type" "text/plain"} (optional)
+;;              :body "..." (optional, "" if omitted)}
+;;
+;; Known, deliberate v1 scope limits (not oversights -- documented so the
+;; next increment knows exactly what to extend):
+;;   - HTTP/1.0-style: every response closes the connection
+;;     (no keep-alive/pipelining).
+;;   - No chunked transfer-encoding, on either the request or response
+;;     side -- request bodies need Content-Length; responses always send
+;;     one.
+;;   - Bodies are read/written as Clorus strings (UTF-8-ish, via
+;;     tcp-read/tcp-write's existing lossy-UTF-8 contract), not
+;;     binary-safe byte buffers.
+
+(def crlf "\r\n")
+(def header-body-separator "\r\n\r\n")
+
+;; ---------------------------------------------------------------------
+;; Small helpers stdlib doesn't have yet (no parse-long equivalent exists)
+;; ---------------------------------------------------------------------
+
+;; Clorus's `nth` doesn't support strings (falls through to nil) and there
+;; are no character literals -- single-character substrings via `subs`
+;; compared against string literals is the available alternative.
+(defn digit-value [ch-str]
+  (cond
+    (= ch-str "0") 0
+    (= ch-str "1") 1
+    (= ch-str "2") 2
+    (= ch-str "3") 3
+    (= ch-str "4") 4
+    (= ch-str "5") 5
+    (= ch-str "6") 6
+    (= ch-str "7") 7
+    (= ch-str "8") 8
+    (= ch-str "9") 9
+    :else -1))
+
+(defn str->long [s]
+  (let [s (trim s)
+        len (count s)]
+    (if (= len 0)
+      nil
+      (loop [i 0
+             acc 0]
+        (if (>= i len)
+          acc
+          (let [d (digit-value (subs s i (+ i 1)))]
+            (if (< d 0)
+              nil
+              (recur (+ i 1) (+ (* acc 10) d)))))))))
+
+;; ---------------------------------------------------------------------
+;; Request parsing
+;; ---------------------------------------------------------------------
+
+(defn parse-request-line [line]
+  (let [parts (split line " ")]
+    (if (< (count parts) 2)
+      {:request-method :get :uri "/" :query-string nil}
+      (let [method-str (lower-case (nth parts 0))
+            target (nth parts 1)
+            q-idx (index-of target "?")]
+        {:request-method (keyword method-str)
+         :uri (if (nil? q-idx) target (subs target 0 q-idx))
+         :query-string (if (nil? q-idx) nil (subs target (+ q-idx 1)))}))))
+
+(defn parse-header-line [line]
+  (let [colon-idx (index-of line ":")]
+    (if (nil? colon-idx)
+      nil
+      [(lower-case (trim (subs line 0 colon-idx)))
+       (trim (subs line (+ colon-idx 1)))])))
+
+(defn parse-headers [header-block]
+  (let [lines (split header-block crlf)]
+    (loop [remaining lines
+           acc {}]
+      (if (empty? remaining)
+        acc
+        (let [line (first remaining)]
+          (if (blank? line)
+            (recur (rest remaining) acc)
+            (let [parsed (parse-header-line line)]
+              (recur (rest remaining)
+                     (if (nil? parsed) acc (assoc acc (nth parsed 0) (nth parsed 1)))))))))))
+
+(defn headers-content-length [headers]
+  (let [raw (get headers "content-length" nil)]
+    (if (nil? raw) 0 (let [n (str->long raw)] (if (nil? n) 0 n)))))
+
+;; Reads from `conn` until the full request (headers, then a body sized by
+;; Content-Length if present) has arrived, looping tcp-read as needed
+;; rather than assuming one read is enough -- a real client's request can
+;; legitimately arrive split across multiple TCP segments. `max-bytes`
+;; bounds total request size (headers + body) as a basic safety limit.
+(defn read-full-request [conn max-bytes]
+  (loop [buf ""]
+    (let [sep-idx (index-of buf header-body-separator)]
+      (if (nil? sep-idx)
+        (if (>= (count buf) max-bytes)
+          buf ;; give up growing further; parse-http-request will see an incomplete request
+          (let [chunk (tcp-read conn 4096)]
+            (if (or (nil? chunk) (= chunk ""))
+              buf ;; peer closed before sending full headers
+              (recur (str buf chunk)))))
+        (let [header-block (subs buf 0 sep-idx)
+              body-so-far (subs buf (+ sep-idx (count header-body-separator)))
+              headers (parse-headers header-block)
+              needed (headers-content-length headers)]
+          (loop [body body-so-far]
+            (if (or (>= (count body) needed) (>= (+ sep-idx (count header-body-separator) (count body)) max-bytes))
+              (str header-block header-body-separator body)
+              (let [chunk (tcp-read conn 4096)]
+                (if (or (nil? chunk) (= chunk ""))
+                  (str header-block header-body-separator body)
+                  (recur (str body chunk)))))))))))
+
+(defn parse-http-request
+  "Parse a raw HTTP/1.1 request (headers + body already fully read) into
+   a Ring-style request map. Exposed (not private) so it's independently
+   testable without a real socket."
+  [raw]
+  (let [sep-idx (index-of raw header-body-separator)]
+    (if (nil? sep-idx)
+      {:request-method :get :uri "/" :query-string nil :headers {} :body ""}
+      (let [header-block (subs raw 0 sep-idx)
+            body (subs raw (+ sep-idx (count header-body-separator)))
+            header-lines (split header-block crlf)
+            request-line (if (empty? header-lines) "" (first header-lines))
+            rest-lines (if (empty? header-lines) [] (rest header-lines))
+            line-info (parse-request-line request-line)
+            headers (parse-headers (join crlf rest-lines))]
+        (assoc (assoc line-info :headers headers) :body body)))))
+
+;; ---------------------------------------------------------------------
+;; Response rendering
+;; ---------------------------------------------------------------------
+
+(defn reason-phrase [status]
+  (cond
+    (= status 200) "OK"
+    (= status 201) "Created"
+    (= status 204) "No Content"
+    (= status 301) "Moved Permanently"
+    (= status 302) "Found"
+    (= status 304) "Not Modified"
+    (= status 400) "Bad Request"
+    (= status 401) "Unauthorized"
+    (= status 403) "Forbidden"
+    (= status 404) "Not Found"
+    (= status 405) "Method Not Allowed"
+    (= status 500) "Internal Server Error"
+    :else "Unknown"))
+
+(defn render-http-response
+  "Serialize a Ring-style response map to raw HTTP/1.1 response bytes.
+   Exposed (not private) so it's independently testable."
+  [resp]
+  (let [status (get resp :status 200)
+        body (get resp :body "")
+        user-headers (get resp :headers {})
+        content-length (count body)
+        status-line (str "HTTP/1.1 " status " " (reason-phrase status) crlf)
+        base-headers (assoc (assoc user-headers
+                                    "Content-Length" content-length)
+                             "Connection" "close")
+        header-text (join crlf
+                           (map (fn [k] (str k ": " (get base-headers k)))
+                                (keys base-headers)))]
+    (str status-line header-text header-body-separator body)))
+
+;; ---------------------------------------------------------------------
+;; Connection handling and the server loop
+;; ---------------------------------------------------------------------
+
+(def max-request-bytes 1048576) ;; 1MB safety cap on headers+body
+
+(defn error-response [status message]
+  {:status status
+   :headers {"Content-Type" "text/plain"}
+   :body message})
+
+(defn handle-connection [conn handler]
+  (do
+   (try
+    (let [raw (read-full-request conn max-request-bytes)]
+      (if (blank? raw)
+        (tcp-close conn)
+        (let [request (parse-http-request raw)
+              response (try
+                         (handler request)
+                         (catch e (error-response 500 (str "Internal Server Error: " e))))
+              response (if (map? response) response (error-response 500 "Handler returned a non-map response"))]
+          (do
+            (tcp-write conn (render-http-response response))
+            (tcp-close conn)))))
+    (catch e
+      (do
+        (tcp-write conn (render-http-response (error-response 500 (str "Internal Server Error (pre-handler): " e))))
+        (tcp-close conn))))))
+
+(defn start-server
+  "Starts an HTTP server on `port`, calling `handler` (a Ring-style
+   request-map -> response-map function) for every request. Each accepted
+   connection is handled on its own `go` block, so multiple requests are
+   served concurrently. Returns the listener; pass it to `stop-server` to
+   shut down."
+  [port handler]
+  (let [listener (tcp-listen port)]
+    (if (nil? listener)
+      (throw (str "Failed to bind HTTP server on port " port))
+      (do
+        (go
+          (loop []
+            (let [conn (tcp-accept listener)]
+              (if (nil? conn)
+                nil ;; listener was closed -- stop accepting
+                (do
+                  (handle-connection conn handler)
+                  (recur))))))
+        listener))))
+
+(defn stop-server
+  "Stops a server started with start-server, closing its listening socket.
+   In-flight connections already accepted are unaffected; the accept loop
+   itself exits on its next iteration once tcp-accept returns nil."
+  [listener]
+  (tcp-close listener))

@@ -1,0 +1,69 @@
+(ns tests.language.test-http-server
+  (:require [clorus.http :as http]))
+
+;; Real end-to-end test: starts a real HTTP server on a real TCP socket,
+;; makes a real HTTP request against it using the same tcp-connect/write/
+;; read primitives any client would use, and checks the actual response
+;; bytes -- not a mock, not calling the handler function directly.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn handler [req]
+  (cond
+    (= (:uri req) "/") {:status 200
+                        :headers {"Content-Type" "text/plain"}
+                        :body "Hello from Clorus!"}
+    (= (:uri req) "/echo") {:status 200
+                            :headers {"Content-Type" "text/plain"}
+                            :body (:body req)}
+    :else {:status 404 :body "not found"}))
+
+(defn -main [& _args]
+  (do
+    (def listener (http/start-server 18081 handler))
+
+    ;; GET /
+    (def client1 (tcp-connect "127.0.0.1" 18081))
+    (tcp-write client1 "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    (def resp1 (loop [buf ""]
+                 (let [chunk (tcp-read client1 4096)]
+                   (if (or (nil? chunk) (= chunk ""))
+                     buf
+                     (recur (str buf chunk))))))
+    (tcp-close client1)
+    (assert-eq "GET / status" (index-of resp1 "HTTP/1.1 200 OK") 0)
+    (assert-eq "GET / body" (nil? (index-of resp1 "Hello from Clorus!")) false)
+
+    ;; POST /echo
+    (def client2 (tcp-connect "127.0.0.1" 18081))
+    (tcp-write client2 (str "POST /echo HTTP/1.1\r\n"
+                            "Host: localhost\r\n"
+                            "Content-Length: 5\r\n"
+                            "Connection: close\r\n"
+                            "\r\n"
+                            "howdy"))
+    (def resp2 (loop [buf ""]
+                 (let [chunk (tcp-read client2 4096)]
+                   (if (or (nil? chunk) (= chunk ""))
+                     buf
+                     (recur (str buf chunk))))))
+    (tcp-close client2)
+    (assert-eq "POST /echo status" (index-of resp2 "HTTP/1.1 200 OK") 0)
+    (assert-eq "POST /echo body" (nil? (index-of resp2 "howdy")) false)
+
+    ;; unknown route -> 404
+    (def client3 (tcp-connect "127.0.0.1" 18081))
+    (tcp-write client3 "GET /nope HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    (def resp3 (loop [buf ""]
+                 (let [chunk (tcp-read client3 4096)]
+                   (if (or (nil? chunk) (= chunk ""))
+                     buf
+                     (recur (str buf chunk))))))
+    (tcp-close client3)
+    (assert-eq "GET /nope status" (index-of resp3 "HTTP/1.1 404 Not Found") 0)
+
+    (http/stop-server listener)
+    (println "HTTP server end-to-end test passed!")))
