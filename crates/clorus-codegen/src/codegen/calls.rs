@@ -199,8 +199,12 @@ impl<'ctx> CodeGen<'ctx> {
             ("rest", "clorus_rest", 1),
             ("last", "clorus_last", 1),
             ("empty", "clorus_empty", 1),
-            ("keys", "clorus_map_keys", 1),
-            ("vals", "clorus_map_vals", 1),
+            // `keys` and `vals` deliberately are *not* runtime fast paths.
+            // Their public definitions live in clorus.core and validate that
+            // their argument is a map.  Lowering them here bypasses those
+            // guards and silently turns `(keys 1)` / `(vals 1)` into `[]`.
+            // The runtime map helpers remain implementation primitives for a
+            // future explicitly-named intrinsic, not public core semantics.
             // "merge" is deliberately not here: it's variadic
             // ((merge m1 m2 ...)), not a fixed 1-arg passthrough -- see
             // its dedicated case in compile_core_call.

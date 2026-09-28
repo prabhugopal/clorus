@@ -820,12 +820,15 @@
          m2 (ensure-map-or-nil "merge-with" m2)
          left (if m1 m1 {})
          right (if m2 m2 {})]
-     (reduce (fn [acc k]
+     ;; Reduce map entries directly instead of calling `keys`.  `merge-with`
+     ;; is defined before the public `keys` function during stdlib bootstrap,
+     ;; and must not rely on a compiler-only forward-reference fast path.
+     (reduce (fn [acc [k v]]
                (if (contains? acc k)
-                 (assoc acc k (f (get acc k) (get right k)))
-                 (assoc acc k (get right k))))
+                 (assoc acc k (f (get acc k) v))
+                 (assoc acc k v)))
              left
-             (keys right))))
+             right)))
   ([f m1 m2 & ms]
    (let [f (ensure-fn "merge-with" f)]
      (loop [acc (merge-with f m1 m2)
