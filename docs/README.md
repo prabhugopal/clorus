@@ -19,6 +19,14 @@ Top-level reference docs:
 - [Production Plan](PRODUCTION_PLAN.md)
 - [Generated Coverage Summary](generated/COVERAGE_SUMMARY.md) — derived view
 
+Proposed future architecture:
+
+- [Native Interop Specification](design/NATIVE_INTEROP_SPEC.md) — explicit,
+  generated, in-process Rust bridge design (proposed; not a current-status
+  document)
+- [Foundation, Parity, and Execution Specification](design/FOUNDATION_PARITY_EXECUTION_SPEC.md)
+  — proposed language/runtime/stdlib/JIT-AOT/core.async strategy
+
 Stable pointer docs remain for backward compatibility:
 
 - [Parity Checklist](PARITY_CHECKLIST.md)

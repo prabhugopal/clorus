@@ -2,9 +2,9 @@
 use clorus::*;
 use clorus_runtime::arithmetic::{clorus_add, clorus_gt, clorus_gte, clorus_lt, clorus_lte};
 use clorus_runtime::value::{
-    clorus_is_truthy, clorus_value_as_long, clorus_value_as_number, clorus_value_bool,
-    clorus_value_double, clorus_value_long, clorus_value_string, clorus_release, clorus_retain,
-    Value,
+    clorus_is_exception_i32, clorus_is_truthy, clorus_release, clorus_retain, clorus_value_as_long,
+    clorus_value_as_number, clorus_value_bool, clorus_value_double, clorus_value_long,
+    clorus_value_string, Value,
 };
 use inkwell::context::Context;
 use inkwell::OptimizationLevel;
@@ -35,11 +35,18 @@ fn map_runtime_symbols(engine: &inkwell::execution_engine::ExecutionEngine, code
         ("clorus_gt", clorus_gt as usize),
         ("clorus_gte", clorus_gte as usize),
         ("clorus_is_truthy", clorus_is_truthy as usize),
+        // `let` and `if` propagate exception values rather than treating them
+        // as ordinary data.  The generated JIT code therefore calls this
+        // runtime predicate; an unmapped external declaration is a native
+        // null call in MCJIT, not a recoverable Rust error.
+        ("clorus_is_exception_i32", clorus_is_exception_i32 as usize),
     ];
 
     for (name, addr) in mappings {
         if let Some(func) = module.get_function(name) {
-            unsafe { engine.add_global_mapping(&func, *addr); }
+            unsafe {
+                engine.add_global_mapping(&func, *addr);
+            }
         }
     }
 }
@@ -62,7 +69,8 @@ fn test_value_star_arithmetic() {
     codegen.print_ir();
 
     println!("\nCreating JIT engine...");
-    let engine = codegen.get_module()
+    let engine = codegen
+        .get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
     map_runtime_symbols(&engine, &codegen);
@@ -94,7 +102,8 @@ fn test_value_star_string_literal() {
     let exprs = parse(r#""Hello Clorus""#).unwrap();
     let _func = codegen.wrap_in_function(&exprs[0], "test_string").unwrap();
 
-    let engine = codegen.get_module()
+    let engine = codegen
+        .get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
     map_runtime_symbols(&engine, &codegen);
@@ -120,7 +129,8 @@ fn test_value_star_let_binding() {
     let exprs = parse("(let [x 10] x)").unwrap();
     let _func = codegen.wrap_in_function(&exprs[0], "test_let").unwrap();
 
-    let engine = codegen.get_module()
+    let engine = codegen
+        .get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
     map_runtime_symbols(&engine, &codegen);
@@ -147,7 +157,8 @@ fn test_value_star_if_expression() {
     let exprs = parse("(if (< 5 10) 100 200)").unwrap();
     let _func = codegen.wrap_in_function(&exprs[0], "test_if").unwrap();
 
-    let engine = codegen.get_module()
+    let engine = codegen
+        .get_module()
         .create_jit_execution_engine(OptimizationLevel::None)
         .unwrap();
     map_runtime_symbols(&engine, &codegen);
