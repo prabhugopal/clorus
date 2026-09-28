@@ -370,6 +370,13 @@
 (defn conj [coll x]
   (__clorus_conj coll x))
 
+;; set - Return a hash set containing the distinct elements of coll.
+;; This deliberately builds through public collection operations rather than a
+;; compiler-only special case, so JIT, AOT, and the REPL share the same
+;; semantics. As in Clojure, nil is an empty collection.
+(defn set [coll]
+  (reduce conj #{} coll))
+
 ;; zipmap - Create map from keys and values vectors
 ;; Example: (zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
 (defn zipmap [keys vals]
