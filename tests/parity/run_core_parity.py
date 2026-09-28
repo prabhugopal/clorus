@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import json
 import os
 import re
@@ -14,7 +15,7 @@ CLORUS_BIN = os.environ.get("CLORUS_BIN", str(ROOT / "target" / "debug" / "cloru
 
 
 def run_cmd(cmd, env=None):
-    p = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    p = subprocess.run(cmd, capture_output=True, text=True, env=env, cwd=ROOT)
     return p.returncode, p.stdout, p.stderr
 
 
@@ -31,7 +32,7 @@ def clj_eval(expr: str):
         Path(path).unlink(missing_ok=True)
 
 
-def clorus_eval(expr: str, expected_literal: str):
+def clorus_eval(expr: str, expected_literal: str, engine: str):
     wrapped_expr = f"(= {expr} {expected_literal})"
     with tempfile.NamedTemporaryFile("w", suffix=".clr", delete=False) as f:
         f.write(wrapped_expr + "\n")
@@ -39,7 +40,11 @@ def clorus_eval(expr: str, expected_literal: str):
     try:
         env = os.environ.copy()
         env["CLORUS_ENTRY_FILE"] = path
-        code, out, err = run_cmd([CLORUS_BIN, "run"], env=env)
+        env.setdefault("CLORUS_HOME", str(ROOT))
+        cmd = [CLORUS_BIN, "run"]
+        if engine == "aot":
+            cmd.append("--legacy-run")
+        code, out, err = run_cmd(cmd, env=env)
         if code != 0:
             msg = (out + "\n" + err).strip()
             return False, f"clorus failed: {msg}"
@@ -57,7 +62,25 @@ def clorus_eval(expr: str, expected_literal: str):
         Path(path).unlink(missing_ok=True)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Compare pure core expressions across Clojure, Clorus JIT, and Clorus AOT."
+    )
+    parser.add_argument(
+        "--engines",
+        default="jit,aot",
+        help="Comma-separated Clorus engines to run: jit,aot (default: jit,aot)",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    engines = [engine.strip() for engine in args.engines.split(",") if engine.strip()]
+    invalid = set(engines) - {"jit", "aot"}
+    if invalid or not engines:
+        print("ERROR: --engines must contain one or both of: jit,aot")
+        return 2
     if not Path(CLORUS_BIN).exists():
         print(f"ERROR: CLORUS_BIN not found: {CLORUS_BIN}")
         return 2
@@ -73,6 +96,7 @@ def main():
     print("====================================")
     print(f"clorus: {CLORUS_BIN}")
     print(f"cases:  {CASES_FILE}")
+    print(f"engines: {', '.join(engines)}")
     print("")
 
     passed = 0
@@ -88,21 +112,26 @@ def main():
             failed += 1
             continue
 
-        ok_clorus, clorus_val = clorus_eval(expr, clj_val)
-        if not ok_clorus:
-            print(f"[FAIL] {name}: {clorus_val}")
-            failed += 1
-            continue
+        case_failed = False
+        for engine in engines:
+            ok_clorus, clorus_val = clorus_eval(expr, clj_val, engine)
+            if not ok_clorus:
+                print(f"[FAIL] {name} [{engine}]: {clorus_val}")
+                case_failed = True
+                continue
 
-        if clorus_val == "true":
-            print(f"[PASS] {name}")
-            passed += 1
-        else:
-            print(f"[FAIL] {name}")
-            print(f"  expr:   {expr}")
-            print(f"  expect: {clj_val}")
-            print(f"  clorus: (= expr expect) => {clorus_val}")
+            if clorus_val != "true":
+                print(f"[FAIL] {name} [{engine}]")
+                print(f"  expr:   {expr}")
+                print(f"  expect: {clj_val}")
+                print(f"  clorus: (= expr expect) => {clorus_val}")
+                case_failed = True
+
+        if case_failed:
             failed += 1
+        else:
+            print(f"[PASS] {name} [{'/'.join(engines)}]")
+            passed += 1
 
     print("")
     print("-----------")

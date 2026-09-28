@@ -9,5 +9,10 @@
   {"name": "assoc-map", "expr": "(assoc {:a 1} :b 2)"},
   {"name": "get-map", "expr": "(get {:a 1 :b 2} :b)"},
   {"name": "nth-vector", "expr": "(nth [10 20 30] 1)"},
-  {"name": "conj-vector", "expr": "(conj [1 2] 3)"}
+  {"name": "conj-vector", "expr": "(conj [1 2] 3)"},
+  {"name": "composed-map-filter", "expr": "(into [] (filter odd? (map #(* % %) [1 2 3 4])))"},
+  {"name": "take-range", "expr": "(into [] (take 3 (range 10)))"},
+  {"name": "partition-by", "expr": "(mapv (fn [xs] (into [] xs)) (partition-by odd? [1 3 2 4 5]))"},
+  {"name": "reduce-early-termination", "expr": "(reduce (fn [acc x] (if (= x 4) (reduced acc) (+ acc x))) 0 [1 2 3 4 5])"},
+  {"name": "metadata-round-trip", "expr": "(meta (with-meta [1 2] {:a 1}))"}
 ]
