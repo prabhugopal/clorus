@@ -1,317 +1,36 @@
-;; =============================================================================
-;; Transducers - Composable algorithmic transformations
-;; =============================================================================
-;; Transducers provide efficient data processing without intermediate collections.
-
-;; =============================================================================
-;; Reduced Values - Early Termination Support
-;; =============================================================================
-
-(defn reduced?
-  "Returns true if x is a reduced value."
-  [x]
-  (and (map? x) (= (:type x) :reduced)))
-
-(defn reduced
-  "Wraps value to signal early termination."
-  [x]
-  (if (reduced? x)
-    x
-    (__clorus_reduced x)))
-
-(defn unreduced
-  "Unwraps a reduced value."
-  [x]
-  (if (reduced? x)
-    (:value x)
-    x))
-
-(defn ensure-reduced
-  "Ensures value is reduced."
-  [x]
-  (if (reduced? x)
-    x
-    (reduced x)))
-
-;; =============================================================================
-;; Transducer Functions
-;; =============================================================================
-
-(defn map
-  "Map transducer."
-  ([xf]
-   (fn [rf]
-     (fn
-       ([result] (rf result))
-       ([result input]
-        (rf result (xf input))))))
-  ([xf coll]
-   (loop [result []
-          remaining coll]
-     (if (empty? remaining)
-       result
-       (recur (conj result (xf (first remaining)))
-              (rest remaining))))))
-
-(defn filter
-  "Filter transducer."
-  ([pred]
-   (fn [rf]
-     (fn
-       ([result] (rf result))
-       ([result input]
-        (if (pred input)
-          (rf result input)
-          result)))))
-  ([pred coll]
-   (loop [result []
-          remaining coll]
-     (if (empty? remaining)
-       result
-       (let [item (first remaining)]
-         (recur (if (pred item)
-                  (conj result item)
-                  result)
-                (rest remaining)))))))
-
-(defn take
-  "Take transducer - takes first n elements."
-  ([n]
-   (fn [rf]
-     (let [counter (atom 0)]
-       (fn
-         ([result] (rf result))
-         ([result input]
-          (let [c (swap! counter inc)]
-            (if (<= c n)
-              (if (= c n)
-                (ensure-reduced (rf result input))
-                (rf result input))
-              result)))))))
-  ([n coll]
-   (loop [result []
-          remaining coll
-          count 0]
-     (if (or (empty? remaining) (>= count n))
-       result
-       (recur (conj result (first remaining))
-              (rest remaining)
-              (inc count))))))
-
-(defn drop
-  "Drop transducer - drops first n elements."
-  ([n]
-   (fn [rf]
-     (let [counter (atom 0)]
-       (fn
-         ([result] (rf result))
-         ([result input]
-          (if (> (swap! counter inc) n)
-            (rf result input)
-            result))))))
-  ([n coll]
-   (if (vector? coll)
-     (let [len (count coll)
-           start (if (< n len) n len)]
-       (loop [i start
-              acc []]
-         (if (>= i len)
-           acc
-           (recur (+ i 1) (conj acc (nth coll i))))))
-     (loop [remaining coll
-            n n]
-       (if (or (<= n 0) (empty? remaining))
-         remaining
-         (recur (rest remaining) (dec n)))))))
-
-(defn take-while
-  "Take-while transducer - takes elements while pred is true."
-  ([pred]
-   (fn [rf]
-     (fn
-       ([result] (rf result))
-       ([result input]
-        (if (pred input)
-          (rf result input)
-          (reduced result))))))
-  ([pred coll]
-   (let [pred (ensure-fn "take-while" pred)
-         coll (ensure-coll "take-while" coll)]
-     (loop [remaining coll
-            acc []]
-       (if (empty? remaining)
-         acc
-         (let [x (first remaining)]
-           (if (pred x)
-             (recur (rest remaining) (conj acc x))
-             acc)))))))
-
-(defn drop-while
-  "Drop-while transducer - drops elements while pred is true, then passes the rest through."
-  ([pred]
-   (fn [rf]
-     (let [dropping (atom true)]
-       (fn
-         ([result] (rf result))
-         ([result input]
-          (if (and @dropping (pred input))
-            result
-            (do (reset! dropping false)
-                (rf result input))))))))
-  ([pred coll]
-   (let [pred (ensure-fn "drop-while" pred)
-         coll (ensure-coll "drop-while" coll)]
-     (loop [remaining coll]
-       (if (empty? remaining)
-         []
-         (if (pred (first remaining))
-           (recur (rest remaining))
-           remaining))))))
-
-(defn remove
-  "Remove transducer - drops elements for which pred is true (complement of filter)."
-  ([pred]
-   (fn [rf]
-     (fn
-       ([result] (rf result))
-       ([result input]
-        (if (pred input)
-          result
-          (rf result input))))))
-  ([pred coll]
-   (let [pred (ensure-fn "remove" pred)]
-     (filter (complement pred) coll))))
-
-;; A unique sentinel distinguishable from any real collection element, used
-;; by `partition-by` to detect "no previous value yet" without relying on
-;; reference-identity comparison (not exposed by the runtime) or colliding
-;; with a legitimate `nil`/falsy first key.
+;; Transducer utilities that supplement clorus.core.
 ;;
-;; Note: `dedupe` is *not* defined here -- it's already a fixed-arity-1
-;; runtime builtin (clorus_dedupe, wired in codegen/calls.rs), which takes
-;; precedence over any same-named stdlib defn. It's eager-only (no
-;; transducer-producing 0-arity form); adding one would mean teaching that
-;; builtin's dispatch about multi-arity, which is out of scope here.
-(def ^:private transducer-none :clorus.transducers/__none__)
+;; Collection transforms (`map`, `filter`, `take`, `drop`, `remove`,
+;; `mapcat`, `partition-by`, `take-while`, and `drop-while`) live in core as
+;; canonical multi-arity APIs. Keeping this file free of redefinitions makes
+;; stdlib behavior independent of load order.
 
-(defn cat
-  "Cat transducer - concatenates a collection of collections, flattening one level.
-   Unlike the other transducers here this has no eager 2-arity form (matching
-   Clojure): it's meant to be composed, typically via `mapcat`."
-  [rf]
+(defn cat [rf]
   (fn
     ([result] (rf result))
     ([result input]
      (reduce (fn [acc x]
-               (let [r (rf acc x)]
-                 (if (reduced? r) (unreduced r) r)))
+               (let [next (rf acc x)]
+                 (if (reduced? next) (unreduced next) next)))
              result
              input))))
 
-(defn mapcat
-  "Mapcat transducer - maps f over each element then concatenates the results."
-  ([f]
-   (comp (map f) cat))
-  ([f coll]
-   (loop [remaining coll
-          acc []]
-     (if (empty? remaining)
-       acc
-       (recur (rest remaining)
-              (concat acc (f (first remaining))))))))
-
-(defn partition-by
-  "Partition-by transducer - groups consecutive elements for which (f item) is equal."
-  ([f]
-   (fn [rf]
-     (let [group (atom [])
-           prev-key (atom transducer-none)]
-       (fn
-         ([result]
-          (let [g @group]
-            (rf (if (empty? g)
-                  result
-                  (let [r (rf result g)]
-                    (if (reduced? r) (unreduced r) r))))))
-         ([result input]
-          (let [k (f input)
-                pk @prev-key]
-            (if (or (= pk transducer-none) (= k pk))
-              (do (swap! group conj input)
-                  (reset! prev-key k)
-                  result)
-              (let [g @group]
-                (reset! group [input])
-                (reset! prev-key k)
-                (rf result g)))))))))
-  ([f coll]
-   (let [f (ensure-fn "partition-by" f)
-         coll (ensure-coll "partition-by" coll)]
-     (if (empty? coll)
-       []
-       (loop [remaining (rest coll)
-              current-key (f (first coll))
-              current-group [(first coll)]
-              result []]
-         (if (empty? remaining)
-           (conj result current-group)
-           (let [x (first remaining)
-                 k (f x)]
-             (if (= k current-key)
-               (recur (rest remaining)
-                      current-key
-                      (conj current-group x)
-                      result)
-               (recur (rest remaining)
-                      k
-                      [x]
-                      (conj result current-group))))))))))
-
-;; =============================================================================
-;; Transducer Application
-;; =============================================================================
-
 (defn completing
-  "Takes a reducing fn f of 2 args and returns a fn that supports completion arity.
-   2-arity path delegates to f, 1-arity path delegates to completion-fn (defaults to identity)."
-  ([f]
-   (completing f (fn [result] result)))
+  ([f] (completing f (fn [result] result)))
   ([f completion-fn]
    (fn
-     ([result]
-      (completion-fn result))
-     ([result input]
-      (f result input)))))
+     ([result] (completion-fn result))
+     ([result input] (f result input)))))
 
 (defn transduce
-  "Apply transducer to collection with completion arity support.
-   rf-fn is passed straight through to xform, not wrapped via `completing`:
-   xform's own composed reducing fn delegates its 1-arity completion call
-   to rf-fn's 1-arity clause when rf-fn is itself multi-arity (e.g. a
-   `(fn ([result] ...) ([result input] ...))`), so that clause actually
-   runs -- completing's own default (a plain identity fn, discarding
-   rf-fn) would always win instead, since transduce always supplied it.
-   A plain 2-arity-only rf-fn has no completion clause to call; calling
-   it with 1 arg returns nil (this runtime's existing arity-mismatch
-   convention, not a thrown exception), which is treated as an explicit
-   opt-out and falls back to the accumulated result unchanged."
   ([xform rf-fn coll]
    (transduce xform rf-fn [] coll))
   ([xform rf-fn init coll]
-   ;; rf is passed straight to reduce (not wrapped to unwrap `reduced`
-   ;; itself) -- reduce's own codegen already detects and unwraps a
-   ;; `reduced` result to stop early; unwrapping it here first would just
-   ;; strip that marker before reduce ever saw it, silently defeating
-   ;; take/take-while's early termination (confirmed: reduce kept
-   ;; iterating the whole collection regardless).
    (let [rf (xform rf-fn)
          result (reduce rf init coll)
          completed (rf result)]
      (if (nil? completed) result completed))))
 
 (defn into
-  "Build collection using transducer."
-  ([to from]
-   (reduce conj to from))
-  ([to xform from]
-   (transduce xform conj to from)))
+  ([to from] (reduce conj to from))
+  ([to xform from] (transduce xform conj to from)))

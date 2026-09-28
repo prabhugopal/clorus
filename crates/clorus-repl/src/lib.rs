@@ -462,15 +462,38 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         // Primary path: JIT-compile stdlib.
         if enable_jit_stdlib {
             match std::fs::read_to_string(core_path) {
-                Ok(source) => match repl_engine.load_stdlib_batch(source) {
-                    Ok(count) => {
-                        println!("✓ Loaded clorus.core ({} functions) via JIT stdlib", count);
-                        core_loaded = true;
+                Ok(mut source) => {
+                    // Keep the REPL's stdlib surface identical to `run` and
+                    // `build`: core owns collection transforms and the sibling
+                    // file supplies `transduce`, `into`, and related helpers.
+                    // Loading them as one batch preserves definition order and
+                    // avoids a partially usable REPL.
+                    let transducers_path = core_path.with_file_name("transducers.clr");
+                    match std::fs::read_to_string(&transducers_path) {
+                        Ok(transducers) => {
+                            source.push('\n');
+                            source.push_str(&transducers);
+                        }
+                        Err(e) if transducers_path.exists() => {
+                            eprintln!(
+                                "⚠ Could not read transducer stdlib {}: {}",
+                                transducers_path.display(),
+                                e
+                            );
+                        }
+                        Err(_) => {}
                     }
-                    Err(e) => {
-                        eprintln!("⚠ Error loading stdlib via JIT: {}", e);
+
+                    match repl_engine.load_stdlib_batch(source) {
+                        Ok(count) => {
+                            println!("✓ Loaded clorus.core stdlib ({} functions) via JIT", count);
+                            core_loaded = true;
+                        }
+                        Err(e) => {
+                            eprintln!("⚠ Error loading stdlib via JIT: {}", e);
+                        }
                     }
-                },
+                }
                 Err(e) => {
                     eprintln!("⚠ Could not read stdlib: {}", e);
                 }
@@ -482,18 +505,26 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         if !core_loaded && !disable_core_lib {
             if _core_lib.is_some() {
                 match std::fs::read_to_string(core_path) {
-                    Ok(source) => match repl_engine.load_stdlib_symbols_only(source) {
-                        Ok(count) => {
-                            println!(
-                                "✓ Loaded clorus.core symbols ({} functions) via clorus-core dylib",
+                    Ok(mut source) => {
+                        let transducers_path = core_path.with_file_name("transducers.clr");
+                        if let Ok(transducers) = std::fs::read_to_string(transducers_path) {
+                            source.push('\n');
+                            source.push_str(&transducers);
+                        }
+
+                        match repl_engine.load_stdlib_symbols_only(source) {
+                            Ok(count) => {
+                                println!(
+                                "✓ Loaded clorus.core stdlib symbols ({} functions) via clorus-core dylib",
                                 count
                             );
-                            core_loaded = true;
+                                core_loaded = true;
+                            }
+                            Err(e) => {
+                                eprintln!("⚠ Error loading stdlib symbols: {}", e);
+                            }
                         }
-                        Err(e) => {
-                            eprintln!("⚠ Error loading stdlib symbols: {}", e);
-                        }
-                    },
+                    }
                     Err(e) => {
                         eprintln!("⚠ Could not read stdlib: {}", e);
                     }
