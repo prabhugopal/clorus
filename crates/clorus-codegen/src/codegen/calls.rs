@@ -195,6 +195,10 @@ impl<'ctx> CodeGen<'ctx> {
         args: &[Expr],
     ) -> Option<Result<PointerValue<'ctx>, String>> {
         const SIMPLE_BUILTINS: &[(&str, &str, usize)] = &[
+            // Reduced values are kernel control markers consumed by reduce.
+            // The public `reduced` wrapper delegates to this explicit
+            // intrinsic, keeping one canonical runtime representation.
+            ("__clorus_reduced", "clorus_reduced", 1),
             ("first", "clorus_first", 1),
             ("rest", "clorus_rest", 1),
             ("last", "clorus_last", 1),

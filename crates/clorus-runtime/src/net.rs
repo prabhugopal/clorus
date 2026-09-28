@@ -110,8 +110,18 @@ pub extern "C" fn clorus_tcp_listen(port_val: *mut Value) -> *mut Value {
             return Value::nil();
         }
         match TcpListener::bind(("0.0.0.0", port as u16)) {
-            Ok(listener) => wrap_handle(SocketHandle::Listener(Some(listener))),
-            Err(_) => Value::nil(),
+            Ok(listener) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_listen: bound port {}", net_debug_seq(), port);
+                }
+                wrap_handle(SocketHandle::Listener(Some(listener)))
+            }
+            Err(e) => {
+                if net_debug_enabled() {
+                    eprintln!("[net #{}] tcp_listen: port {} error: {}", net_debug_seq(), port, e);
+                }
+                Value::nil()
+            }
         }
     }
 }
