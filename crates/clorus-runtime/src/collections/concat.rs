@@ -82,52 +82,59 @@ pub extern "C" fn clorus_concat(colls: *mut Value) -> *mut Value {
     }
 }
 
-/// Interleave multiple collections (alternate elements from each)
+/// Interleave multiple finite collections until the shortest is exhausted.
+///
+/// Like `clorus_concat`, this materializes eagerly but exposes its result as
+/// Clorus's canonical List sequence. Counting before indexing is deliberate:
+/// a nil element is valid data and must not be mistaken for an exhausted
+/// collection.
 #[no_mangle]
 pub extern "C" fn clorus_interleave(colls: *mut Value) -> *mut Value {
     if colls.is_null() {
-        return crate::vector::clorus_vector_empty();
+        return crate::list::clorus_list_empty();
     }
 
     unsafe {
         // colls should be a vector of collections
         if (*colls).header().tag() != ValueTag::Vector {
-            return crate::vector::clorus_vector_empty();
+            return crate::list::clorus_list_empty();
         }
 
         let vec_ptr = (*colls).as_ptr() as *mut PersistentVector;
         let num_colls = (*vec_ptr).count();
 
         if num_colls == 0 {
-            return crate::vector::clorus_vector_empty();
+            return crate::list::clorus_list_empty();
         }
 
         let mut result = PersistentVector::empty();
         let mut index = 0;
 
-        // Interleave until any collection is exhausted
+        // Interleave until *any* collection is exhausted. Checking counts
+        // first preserves nil values, which clorus_nth also uses as its
+        // out-of-range sentinel.
         loop {
-            let mut added_any = false;
+            for i in 0..num_colls {
+                let coll = PersistentVector::nth(vec_ptr, i);
+                if clorus_count(coll) <= index {
+                    let vector_result = Value::from_ptr(ValueTag::Vector, result as *mut u8);
+                    let list_result = crate::list::clorus_vector_to_list(vector_result);
+                    crate::value::clorus_release(vector_result);
+                    return list_result;
+                }
+            }
 
             for i in 0..num_colls {
                 let coll = PersistentVector::nth(vec_ptr, i);
                 let elem = clorus_nth(coll, index);
-
-                if !elem.is_null() && (*elem).header().tag() != ValueTag::Nil {
-                    result = PersistentVector::conj(result, elem);
+                result = PersistentVector::conj(result, elem);
+                if !elem.is_null() {
                     crate::value::clorus_release(elem);
-                    added_any = true;
                 }
-            }
-
-            if !added_any {
-                break;
             }
 
             index += 1;
         }
-
-        Value::from_ptr(ValueTag::Vector, result as *mut u8)
     }
 }
 

@@ -1,0 +1,18 @@
+(ns tests.stdlib.test-core-interleave-contract)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; The public API is variadic and stops at the shortest input, matching
+    ;; Clojure. The finite implementation returns a List sequence.
+    (assert-eq "interleave no args" (interleave) '())
+    (assert-eq "interleave no args seq" (seq? (interleave)) true)
+    (assert-eq "interleave two" (interleave [1 3] [2 4]) '(1 2 3 4))
+    (assert-eq "interleave shortest two" (interleave [1] [2 3]) '(1 2))
+    (assert-eq "interleave shortest many" (interleave [1 4] [2 3] [5]) '(1 2 5))
+    (assert-eq "interleave preserves nil" (interleave [1 nil] [2 3]) (list 1 2 nil 3))
+    (println "core interleave contract passed")))

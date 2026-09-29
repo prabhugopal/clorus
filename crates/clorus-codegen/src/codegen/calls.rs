@@ -216,7 +216,9 @@ impl<'ctx> CodeGen<'ctx> {
             ("distinct", "clorus_distinct", 1),
             ("dedupe", "clorus_dedupe", 1),
             ("flatten", "clorus_flatten", 1),
-            ("interleave", "clorus_interleave", 1),
+            // `interleave` is variadic. It has a dedicated lowering in
+            // compile_core_call that packages all collection arguments into
+            // the runtime's collection vector.
             ("interpose", "clorus_interpose", 2),
             ("parents", "clorus_parents", 1),
             ("ancestors", "clorus_ancestors", 1),

@@ -2975,6 +2975,54 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
 
+            "interleave" => {
+                // interleave is variadic (including its zero-argument empty
+                // sequence case). The runtime takes one vector containing
+                // all input collections, which keeps the ABI simple without
+                // restricting the source-level arity.
+                let vec_empty_fn = self
+                    .module
+                    .get_function("clorus_vector_empty")
+                    .ok_or("clorus_vector_empty not declared")?;
+                let vec_conj_fn = self
+                    .module
+                    .get_function("clorus_vector_conj")
+                    .ok_or("clorus_vector_conj not declared")?;
+                let mut colls = self
+                    .builder
+                    .build_call(vec_empty_fn, &[], "interleave_colls")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                for arg in args {
+                    let coll = self.compile_expr(arg)?;
+                    colls = self
+                        .builder
+                        .build_call(vec_conj_fn, &[colls.into(), coll.into()], "interleave_coll")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                }
+
+                let interleave_fn = self
+                    .module
+                    .get_function("clorus_interleave")
+                    .ok_or("clorus_interleave not declared")?;
+                Ok(self
+                    .builder
+                    .build_call(interleave_fn, &[colls.into()], "interleave_call")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
+
             // String operations
             "str" => {
                 // str takes variable args and concatenates them
