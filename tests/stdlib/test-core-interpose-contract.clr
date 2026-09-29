@@ -1,0 +1,17 @@
+(ns tests.stdlib.test-core-interpose-contract)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; The language API follows Clojure: separator first, collection second.
+    (assert-eq "interpose vector" (interpose 0 [1 2 3]) '(1 0 2 0 3))
+    (assert-eq "interpose list" (interpose :x '(1 2)) '(1 :x 2))
+    (assert-eq "interpose one" (interpose 0 [1]) '(1))
+    (assert-eq "interpose empty" (interpose 0 []) '())
+    (assert-eq "interpose nil collection" (interpose 0 nil) '())
+    (assert-eq "interpose sequence result" (seq? (interpose 0 [1 2])) true)
+    (println "core interpose contract passed")))

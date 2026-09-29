@@ -138,11 +138,15 @@ pub extern "C" fn clorus_interleave(colls: *mut Value) -> *mut Value {
     }
 }
 
-/// Insert a separator between elements of a collection
+/// Insert a separator between elements of a finite collection.
+///
+/// The ABI receives collection then separator for efficient lowering; the
+/// public core call preserves Clojure's `(interpose separator coll)` order.
+/// The result is eagerly materialized as Clorus's canonical List sequence.
 #[no_mangle]
 pub extern "C" fn clorus_interpose(coll: *mut Value, sep: *mut Value) -> *mut Value {
     if coll.is_null() {
-        return crate::vector::clorus_vector_empty();
+        return crate::list::clorus_list_empty();
     }
 
     unsafe {
@@ -150,7 +154,7 @@ pub extern "C" fn clorus_interpose(coll: *mut Value, sep: *mut Value) -> *mut Va
         let count = clorus_count(coll);
 
         if count == 0 {
-            return crate::vector::clorus_vector_empty();
+            return crate::list::clorus_list_empty();
         }
 
         for i in 0..count {
@@ -164,7 +168,10 @@ pub extern "C" fn clorus_interpose(coll: *mut Value, sep: *mut Value) -> *mut Va
             }
         }
 
-        Value::from_ptr(ValueTag::Vector, result as *mut u8)
+        let vector_result = Value::from_ptr(ValueTag::Vector, result as *mut u8);
+        let list_result = crate::list::clorus_vector_to_list(vector_result);
+        crate::value::clorus_release(vector_result);
+        list_result
     }
 }
 

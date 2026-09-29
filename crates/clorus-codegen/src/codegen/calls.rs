@@ -219,7 +219,8 @@ impl<'ctx> CodeGen<'ctx> {
             // `interleave` is variadic. It has a dedicated lowering in
             // compile_core_call that packages all collection arguments into
             // the runtime's collection vector.
-            ("interpose", "clorus_interpose", 2),
+            // `interpose` has a public argument order different from its
+            // runtime ABI; compile_core_call lowers it explicitly.
             ("parents", "clorus_parents", 1),
             ("ancestors", "clorus_ancestors", 1),
             ("descendants", "clorus_descendants", 1),
