@@ -899,6 +899,14 @@
     m
     (throw (str fname " expects map or nil"))))
 
+;; find - Return [key value] when k is present in an associative collection.
+;; Presence is checked separately from `get` so stored nil and false values
+;; remain distinguishable from an absent key.
+(defn find [coll k]
+  (if (contains? coll k)
+    [k (get coll k)]
+    nil))
+
 ;; update - Update value in map using function
 ;; Example: (update {:count 5} :count inc) ; => {:count 6}
 (defn update

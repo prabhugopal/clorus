@@ -1,0 +1,16 @@
+(ns tests.stdlib.test-core-find)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "map entry" (find {:a 1} :a) [:a 1])
+    (assert-eq "present nil remains present" (find {:a nil} :a) [:a nil])
+    (assert-eq "present false remains present" (find {:a false} :a) [:a false])
+    (assert-eq "vector index is associative" (find [10 20] 1) [1 20])
+    (assert-eq "missing key returns nil" (find {:a 1} :missing) nil)
+    (assert-eq "nil is empty associative input" (find nil :a) nil)
+    "PASS"))

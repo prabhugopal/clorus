@@ -350,6 +350,7 @@ run_repl_regressions() {
 (set [1 2 3 1])
 (vec '(1 2 3))
 (some (fn [x] (if (= x 2) :found nil)) [1 2 3])
+(find {:a nil} :a)
 (into [] (map inc [1 2 3]))
 (transduce (take 2) conj [] [1 2 3])
 :q
@@ -374,7 +375,8 @@ EOF
             && grep -q "\[2 3 4\]" "$repl_output_file" \
             && grep -q "\[1 2\]" "$repl_output_file" \
             && grep -q ":found" "$repl_output_file" \
-            && ! grep -qE "Undefined function: (map|set|vec|some|into|transduce)" "$repl_output_file"; then
+            && grep -q ":a" "$repl_output_file" \
+            && ! grep -qE "Undefined function: (map|set|vec|some|find|into|transduce)" "$repl_output_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED+=1))
         else
