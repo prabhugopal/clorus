@@ -1,0 +1,16 @@
+(ns tests.language.test-quoted-nil)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; Quote is data, not a numeric fallback: every quoted nil stays nil.
+    (assert-eq "quoted nil" 'nil nil)
+    (assert-eq "quoted list nil" '(nil) (list nil))
+    (assert-eq "quoted vector nil" '[nil] [nil])
+    (assert-eq "syntax quoted nil" `nil nil)
+    (assert-eq "syntax quoted list nil" `(nil) (list nil))
+    (println "quoted nil contract passed")))

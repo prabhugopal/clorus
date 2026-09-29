@@ -58,7 +58,20 @@ impl<'ctx> CodeGen<'ctx> {
                     .const_float(if *b { 1.0 } else { 0.0 });
                 Ok(self.box_number(float_val))
             }
-            Expr::Nil => Ok(self.box_number(self.context.f64_type().const_float(0.0))),
+            Expr::Nil => {
+                let nil_fn = self
+                    .module
+                    .get_function("clorus_value_nil")
+                    .ok_or("clorus_value_nil not declared")?;
+                Ok(self
+                    .builder
+                    .build_call(nil_fn, &[], "quoted_nil")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
 
             Expr::Symbol(s) => {
                 let c_str = self
@@ -476,7 +489,20 @@ impl<'ctx> CodeGen<'ctx> {
                     .into_pointer_value())
             }
 
-            Expr::Nil => Ok(self.box_number(self.context.f64_type().const_float(0.0))),
+            Expr::Nil => {
+                let nil_fn = self
+                    .module
+                    .get_function("clorus_value_nil")
+                    .ok_or("clorus_value_nil not declared")?;
+                Ok(self
+                    .builder
+                    .build_call(nil_fn, &[], "syntax_quoted_nil")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
+            }
 
             // Collections: recursively process, checking for unquote-splicing
             Expr::Vector(elements) => self.compile_syntax_quoted_sequence(elements, true),
