@@ -347,6 +347,9 @@ run_repl_regressions() {
 (filter odd? [1 2 3 4 5])
 (take 3 [10 20 30 40])
 (drop 2 [10 20 30 40])
+(set [1 2 3 1])
+(into [] (map inc [1 2 3]))
+(transduce (take 2) conj [] [1 2 3])
 :q
 EOF
         )
@@ -365,7 +368,10 @@ EOF
             && grep -q "\[1 3 5\]" "$repl_output_file" \
             && grep -q "\[10 20 30\]" "$repl_output_file" \
             && grep -q "\[30 40\]" "$repl_output_file" \
-            && ! grep -q "Undefined function: map" "$repl_output_file"; then
+            && grep -q "#{1 2 3}" "$repl_output_file" \
+            && grep -q "\[2 3 4\]" "$repl_output_file" \
+            && grep -q "\[1 2\]" "$repl_output_file" \
+            && ! grep -qE "Undefined function: (map|set|into|transduce)" "$repl_output_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED+=1))
         else
