@@ -1589,6 +1589,14 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                     };
                     return left_num == right_num;
                 }
+                // Clojure's sequential equality is structural across the
+                // concrete sequence representation: `[1 2]` equals `(1 2)`.
+                // Clorus uses Vector for counted collections and List for its
+                // finite sequence boundary, so this relation is essential to
+                // keep a representation choice from changing `=` semantics.
+                (ValueTag::Vector, ValueTag::List) | (ValueTag::List, ValueTag::Vector) => {
+                    return sequential_equals(left, right);
+                }
                 _ => return false,
             }
         }
@@ -1637,35 +1645,7 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                 left_sym == right_sym
             }
 
-            ValueTag::Vector => {
-                let left_ptr = (*left).as_ptr() as *mut crate::vector::PersistentVector;
-                let right_ptr = (*right).as_ptr() as *mut crate::vector::PersistentVector;
-                let left_count = (*left_ptr).count();
-                let right_count = (*right_ptr).count();
-                if left_count != right_count {
-                    return false;
-                }
-                for i in 0..left_count {
-                    let left_elem = crate::vector::PersistentVector::nth(left_ptr, i);
-                    let right_elem = crate::vector::PersistentVector::nth(right_ptr, i);
-                    let eq = clorus_equals(left_elem, right_elem);
-                    if !left_elem.is_null() {
-                        crate::value::clorus_release(left_elem);
-                    }
-                    if !right_elem.is_null() {
-                        crate::value::clorus_release(right_elem);
-                    }
-                    if !eq {
-                        return false;
-                    }
-                }
-                true
-            }
-            ValueTag::List => {
-                let left_ptr = (*left).as_ptr() as *mut crate::list::PersistentList;
-                let right_ptr = (*right).as_ptr() as *mut crate::list::PersistentList;
-                crate::list::list_equals(left_ptr, right_ptr)
-            }
+            ValueTag::Vector | ValueTag::List => sequential_equals(left, right),
             ValueTag::HashMap => {
                 let left_ptr = (*left).as_ptr() as *mut crate::map::ClorusHashMap;
                 let right_ptr = (*right).as_ptr() as *mut crate::map::ClorusHashMap;
@@ -1704,6 +1684,35 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                 (*left).as_ptr() == (*right).as_ptr(),
         }
     }
+}
+
+/// Structural equality for the counted sequence representations Clorus
+/// exposes publicly. Both `clorus_nth` and `clorus_count` are polymorphic for
+/// vectors and lists, so this stays correct when one side crosses the finite
+/// sequence boundary and becomes a List.
+unsafe fn sequential_equals(left: *mut Value, right: *mut Value) -> bool {
+    let left_count = crate::collections::clorus_count(left);
+    let right_count = crate::collections::clorus_count(right);
+    if left_count != right_count {
+        return false;
+    }
+
+    for i in 0..left_count {
+        let left_elem = crate::collections::clorus_nth(left, i);
+        let right_elem = crate::collections::clorus_nth(right, i);
+        let equal = clorus_equals(left_elem, right_elem);
+        if !left_elem.is_null() {
+            clorus_release(left_elem);
+        }
+        if !right_elem.is_null() {
+            clorus_release(right_elem);
+        }
+        if !equal {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Create a symbol value from a C string pointer
@@ -1901,6 +1910,27 @@ mod tests {
             clorus_release(v2);
             clorus_release(v1b);
             clorus_release(v2b);
+        }
+    }
+
+    #[test]
+    fn test_vector_and_list_share_sequential_equality_and_hash() {
+        unsafe {
+            let vector = crate::vector::clorus_vector_empty();
+            let one = Value::long(1);
+            let two = Value::long(2);
+            let vector = crate::vector::clorus_vector_conj(vector, one);
+            let vector = crate::vector::clorus_vector_conj(vector, two);
+            let list = crate::list::clorus_vector_to_list(vector);
+
+            assert!(clorus_equals(vector, list));
+            assert!(clorus_equals(list, vector));
+            assert_eq!(crate::hash::clorus_hash(vector), crate::hash::clorus_hash(list));
+
+            clorus_release(vector);
+            clorus_release(list);
+            clorus_release(one);
+            clorus_release(two);
         }
     }
 

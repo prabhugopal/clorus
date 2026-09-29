@@ -2,11 +2,14 @@ use crate::value::{Value, ValueTag};
 use crate::vector::PersistentVector;
 use crate::collections::{clorus_count, clorus_nth};
 
-/// Remove duplicate elements from a collection (distinct)
+/// Remove duplicate elements from a finite collection (distinct).
+///
+/// The work is eager until Clorus has a lazy sequence runtime, but the public
+/// value is a List sequence rather than the temporary vector accumulator.
 #[no_mangle]
 pub extern "C" fn clorus_distinct(coll: *mut Value) -> *mut Value {
     if coll.is_null() {
-        return crate::vector::clorus_vector_empty();
+        return crate::list::clorus_list_empty();
     }
 
     unsafe {
@@ -42,22 +45,28 @@ pub extern "C" fn clorus_distinct(coll: *mut Value) -> *mut Value {
             }
         }
 
-        Value::from_ptr(ValueTag::Vector, result as *mut u8)
+        let vector_result = Value::from_ptr(ValueTag::Vector, result as *mut u8);
+        let list_result = crate::list::clorus_vector_to_list(vector_result);
+        crate::value::clorus_release(vector_result);
+        list_result
     }
 }
 
-/// Remove consecutive duplicate elements (dedupe)
+/// Remove consecutive duplicate elements from a finite collection (dedupe).
+///
+/// As with distinct, this is eager but exposes the canonical List sequence
+/// representation at the public boundary.
 #[no_mangle]
 pub extern "C" fn clorus_dedupe(coll: *mut Value) -> *mut Value {
     if coll.is_null() {
-        return crate::vector::clorus_vector_empty();
+        return crate::list::clorus_list_empty();
     }
 
     unsafe {
         let count = clorus_count(coll);
 
         if count == 0 {
-            return crate::vector::clorus_vector_empty();
+            return crate::list::clorus_list_empty();
         }
 
         let mut result = PersistentVector::empty();
@@ -86,6 +95,9 @@ pub extern "C" fn clorus_dedupe(coll: *mut Value) -> *mut Value {
             crate::value::clorus_release(prev);
         }
 
-        Value::from_ptr(ValueTag::Vector, result as *mut u8)
+        let vector_result = Value::from_ptr(ValueTag::Vector, result as *mut u8);
+        let list_result = crate::list::clorus_vector_to_list(vector_result);
+        crate::value::clorus_release(vector_result);
+        list_result
     }
 }

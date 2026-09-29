@@ -150,30 +150,6 @@ impl Drop for PersistentList {
     }
 }
 
-/// Structural equality for lists (element-wise)
-pub(crate) unsafe fn list_equals(a: *mut PersistentList, b: *mut PersistentList) -> bool {
-    if a.is_null() || b.is_null() {
-        return a.is_null() && b.is_null();
-    }
-
-    let mut a_node = (*a).head;
-    let mut b_node = (*b).head;
-
-    while !a_node.is_null() && !b_node.is_null() {
-        let a_val = (*a_node).head;
-        let b_val = (*b_node).head;
-
-        if !crate::value::clorus_equals(a_val, b_val) {
-            return false;
-        }
-
-        a_node = (*a_node).tail;
-        b_node = (*b_node).tail;
-    }
-
-    a_node.is_null() && b_node.is_null()
-}
-
 /// Structural hash for lists (order-dependent)
 pub(crate) unsafe fn list_hash(list: *mut PersistentList) -> u64 {
     if list.is_null() {
