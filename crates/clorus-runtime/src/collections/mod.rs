@@ -200,11 +200,17 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
 /// intentionally excluded until Clorus has a dedicated character value type.
 #[no_mangle]
 pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
-    if coll.is_null() || clorus_count(coll) == 0 {
+    if coll.is_null() {
         return Value::nil();
     }
 
     unsafe {
+        if (*coll).header().tag() == ValueTag::LazySeq {
+            return crate::lazy_seq::clorus_lazy_seq_force(coll);
+        }
+        if clorus_count(coll) == 0 {
+            return Value::nil();
+        }
         match (*coll).header().tag() {
             ValueTag::List => {
                 (*coll).header().retain();
@@ -218,6 +224,7 @@ pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
                 crate::value::clorus_release(seq_vec);
                 result
             }
+            ValueTag::LazySeq => unreachable!("lazy sequence handled before collection dispatch"),
             _ => Value::nil(),
         }
     }
@@ -268,6 +275,13 @@ pub extern "C" fn clorus_first(coll: *mut Value) -> *mut Value {
 
     unsafe {
         match (*coll).header().tag() {
+            ValueTag::LazySeq => {
+                let seq = crate::lazy_seq::clorus_lazy_seq_force(coll);
+                if crate::value::clorus_is_exception(seq) { return seq; }
+                let result = clorus_first(seq);
+                crate::value::clorus_release(seq);
+                result
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 if (*vec_ptr).is_empty() {
@@ -303,6 +317,13 @@ pub extern "C" fn clorus_rest(coll: *mut Value) -> *mut Value {
 
     unsafe {
         match (*coll).header().tag() {
+            ValueTag::LazySeq => {
+                let seq = crate::lazy_seq::clorus_lazy_seq_force(coll);
+                if crate::value::clorus_is_exception(seq) { return seq; }
+                let result = clorus_rest(seq);
+                crate::value::clorus_release(seq);
+                result
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 let count = (*vec_ptr).count();

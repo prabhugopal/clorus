@@ -144,6 +144,7 @@ pub extern "C" fn clorus_is_lazy_seq_i32(value: *mut Value) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{clorus_is_lazy_seq_i32, clorus_lazy_seq_force, clorus_lazy_seq_new, LazySeqCell};
+    use crate::collections::{clorus_first, clorus_rest, clorus_seq};
     use crate::value::clorus_release;
 
     #[test]
@@ -170,6 +171,20 @@ mod tests {
             let second = clorus_lazy_seq_force(lazy);
             clorus_release(first);
             clorus_release(second);
+            clorus_release(lazy);
+        }
+    }
+
+    #[test]
+    fn core_sequence_boundary_accepts_an_empty_native_lazy_sequence() {
+        unsafe {
+            let lazy = clorus_lazy_seq_new(std::ptr::null_mut());
+            let seq = clorus_seq(lazy);
+            let first = clorus_first(lazy);
+            let rest = clorus_rest(lazy);
+            clorus_release(seq);
+            clorus_release(first);
+            clorus_release(rest);
             clorus_release(lazy);
         }
     }
