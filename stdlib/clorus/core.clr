@@ -210,8 +210,55 @@
         acc
         (let [v (f (first remaining))]
           (if (nil? v)
-            (recur (rest remaining) acc)
-            (recur (rest remaining) (__clorus_conj acc v))))))))
+              (recur (rest remaining) acc)
+              (recur (rest remaining) (__clorus_conj acc v))))))))
+
+;; map-indexed - Apply f to each [index item] pair.
+;; The one-argument form is a transducer; the two-argument form eagerly
+;; realizes into a vector, consistent with Clorus's current core transforms.
+(defn map-indexed
+  ([f]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (let [i @counter]
+            (do (swap! counter inc)
+                (rf result (f i input)))))))))
+  ([f coll]
+   (loop [i 0
+          remaining coll
+          acc []]
+     (if (empty? remaining)
+       acc
+       (recur (inc i)
+              (rest remaining)
+              (__clorus_conj acc (f i (first remaining))))))))
+
+;; keep-indexed - Apply f to each [index item] pair and retain non-nil values.
+;; False is a valid retained value, matching Clojure's keep semantics.
+(defn keep-indexed
+  ([f]
+   (fn [rf]
+     (let [counter (atom 0)]
+       (fn
+         ([result] (rf result))
+         ([result input]
+          (let [i @counter
+                value (f i input)]
+            (do (swap! counter inc)
+                (if (nil? value) result (rf result value)))))))))
+  ([f coll]
+   (loop [i 0
+          remaining coll
+          acc []]
+     (if (empty? remaining)
+       acc
+       (let [value (f i (first remaining))]
+         (recur (inc i)
+                (rest remaining)
+                (if (nil? value) acc (__clorus_conj acc value))))))))
 
 ;; mapcat - Map then concatenate
 ;; Example: (mapcat (fn [x] [x x]) [1 2]) ; => [1 1 2 2]

@@ -1,0 +1,25 @@
+(ns tests.stdlib.test-core-indexed)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "map-indexed eager"
+               (map-indexed (fn [i x] (+ i x)) [10 10 10])
+               [10 11 12])
+    (assert-eq "map-indexed transducer"
+               (transduce (map-indexed (fn [i x] (+ i x))) conj [] [10 10 10])
+               [10 11 12])
+    (assert-eq "keep-indexed eager"
+               (keep-indexed (fn [i x] (if (even? i) x nil)) [10 20 30 40])
+               [10 30])
+    (assert-eq "keep-indexed transducer"
+               (transduce (keep-indexed (fn [i x] (if (even? i) x nil))) conj [] [10 20 30 40])
+               [10 30])
+    (assert-eq "keep-indexed retains false"
+               (keep-indexed (fn [i _] (if (= i 1) false nil)) [1 2 3])
+               [false])
+    "PASS"))

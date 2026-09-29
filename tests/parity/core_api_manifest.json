@@ -35,7 +35,7 @@
     {"name": "seq", "owner": "sequence-runtime", "status": "planned", "coverage": "none", "gap": "requires the official seq/lazy realization representation"},
     {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "find", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
-    {"name": "map-indexed", "owner": "source-core", "status": "planned", "coverage": "none", "gap": "needs eager and transducer arity contracts"},
-    {"name": "keep-indexed", "owner": "source-core", "status": "planned", "coverage": "none", "gap": "needs eager and transducer arity contracts"}
+    {"name": "map-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
+    {"name": "keep-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"}
   ]
 }
