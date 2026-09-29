@@ -437,13 +437,13 @@ pub extern "C" fn clorus_count(coll: *mut Value) -> i64 {
 /// (empty {:a 1}) => {}
 /// (empty #{1 2}) => #{}
 /// (empty '(1 2)) => ()
-/// (empty "text") => ""
+/// (empty "text") => nil
 /// (empty nil) => nil
 ///
-/// Strings are counted and treated as emptyable just as they are by
-/// Clojure. Values without an empty representation still use the runtime's
-/// established lenient fallback and return nil; public exception fidelity
-/// for those invalid inputs is tracked at the core-library layer.
+/// Clojure's `empty` only constructs empty persistent collections. Strings
+/// remain countable and seqable for functions such as `not-empty`, but have
+/// no persistent empty representation, so they return nil here. Values
+/// without an empty representation use the same nil fallback.
 #[no_mangle]
 pub extern "C" fn clorus_empty(coll: *mut Value) -> *mut Value {
     if coll.is_null() {
@@ -456,7 +456,7 @@ pub extern "C" fn clorus_empty(coll: *mut Value) -> *mut Value {
             ValueTag::List => crate::list::clorus_list_empty(),
             ValueTag::HashMap => crate::map::clorus_map_empty(),
             ValueTag::HashSet => crate::set::clorus_set_empty(),
-            ValueTag::String => Value::string(""),
+            ValueTag::String => Value::nil(),
             ValueTag::Nil => Value::nil(),
             _ => Value::nil(),
         }
@@ -747,12 +747,11 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_preserves_supported_collection_kind() {
+    fn test_empty_preserves_persistent_collection_kind() {
         unsafe {
             let string = Value::string("clorus");
             let empty_string = clorus_empty(string);
-            assert_eq!((*empty_string).header().tag(), ValueTag::String);
-            assert_eq!((*empty_string).as_string(), "");
+            assert_eq!((*empty_string).header().tag(), ValueTag::Nil);
 
             let vector = crate::vector::clorus_vector_empty();
             let empty_vector = clorus_empty(vector);

@@ -1189,53 +1189,6 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
 
-            "empty?" => {
-                // empty? takes 1 arg: collection
-                if args.len() != 1 {
-                    return Err("empty? requires 1 argument: collection".to_string());
-                }
-
-                let coll_ptr = self.compile_expr(&args[0])?;
-
-                let count_fn = self
-                    .module
-                    .get_function("clorus_count")
-                    .ok_or("clorus_count not declared")?;
-
-                let count_result = self
-                    .builder
-                    .build_call(count_fn, &[coll_ptr.into()], "count_call")
-                    .unwrap();
-
-                // count returns i64, compare with 0
-                let count_i64 = count_result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_int_value();
-                let zero = self.context.i64_type().const_zero();
-                let is_empty = self
-                    .builder
-                    .build_int_compare(inkwell::IntPredicate::EQ, count_i64, zero, "is_empty")
-                    .unwrap();
-
-                // Convert bool to Value* (boolean)
-                let value_bool_fn = self
-                    .module
-                    .get_function("clorus_value_boolean")
-                    .ok_or("clorus_value_boolean not declared")?;
-                let result = self
-                    .builder
-                    .build_call(value_bool_fn, &[is_empty.into()], "empty_bool")
-                    .unwrap();
-
-                Ok(result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
-            }
-
             "conj" | "__clorus_conj" => {
                 // conj takes 2 args: collection, element
                 if args.len() != 2 {

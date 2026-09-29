@@ -76,6 +76,17 @@
 (defn ensure-reduced [x]
   (if (reduced? x) x (reduced x)))
 
+;; empty? - Check whether a countable Clojure value is empty.
+;;
+;; This appears before the sequence transforms that consume it. The runtime's
+;; count primitive deliberately returns zero for unsupported internal values;
+;; the public contract belongs here instead. Nil, strings, and persistent
+;; collections are countable; other values are an error.
+(defn empty? [coll]
+  (if (or (nil? coll) (string? coll) (coll? coll))
+    (= (count coll) 0)
+    (throw "empty? expects a countable collection")))
+
 ;; take - Take first n elements
 ;; Example: (take 3 [1 2 3 4 5]) ; => [1 2 3]
 (defn take
@@ -384,10 +395,6 @@
 ;; odd? - Check if number is odd
 (defn odd? [x]
   (not (even? x)))
-
-;; empty? - Check if collection is empty
-(defn empty? [coll]
-  (= (count coll) 0))
 
 ;; not-empty - Return collection if not empty, nil otherwise
 (defn not-empty [coll]

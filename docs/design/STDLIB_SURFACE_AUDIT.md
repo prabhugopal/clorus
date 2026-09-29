@@ -72,13 +72,11 @@ definition must therefore appear after public helpers it invokes. For example,
 Audit these as public APIs before adding them; implementation follows only when
 the behavior and owner are agreed:
 
-- Full lazy-sequence semantics (the finite `seq` and eager `vec` contracts
-  are implemented; strings await character values and `clorus.lazy` is not
-  yet the integrated core lazy runtime)
-- `some`, `find`, `keep-indexed`, and `map-indexed`
-- Complete multi-arity collection contracts (`concat`, `interleave`,
-  `interpose`, `dedupe`, and related sequence functions)
-- `empty` / `not-empty` behavior for every supported collection kind
+- Establish full lazy-sequence semantics. The finite `seq` and eager `vec`
+  contracts are implemented; `concat`, `interleave`, `interpose`, `distinct`,
+  and `dedupe` are likewise finite and eager. Strings await character values,
+  `clorus.lazy` is not the integrated core lazy runtime, and `dedupe` does not
+  yet offer its transducer arity.
 
 These are intentionally not claimed as complete merely because a similarly
 named runtime helper exists.
@@ -99,6 +97,6 @@ named runtime helper exists.
 2. Select the smallest owner: source stdlib first; native kernel only when the
    operation needs representation-level support.
 3. Place source definitions after their dependencies.
-4. Add JIT, AOT, and REPL coverage; add Clojure differential coverage when
-   portable.
+4. Add JIT, AOT, and REPL coverage; add the expression to the Clojure
+   differential corpus when it is portable.
 5. Update this audit and the generated parity inventory if the status changes.

@@ -19,23 +19,47 @@ def run_cmd(cmd, env=None):
     return p.returncode, p.stdout, p.stderr
 
 
-def clj_eval(expr: str):
+def clj_eval_all(cases):
+    """Evaluate all reference expressions in one Clojure process.
+
+    The parity corpus intentionally contains only independent, pure expressions.
+    Batching them keeps the smoke test fast enough to run routinely while the
+    marker makes every reference value unambiguous, including nil and strings.
+    """
     with tempfile.NamedTemporaryFile("w", suffix=".clj", delete=False) as f:
-        f.write(f"(println (pr-str {expr}))\n")
+        for index, case in enumerate(cases):
+            f.write(
+                f'(println "__CLORUS_PARITY_EXPECT_{index}__" '
+                f'(pr-str {case["expr"]}))\n'
+            )
         path = f.name
     try:
         code, out, err = run_cmd(["clj", "-M", path])
         if code != 0:
             return False, f"clj failed: {err.strip() or out.strip()}"
-        return True, out.strip().splitlines()[-1] if out.strip() else ""
+
+        values = {}
+        for line in out.splitlines():
+            match = re.match(r"^__CLORUS_PARITY_EXPECT_(\d+)__\s+(.*)$", line)
+            if match:
+                values[int(match.group(1))] = match.group(2)
+
+        missing = [str(index) for index in range(len(cases)) if index not in values]
+        if missing:
+            return False, "clj output missing reference values for case indexes: " + ", ".join(missing)
+        return True, values
     finally:
         Path(path).unlink(missing_ok=True)
 
 
-def clorus_eval(expr: str, expected_literal: str, engine: str):
-    wrapped_expr = f"(= {expr} {expected_literal})"
+def clorus_eval_all(cases, expected_literals, engine: str):
+    """Check all expressions in one Clorus process for the selected engine."""
     with tempfile.NamedTemporaryFile("w", suffix=".clr", delete=False) as f:
-        f.write(wrapped_expr + "\n")
+        for index, case in enumerate(cases):
+            f.write(
+                f'(println "__CLORUS_PARITY_RESULT_{index}__" '
+                f'(= {case["expr"]} {expected_literals[index]}))\n'
+            )
         path = f.name
     try:
         env = os.environ.copy()
@@ -48,16 +72,22 @@ def clorus_eval(expr: str, expected_literal: str, engine: str):
         if code != 0:
             msg = (out + "\n" + err).strip()
             return False, f"clorus failed: {msg}"
+
         combined = (out + "\n" + err).splitlines()
-        value = None
-        for line in reversed(combined):
-            m = re.match(r"^\s*=>\s*(.*)$", line)
-            if m:
-                value = m.group(1).strip()
-                break
-        if value is None:
-            return False, f"clorus output missing result marker. output={out!r} err={err!r}"
-        return True, value
+        values = {}
+        for line in combined:
+            match = re.match(r"^__CLORUS_PARITY_RESULT_(\d+)__\s+(.*)$", line)
+            if match:
+                values[int(match.group(1))] = match.group(2).strip()
+
+        missing = [str(index) for index in range(len(cases)) if index not in values]
+        if missing:
+            return False, (
+                "clorus output missing result values for case indexes: "
+                + ", ".join(missing)
+                + f". output={out!r} err={err!r}"
+            )
+        return True, values
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -99,32 +129,39 @@ def main():
     print(f"engines: {', '.join(engines)}")
     print("")
 
+    ok_clj, clj_values = clj_eval_all(cases)
+    if not ok_clj:
+        print(f"[FAIL] Clojure reference evaluation: {clj_values}")
+        return 1
+
+    engine_values = {}
+    engine_errors = {}
+    for engine in engines:
+        ok_clorus, values = clorus_eval_all(cases, clj_values, engine)
+        if ok_clorus:
+            engine_values[engine] = values
+        else:
+            engine_errors[engine] = values
+
     passed = 0
     failed = 0
-
-    for case in cases:
+    for index, case in enumerate(cases):
         name = case["name"]
         expr = case["expr"]
-
-        ok_clj, clj_val = clj_eval(expr)
-        if not ok_clj:
-            print(f"[FAIL] {name}: {clj_val}")
-            failed += 1
-            continue
-
         case_failed = False
+
         for engine in engines:
-            ok_clorus, clorus_val = clorus_eval(expr, clj_val, engine)
-            if not ok_clorus:
-                print(f"[FAIL] {name} [{engine}]: {clorus_val}")
+            if engine in engine_errors:
+                print(f"[FAIL] {name} [{engine}]: {engine_errors[engine]}")
                 case_failed = True
                 continue
 
-            if clorus_val != "true":
+            clorus_value = engine_values[engine][index]
+            if clorus_value != "true":
                 print(f"[FAIL] {name} [{engine}]")
                 print(f"  expr:   {expr}")
-                print(f"  expect: {clj_val}")
-                print(f"  clorus: (= expr expect) => {clorus_val}")
+                print(f"  expect: {clj_values[index]}")
+                print(f"  clorus: (= expr expect) => {clorus_value}")
                 case_failed = True
 
         if case_failed:

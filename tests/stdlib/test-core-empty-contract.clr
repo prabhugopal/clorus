@@ -7,16 +7,22 @@
 
 (defn -main [& _args]
   (do
-    ;; `empty` preserves the supported input kind, including strings.
+    ;; `empty` preserves persistent collection kind. Clojure strings are
+    ;; countable and seqable but are not persistent collections, so `empty`
+    ;; returns nil for them.
     (assert-eq "empty vector" (empty [1 2]) [])
     (assert-eq "empty list" (empty '(1 2)) '())
     (assert-eq "empty map" (empty {:a 1}) {})
     (assert-eq "empty set" (empty #{1 2}) #{})
-    (assert-eq "empty string" (empty "clorus") "")
+    (assert-eq "empty string" (empty "clorus") nil)
     (assert-eq "empty nil" (empty nil) nil)
+    (assert-eq "empty number" (empty 42) nil)
 
     ;; `not-empty` preserves the original value and returns nil only when it
-    ;; has no elements. This also guards its existing string-via-count path.
+    ;; has no elements, including countable strings.
+    (assert-eq "empty? vector" (empty? [1]) false)
+    (assert-eq "empty? empty string" (empty? "") true)
+    (assert-eq "empty? nil" (empty? nil) true)
     (assert-eq "not-empty vector" (not-empty [1]) [1])
     (assert-eq "not-empty list" (not-empty '(1)) '(1))
     (assert-eq "not-empty map" (not-empty {:a 1}) {:a 1})
@@ -25,4 +31,18 @@
     (assert-eq "not-empty empty vector" (not-empty []) nil)
     (assert-eq "not-empty empty string" (not-empty "") nil)
     (assert-eq "not-empty nil" (not-empty nil) nil)
+    (assert-eq "empty? unsupported error"
+               (try
+                 (do
+                   (empty? 42)
+                   false)
+                 (catch e (string? e)))
+               true)
+    (assert-eq "not-empty unsupported error"
+               (try
+                 (do
+                   (not-empty 42)
+                   false)
+                 (catch e (string? e)))
+               true)
     (println "core empty/not-empty contract passed")))
