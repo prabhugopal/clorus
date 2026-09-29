@@ -20,6 +20,16 @@ Namespace-to-file mapping for `clorus.*` modules is currently:
 
 Notes:
 
-- REPL and CLI startup load stdlib from the namespaced paths above.
-- A `transducers.clr.disabled` file previously sat here, claiming to be a fuller transducer implementation than `clorus/transducers.clr` (`remove`/`drop`/`take-while`/`cat`/`mapcat`/`dedupe`/`partition-by` etc.) blocked only by a multi-arity-closure-returning-a-closure codegen bug. That bug is fixed (verified directly: multi-arity closures dispatch correctly by arg count now), but re-testing the file against current code showed it's independently broken in ways unrelated to that bug -- most of its transducers (`map`/`filter`/`remove`/`drop`/`cat`/`mapcat`/`dedupe`/`partition-by`) returned empty output, and `take-while` produced a doubly-wrapped `reduced` value instead of a real result. It was removed rather than kept as a stale "just re-enable this" pointer.
-- That gap is now closed: `clorus/transducers.clr` has real, from-scratch implementations of `remove`/`drop`/`take-while`/`drop-while`/`cat`/`mapcat`/`partition-by`, each following the same dual-arity pattern as `map`/`filter`/`take` (a 1-arity transducer-producing form plus a 2-arity eager-collection form). `dedupe` is deliberately *not* among them: it's already a fixed-arity-1 runtime builtin (`clorus_dedupe` in `crates/clorus-codegen/src/codegen/calls.rs`) that takes precedence over any same-named stdlib `defn`, so it stays eager-only -- a transducer-producing `(dedupe)` form would need that builtin's call dispatch taught multi-arity first, which is out of scope here. See `tests/stdlib/test-transducers-completion-gap.clr` for coverage of both the eager and composed-transducer forms of each.
+- `clorus.core` is the canonical home for public collection transforms and
+  reduced-value helpers. In particular, `map`, `filter`, `take`, `drop`,
+  `remove`, `mapcat`, `partition-by`, `take-while`, and `drop-while` are
+  defined there exactly once.
+- `clorus.transducers` supplements core with `cat`, `completing`, `transduce`,
+  and `into`; it must not redefine public core APIs. This keeps semantics
+  independent of stdlib load order.
+- REPL, `run`, and `build` load `core.clr` before `transducers.clr`. Source
+  stdlib definitions must therefore only depend on definitions that occur
+  earlier in that order; use the normal public API rather than a compiler-only
+  shortcut.
+- The public-surface inventory and the process for adding a core function are
+  maintained in [`docs/design/STDLIB_SURFACE_AUDIT.md`](../docs/design/STDLIB_SURFACE_AUDIT.md).
