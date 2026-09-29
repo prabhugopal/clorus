@@ -84,6 +84,7 @@ fn metadata_type_name(val: *mut Value) -> &'static str {
             ValueTag::Var => "var",
             ValueTag::Exception => "exception",
             ValueTag::Socket => "socket",
+            ValueTag::LazySeq => "lazy-seq",
         }
     }
 }
@@ -250,6 +251,7 @@ pub enum ValueTag {
     OpaquePointer = 18,  // FFI opaque pointer (window, etc.)
     Exception = 19,      // Language-level exception payload wrapper
     Socket = 20,         // TCP listener or stream handle (see crate::net)
+    LazySeq = 21,        // Cached zero-arity thunk (see crate::lazy_seq)
 }
 
 /// Header for all heap-allocated values
@@ -505,6 +507,14 @@ impl Value {
     /// Get the multi-arity function data (unsafe - caller must ensure tag is MultiArityFunction)
     pub unsafe fn as_multi_arity_function(&self) -> *mut crate::function::MultiArityFunctionData {
         self.data.ptr as *mut crate::function::MultiArityFunctionData
+    }
+
+    pub(crate) fn from_lazy_seq(cell: *mut crate::lazy_seq::LazySeqCell) -> *mut Self {
+        Self::from_ptr(ValueTag::LazySeq, cell as *mut u8)
+    }
+
+    pub(crate) unsafe fn as_lazy_seq(&self) -> *mut crate::lazy_seq::LazySeqCell {
+        self.data.ptr as *mut crate::lazy_seq::LazySeqCell
     }
 
     /// Create a var value from Var pointer
@@ -1300,6 +1310,11 @@ unsafe fn deallocate_value(val: *mut Value) {
             }
             drop(Box::from_raw(val));
         }
+        ValueTag::LazySeq => {
+            let cell = (*val).as_lazy_seq();
+            if !cell.is_null() { drop(Box::from_raw(cell)); }
+            drop(Box::from_raw(val));
+        }
     }
 }
 
@@ -1680,7 +1695,7 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
 
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer | ValueTag::Exception | ValueTag::Socket =>
+            ValueTag::OpaquePointer | ValueTag::Exception | ValueTag::Socket | ValueTag::LazySeq =>
                 (*left).as_ptr() == (*right).as_ptr(),
         }
     }

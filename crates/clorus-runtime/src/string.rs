@@ -1267,6 +1267,7 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
                 crate::net::SocketHandle::Stream(None) => "#<tcp-stream: closed>".to_string(),
             }
         }
+        ValueTag::LazySeq => "#<lazy-seq>".to_string(),
     }
 }
 

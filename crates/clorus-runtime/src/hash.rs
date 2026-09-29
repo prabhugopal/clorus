@@ -99,7 +99,7 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
             }
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer | ValueTag::Socket => {
+            ValueTag::OpaquePointer | ValueTag::Socket | ValueTag::LazySeq => {
                 (*val).as_ptr() as u64
             }
             ValueTag::Exception => {
