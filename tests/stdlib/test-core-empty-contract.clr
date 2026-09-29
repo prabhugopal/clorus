@@ -1,0 +1,28 @@
+(ns tests.stdlib.test-core-empty-contract)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; `empty` preserves the supported input kind, including strings.
+    (assert-eq "empty vector" (empty [1 2]) [])
+    (assert-eq "empty list" (empty '(1 2)) '())
+    (assert-eq "empty map" (empty {:a 1}) {})
+    (assert-eq "empty set" (empty #{1 2}) #{})
+    (assert-eq "empty string" (empty "clorus") "")
+    (assert-eq "empty nil" (empty nil) nil)
+
+    ;; `not-empty` preserves the original value and returns nil only when it
+    ;; has no elements. This also guards its existing string-via-count path.
+    (assert-eq "not-empty vector" (not-empty [1]) [1])
+    (assert-eq "not-empty list" (not-empty '(1)) '(1))
+    (assert-eq "not-empty map" (not-empty {:a 1}) {:a 1})
+    (assert-eq "not-empty set" (not-empty #{1}) #{1})
+    (assert-eq "not-empty string" (not-empty "clorus") "clorus")
+    (assert-eq "not-empty empty vector" (not-empty []) nil)
+    (assert-eq "not-empty empty string" (not-empty "") nil)
+    (assert-eq "not-empty nil" (not-empty nil) nil)
+    (println "core empty/not-empty contract passed")))

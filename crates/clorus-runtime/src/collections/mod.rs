@@ -437,12 +437,13 @@ pub extern "C" fn clorus_count(coll: *mut Value) -> i64 {
 /// (empty {:a 1}) => {}
 /// (empty #{1 2}) => #{}
 /// (empty '(1 2)) => ()
+/// (empty "text") => ""
 /// (empty nil) => nil
 ///
-/// Matches Clojure: non-collection values (numbers, strings, keywords,
-/// etc.) have no defined "empty" and return nil here, consistent with
-/// this runtime's established lenient-fallback convention elsewhere
-/// (rather than throwing, which real Clojure does for those cases).
+/// Strings are counted and treated as emptyable just as they are by
+/// Clojure. Values without an empty representation still use the runtime's
+/// established lenient fallback and return nil; public exception fidelity
+/// for those invalid inputs is tracked at the core-library layer.
 #[no_mangle]
 pub extern "C" fn clorus_empty(coll: *mut Value) -> *mut Value {
     if coll.is_null() {
@@ -455,6 +456,7 @@ pub extern "C" fn clorus_empty(coll: *mut Value) -> *mut Value {
             ValueTag::List => crate::list::clorus_list_empty(),
             ValueTag::HashMap => crate::map::clorus_map_empty(),
             ValueTag::HashSet => crate::set::clorus_set_empty(),
+            ValueTag::String => Value::string(""),
             ValueTag::Nil => Value::nil(),
             _ => Value::nil(),
         }
@@ -741,6 +743,26 @@ mod tests {
             crate::value::clorus_release(vec);
             crate::value::clorus_release(vec1);
             crate::value::clorus_release(vec2);
+        }
+    }
+
+    #[test]
+    fn test_empty_preserves_supported_collection_kind() {
+        unsafe {
+            let string = Value::string("clorus");
+            let empty_string = clorus_empty(string);
+            assert_eq!((*empty_string).header().tag(), ValueTag::String);
+            assert_eq!((*empty_string).as_string(), "");
+
+            let vector = crate::vector::clorus_vector_empty();
+            let empty_vector = clorus_empty(vector);
+            assert_eq!((*empty_vector).header().tag(), ValueTag::Vector);
+            assert_eq!(clorus_count(empty_vector), 0);
+
+            crate::value::clorus_release(string);
+            crate::value::clorus_release(empty_string);
+            crate::value::clorus_release(vector);
+            crate::value::clorus_release(empty_vector);
         }
     }
 
