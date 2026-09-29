@@ -79,6 +79,42 @@ impl<'ctx> CodeGen<'ctx> {
         func: &str,
         args: &[Expr],
     ) -> Result<PointerValue<'ctx>, String> {
+        if func == "lazy-seq" {
+            if args.is_empty() {
+                return Err("lazy-seq requires at least one body expression".to_string());
+            }
+
+            // This is a special form, not a source-level function: compiling
+            // the body as a zero-arity closure is what preserves laziness and
+            // permits lexical captures. The native cell owns memoization,
+            // lifecycle, and force synchronization.
+            let body = if args.len() == 1 {
+                args[0].clone()
+            } else {
+                Expr::Do {
+                    exprs: args.to_vec(),
+                }
+            };
+            let thunk = self.compile_expr(&Expr::Fn {
+                params: Vec::new(),
+                rest_param: None,
+                body: Box::new(body),
+            })?;
+            let constructor = self
+                .module
+                .get_function("clorus_lazy_seq_new")
+                .ok_or("clorus_lazy_seq_new not declared")?;
+            let result = self
+                .builder
+                .build_call(constructor, &[thunk.into()], "lazy_seq_new")
+                .unwrap();
+            return Ok(result
+                .try_as_basic_value()
+                .left()
+                .unwrap()
+                .into_pointer_value());
+        }
+
         // Numeric helpers present in clorus.core and frequently used qualified:
         // (inc x), (dec x), (zero? x)
         match func {

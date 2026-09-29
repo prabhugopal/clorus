@@ -83,9 +83,14 @@
 ;; the public contract belongs here instead. Nil, strings, and persistent
 ;; collections are countable; other values are an error.
 (defn empty? [coll]
-  (if (or (nil? coll) (string? coll) (coll? coll))
-    (= (count coll) 0)
-    (throw "empty? expects a countable collection")))
+  (cond
+    (nil? coll) true
+    ;; `seq` is the one-element forcing boundary for native lazy sequences.
+    ;; Count remains deliberately non-forcing, so using it here would label
+    ;; every unresolved lazy sequence as empty.
+    (seq? coll) (nil? (seq coll))
+    (or (string? coll) (coll? coll)) (= (count coll) 0)
+    true (throw "empty? expects a countable collection")))
 
 ;; take - Take first n elements
 ;; Example: (take 3 [1 2 3 4 5]) ; => [1 2 3]

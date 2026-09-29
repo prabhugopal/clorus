@@ -1433,15 +1433,15 @@ pub extern "C" fn clorus_is_bool(val: *mut Value) -> bool {
     }
 }
 
-/// Check if value is a seq (list only - not vector)
-/// In Clojure, seq? returns true only for lists/seqs, not vectors
+/// Check if a value is a sequence (a realized list or a native lazy sequence).
+/// In Clojure, `seq?` remains false for vectors and other collections.
 #[no_mangle]
 pub extern "C" fn clorus_is_seq(val: *mut Value) -> bool {
     if val.is_null() {
         return false;
     }
     unsafe {
-        (*val).header().tag() == ValueTag::List
+        matches!((*val).header().tag(), ValueTag::List | ValueTag::LazySeq)
     }
 }
 

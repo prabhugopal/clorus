@@ -3,15 +3,17 @@
 //! This is intentionally not public language surface yet.  The `LazySeq`
 //! `ValueTag` wrapper is added only after this cell's lifecycle is tested.
 
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
+use std::thread::{self, ThreadId};
 
+use crate::collections::clorus_seq;
 use crate::function::clorus_function_call;
-use crate::value::{clorus_is_exception, clorus_release, clorus_retain, Value};
+use crate::value::{clorus_is_exception, clorus_release, clorus_retain, Value, ValueTag};
 
 #[derive(Debug)]
 enum State {
     Unforced,
-    Forcing,
+    Forcing(ThreadId),
     Realized(*mut Value),
 }
 
@@ -22,6 +24,7 @@ enum State {
 pub(crate) struct LazySeqCell {
     thunk: Mutex<*mut Value>,
     state: Mutex<State>,
+    realized: Condvar,
 }
 
 impl LazySeqCell {
@@ -32,40 +35,38 @@ impl LazySeqCell {
         Self {
             thunk: Mutex::new(thunk),
             state: Mutex::new(State::Unforced),
+            realized: Condvar::new(),
         }
     }
 
-    /// Force once. Recursive forcing is represented as a language exception
-    /// by the eventual public wrapper; this internal layer reports it without
-    /// blocking so the wrapper can choose that representation.
+    /// Force once, memoizing a successful result.
+    ///
+    /// A second thread waits for the thread currently evaluating the thunk and
+    /// then observes its cached result (or retries after an exception). A thunk
+    /// which recursively forces its own cell is rejected rather than deadlocking.
+    /// The public wrapper turns that rejection into a Clorus exception.
     pub(crate) unsafe fn force(&self) -> Result<*mut Value, ()> {
-        {
-            let state = self.state.lock().expect("lazy sequence state poisoned");
+        let current_thread = thread::current().id();
+        let mut state = self.state.lock().expect("lazy sequence state poisoned");
+        loop {
             match *state {
+                State::Unforced => {
+                    *state = State::Forcing(current_thread);
+                    break;
+                }
                 State::Realized(value) => {
                     if !value.is_null() {
                         clorus_retain(value);
                     }
                     return Ok(value);
                 }
-                State::Forcing => return Err(()),
-                State::Unforced => {}
-            }
-        }
-
-        {
-            let mut state = self.state.lock().expect("lazy sequence state poisoned");
-            match *state {
-                State::Unforced => *state = State::Forcing,
-                State::Realized(value) => {
-                    if !value.is_null() {
-                        clorus_retain(value);
-                    }
-                    return Ok(value);
+                State::Forcing(owner) if owner == current_thread => return Err(()),
+                State::Forcing(_) => {
+                    state = self.realized.wait(state).expect("lazy sequence state poisoned");
                 }
-                State::Forcing => return Err(()),
             }
         }
+        drop(state);
 
         let thunk = *self.thunk.lock().expect("lazy sequence thunk poisoned");
         let result = clorus_function_call(thunk, std::ptr::null(), 0);
@@ -73,13 +74,37 @@ impl LazySeqCell {
         let mut state = self.state.lock().expect("lazy sequence state poisoned");
         if clorus_is_exception(result) {
             *state = State::Unforced;
+            self.realized.notify_all();
             return Ok(result);
         }
+
+        // A lazy-seq thunk has the same contract as `seq`: it returns nil or
+        // something sequenceable. Normalize finite collections here, once,
+        // so `(seq lazy-value)` always yields the canonical list sequence.
+        let sequenceable = result.is_null() || matches!(
+            (*result).tag(),
+            ValueTag::Nil | ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet | ValueTag::LazySeq
+        );
+        if !sequenceable {
+            let message = Value::string("lazy-seq body must return a sequence or nil");
+            let exception = Value::exception(message);
+            clorus_release(message);
+            clorus_release(result);
+            *state = State::Unforced;
+            self.realized.notify_all();
+            return Ok(exception);
+        }
+        let sequence = clorus_seq(result);
+        if !result.is_null() {
+            clorus_release(result);
+        }
+        let result = sequence;
 
         if !result.is_null() {
             clorus_retain(result);
         }
         *state = State::Realized(result);
+        self.realized.notify_all();
 
         let mut thunk_slot = self.thunk.lock().expect("lazy sequence thunk poisoned");
         if !(*thunk_slot).is_null() {
@@ -145,7 +170,7 @@ pub extern "C" fn clorus_is_lazy_seq_i32(value: *mut Value) -> i32 {
 mod tests {
     use super::{clorus_is_lazy_seq_i32, clorus_lazy_seq_force, clorus_lazy_seq_new, LazySeqCell};
     use crate::collections::{clorus_first, clorus_rest, clorus_seq};
-    use crate::value::clorus_release;
+    use crate::value::{clorus_is_seq, clorus_release};
 
     #[test]
     fn nil_result_is_cached_and_released_with_the_cell() {
@@ -167,6 +192,7 @@ mod tests {
         unsafe {
             let lazy = clorus_lazy_seq_new(std::ptr::null_mut());
             assert_eq!(clorus_is_lazy_seq_i32(lazy), 1);
+            assert!(clorus_is_seq(lazy));
             let first = clorus_lazy_seq_force(lazy);
             let second = clorus_lazy_seq_force(lazy);
             clorus_release(first);

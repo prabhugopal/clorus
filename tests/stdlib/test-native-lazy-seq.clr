@@ -1,0 +1,51 @@
+(ns tests.stdlib.test-native-lazy-seq)
+
+(defn assert-eq [label expected actual]
+  (when (not (= expected actual))
+    (throw (str label " expected=" expected " actual=" actual))))
+
+;; Construction must not run the body. `first` is the forcing boundary and
+;; repeated traversal must use the cached result rather than invoke it again.
+(let [calls (atom 0)
+      xs (lazy-seq
+           (swap! calls inc)
+           (list 10 20))]
+  (assert-eq "lazy-seq is initially unforced" 0 @calls)
+  (assert-eq "lazy-seq satisfies seq?" true (seq? xs))
+  (assert-eq "first forces lazy-seq" 10 (first xs))
+  (assert-eq "lazy-seq force count" 1 @calls)
+  (assert-eq "first uses cached lazy-seq" 10 (first xs))
+  (assert-eq "lazy-seq is forced once" 1 @calls)
+  (assert-eq "rest traverses cached lazy-seq" 20 (first (rest xs))))
+
+;; A sequenceable collection realizes to the canonical list representation,
+;; exactly as `seq` does for a non-lazy collection.
+(let [xs (lazy-seq [30 40])]
+  (assert-eq "lazy-seq seq normalizes vectors" true (list? (seq xs)))
+  (assert-eq "lazy-seq normalized first" 30 (first xs)))
+
+;; Core transforms use `empty?` internally. Its sequence boundary must force
+;; only what traversal requires instead of treating an unresolved value as
+;; count-zero.
+(let [xs (lazy-seq (list 1 2 3))]
+  (assert-eq "lazy-seq is not empty" false (empty? xs))
+  (assert-eq "take traverses lazy-seq" [1 2] (take 2 xs))
+  (assert-eq "drop traverses lazy-seq" 3 (first (drop 2 xs))))
+
+(assert-eq "lazy-seq rejects non-sequence bodies"
+           true
+           (try
+             (do
+               (first (lazy-seq 42))
+               false)
+             (catch e (string? e))))
+
+;; `seq` is also a forcing boundary and an empty body result becomes nil.
+(let [calls (atom 0)
+      xs (lazy-seq
+           (swap! calls inc)
+           nil)]
+  (assert-eq "seq forces lazy-seq" nil (seq xs))
+  (assert-eq "seq realizes once" 1 @calls))
+
+(println "native lazy-seq passed")

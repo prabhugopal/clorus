@@ -378,6 +378,7 @@ impl<'ctx> CodeGen<'ctx> {
             "__clorus_is_fn",
             "__clorus_regex_valid",
             "__clorus_reduced",
+            "lazy-seq",
             "seq",
             // Collection helpers
             "merge",
@@ -4403,6 +4404,12 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             Expr::Call { func, args } => {
+                // `lazy-seq` delays its body, so it has to be handled before
+                // the ordinary call path would compile every argument.
+                if func == "lazy-seq" {
+                    return self.compile_core_call(func, args);
+                }
+
                 if func == "methods" {
                     if args.len() != 1 {
                         return Err(
