@@ -191,6 +191,38 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
     }
 }
 
+/// Return a real sequence for a non-empty finite collection.
+///
+/// Clorus represents the public sequence contract with `ValueTag::List`:
+/// `seq?` recognizes it and the existing first/rest/count operations already
+/// handle it. Vectors, maps, and sets are materialized into that representation
+/// at this boundary; empty inputs return nil, as in Clojure. Strings are
+/// intentionally excluded until Clorus has a dedicated character value type.
+#[no_mangle]
+pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
+    if coll.is_null() || clorus_count(coll) == 0 {
+        return Value::nil();
+    }
+
+    unsafe {
+        match (*coll).header().tag() {
+            ValueTag::List => {
+                (*coll).header().retain();
+                coll
+            }
+            ValueTag::Vector => crate::list::clorus_vector_to_list(coll),
+            ValueTag::HashMap | ValueTag::HashSet => {
+                let seq_vec = coll_as_seqable_vector(coll)
+                    .expect("map and set are sequenceable by construction");
+                let result = crate::list::clorus_vector_to_list(seq_vec);
+                crate::value::clorus_release(seq_vec);
+                result
+            }
+            _ => Value::nil(),
+        }
+    }
+}
+
 // Helper function for nth on lists (add to list.rs if not present)
 #[no_mangle]
 pub extern "C" fn clorus_list_nth(list_val: *mut Value, index: i64) -> *mut Value {
@@ -681,6 +713,31 @@ mod tests {
             let vec2 = crate::vector::clorus_vector_conj(vec1, val2);
             assert_eq!(clorus_count(vec2), 2);
 
+            crate::value::clorus_release(vec);
+            crate::value::clorus_release(vec1);
+            crate::value::clorus_release(vec2);
+        }
+    }
+
+    #[test]
+    fn test_seq_materializes_non_empty_vector_as_list() {
+        unsafe {
+            let vec = crate::vector::clorus_vector_empty();
+            let vec1 = crate::vector::clorus_vector_conj(vec, Value::double(1.0));
+            let vec2 = crate::vector::clorus_vector_conj(vec1, Value::double(2.0));
+
+            let seq = clorus_seq(vec2);
+            assert_eq!((*seq).header().tag(), ValueTag::List);
+            assert_eq!(clorus_count(seq), 2);
+
+            let first = clorus_first(seq);
+            assert_eq!((*first).as_double(), 1.0);
+            crate::value::clorus_release(first);
+            crate::value::clorus_release(seq);
+
+            let empty_seq = clorus_seq(vec);
+            assert_eq!((*empty_seq).header().tag(), ValueTag::Nil);
+            crate::value::clorus_release(empty_seq);
             crate::value::clorus_release(vec);
             crate::value::clorus_release(vec1);
             crate::value::clorus_release(vec2);

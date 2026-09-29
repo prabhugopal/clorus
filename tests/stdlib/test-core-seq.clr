@@ -1,0 +1,26 @@
+(ns tests.stdlib.test-core-seq)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "nil stays nil" (seq nil) nil)
+    (assert-eq "empty vector becomes nil" (seq []) nil)
+    (assert-eq "vector is not itself a seq" (seq? [1 2]) false)
+    (let [s (seq [1 2 3])]
+      (assert-eq "vector becomes a seq" (seq? s) true)
+      (assert-eq "seq is a list representation" (list? s) true)
+      (assert-eq "vector sequence preserves order" s '(1 2 3))
+      (assert-eq "seq first" (first s) 1)
+      (assert-eq "seq rest remains a seq" (seq? (rest s)) true)
+      (assert-eq "seq rest value" (rest s) '(2 3)))
+    (let [s (seq {:a nil})]
+      (assert-eq "map becomes a seq" (seq? s) true)
+      (assert-eq "map entry is a vector" (first s) [:a nil]))
+    (let [s (seq #{1 2 3})]
+      (assert-eq "set becomes a seq" (seq? s) true)
+      (assert-eq "set seq count" (count s) 3))
+    "PASS"))

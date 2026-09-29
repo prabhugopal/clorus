@@ -201,6 +201,7 @@ impl<'ctx> CodeGen<'ctx> {
             ("__clorus_reduced", "clorus_reduced", 1),
             ("first", "clorus_first", 1),
             ("rest", "clorus_rest", 1),
+            ("seq", "clorus_seq", 1),
             ("last", "clorus_last", 1),
             ("empty", "clorus_empty", 1),
             // `keys` and `vals` deliberately are *not* runtime fast paths.

@@ -351,6 +351,7 @@ run_repl_regressions() {
 (vec '(1 2 3))
 (some (fn [x] (if (= x 2) :found nil)) [1 2 3])
 (find {:a nil} :a)
+(seq [1 2 3])
 (map-indexed (fn [i x] (+ i x)) [10 10 10])
 (keep-indexed (fn [i x] (if (even? i) x nil)) [10 20 30 40])
 (into [] (map inc [1 2 3]))
@@ -378,9 +379,10 @@ EOF
             && grep -q "\[1 2\]" "$repl_output_file" \
             && grep -q ":found" "$repl_output_file" \
             && grep -q ":a" "$repl_output_file" \
+            && grep -q "(1 2 3)" "$repl_output_file" \
             && grep -q "\[10 11 12\]" "$repl_output_file" \
             && grep -q "\[10 30\]" "$repl_output_file" \
-            && ! grep -qE "Undefined function: (map|set|vec|some|find|map-indexed|keep-indexed|into|transduce)" "$repl_output_file"; then
+            && ! grep -qE "Undefined function: (map|set|vec|some|find|seq|map-indexed|keep-indexed|into|transduce)" "$repl_output_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED+=1))
         else

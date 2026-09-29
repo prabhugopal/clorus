@@ -379,6 +379,7 @@ impl<'ctx> CodeGen<'ctx> {
             "__clorus_is_fn",
             "__clorus_regex_valid",
             "__clorus_reduced",
+            "seq",
             // Collection helpers
             "merge",
             "get-in",

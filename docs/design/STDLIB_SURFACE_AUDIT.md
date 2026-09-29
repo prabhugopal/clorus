@@ -72,7 +72,9 @@ definition must therefore appear after public helpers it invokes. For example,
 Audit these as public APIs before adding them; implementation follows only when
 the behavior and owner are agreed:
 
-- `seq` / `vec` conversion semantics
+- Full lazy-sequence semantics (the finite `seq` and eager `vec` contracts
+  are implemented; strings await character values and `clorus.lazy` is not
+  yet the integrated core lazy runtime)
 - `some`, `find`, `keep-indexed`, and `map-indexed`
 - Complete multi-arity collection contracts (`concat`, `interleave`,
   `interpose`, `dedupe`, and related sequence functions)
