@@ -19,6 +19,14 @@ Every public `clorus.core` function must have all of the following:
 Do not add compiler fast paths merely because a public name is missing. The
 runtime remains a small kernel; source stdlib owns policy and composition.
 
+The tracked beta scope lives in
+[`tests/parity/core_api_manifest.json`](../../tests/parity/core_api_manifest.json).
+Validate and summarize it with:
+
+```bash
+python3 tests/parity/validate_core_api_manifest.py
+```
+
 ## Current ownership
 
 | Area | Canonical owner | Notes |
