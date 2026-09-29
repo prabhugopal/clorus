@@ -256,6 +256,15 @@
 (defn not-every? [pred coll]
   (not (every? pred coll)))
 
+;; some - Return the first truthy value produced by pred, or nil.
+;; `reduced` makes the short-circuit explicit and uses the same canonical
+;; control marker as transducers and reduce in both execution engines.
+(defn some [pred coll]
+  (reduce (fn [_ x]
+            (let [result (pred x)]
+              (if result (reduced result) nil)))
+          nil
+          coll))
 
 ;; comp - Function composition
 ;; Takes multiple functions and returns a new function that applies them

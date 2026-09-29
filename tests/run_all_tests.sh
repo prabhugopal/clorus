@@ -349,6 +349,7 @@ run_repl_regressions() {
 (drop 2 [10 20 30 40])
 (set [1 2 3 1])
 (vec '(1 2 3))
+(some (fn [x] (if (= x 2) :found nil)) [1 2 3])
 (into [] (map inc [1 2 3]))
 (transduce (take 2) conj [] [1 2 3])
 :q
@@ -372,7 +373,8 @@ EOF
             && grep -q "#{1 2 3}" "$repl_output_file" \
             && grep -q "\[2 3 4\]" "$repl_output_file" \
             && grep -q "\[1 2\]" "$repl_output_file" \
-            && ! grep -qE "Undefined function: (map|set|vec|into|transduce)" "$repl_output_file"; then
+            && grep -q ":found" "$repl_output_file" \
+            && ! grep -qE "Undefined function: (map|set|vec|some|into|transduce)" "$repl_output_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED+=1))
         else

@@ -1,0 +1,23 @@
+(ns tests.stdlib.test-core-some)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "returns predicate value, not a boolean"
+               (some (fn [x] (if (= x 3) :found nil)) [1 2 3 4])
+               :found)
+    (assert-eq "returns nil when no result is truthy" (some even? [1 3 5]) nil)
+    (assert-eq "zero is truthy" (some (fn [x] (if (= x 2) 0 nil)) [1 2 3]) 0)
+    (let [calls (atom 0)]
+      (assert-eq "stops at first truthy result"
+                 (some (fn [x]
+                         (do (swap! calls inc)
+                             (= x 2)))
+                       [1 2 3 4])
+                 true)
+      (assert-eq "does not evaluate past match" @calls 2))
+    "PASS"))

@@ -33,7 +33,7 @@
     {"name": "interpose", "owner": "native-kernel", "status": "partial", "coverage": "sequence tests", "gap": "audit full collection-kind semantics"},
     {"name": "dedupe", "owner": "native-kernel", "status": "partial", "coverage": "sequence tests", "gap": "eager behavior exists; transducer arity is not specified"},
     {"name": "seq", "owner": "sequence-runtime", "status": "planned", "coverage": "none", "gap": "requires the official seq/lazy realization representation"},
-    {"name": "some", "owner": "source-core", "status": "planned", "coverage": "none", "gap": "needs a Clojure-compatible truthiness and short-circuit contract"},
+    {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "find", "owner": "source-core", "status": "planned", "coverage": "none", "gap": "needs a map-entry representation contract"},
     {"name": "map-indexed", "owner": "source-core", "status": "planned", "coverage": "none", "gap": "needs eager and transducer arity contracts"},
     {"name": "keep-indexed", "owner": "source-core", "status": "planned", "coverage": "none", "gap": "needs eager and transducer arity contracts"}
