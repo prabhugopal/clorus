@@ -362,6 +362,39 @@ pub extern "C" fn clorus_vector_to_list(coll_val: *mut Value) -> *mut Value {
     }
 }
 
+/// Materialize a list as a vector.
+///
+/// This is an implementation primitive for code-generation paths such as
+/// syntax-quote that need a vector accumulator. Public `concat` deliberately
+/// returns a List sequence, so keeping this conversion explicit prevents that
+/// internal requirement from changing the language-level result type.
+#[no_mangle]
+pub extern "C" fn clorus_list_to_vector(list_val: *mut Value) -> *mut Value {
+    if list_val.is_null() {
+        return crate::vector::clorus_vector_empty();
+    }
+
+    unsafe {
+        if (*list_val).header().tag() != ValueTag::List {
+            return crate::vector::clorus_vector_empty();
+        }
+
+        let list_ptr = (*list_val).as_ptr() as *mut PersistentList;
+        let mut current = (*list_ptr).clone();
+        let mut result = crate::vector::clorus_vector_empty();
+
+        while !current.is_empty() {
+            let elem = current.first();
+            let next = crate::vector::clorus_vector_conj(result, elem);
+            crate::value::clorus_release(result);
+            result = next;
+            current = current.rest();
+        }
+
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

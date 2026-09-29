@@ -3,11 +3,16 @@ use crate::vector::PersistentVector;
 use crate::list::PersistentList;
 use crate::collections::{clorus_count, clorus_nth};
 
-/// Concatenate multiple collections into one vector
+/// Concatenate multiple finite collections into one sequence list.
+///
+/// The runtime materializes eagerly because Clorus does not yet have a lazy
+/// sequence runtime. Returning a List, rather than leaking the vector used
+/// while building it, preserves the public `seq?` contract of clojure.core/
+/// concat and keeps the representation boundary in one place.
 #[no_mangle]
 pub extern "C" fn clorus_concat(colls: *mut Value) -> *mut Value {
     if colls.is_null() {
-        return crate::vector::clorus_vector_empty();
+        return crate::list::clorus_list_empty();
     }
 
     unsafe {
@@ -15,7 +20,7 @@ pub extern "C" fn clorus_concat(colls: *mut Value) -> *mut Value {
 
         // colls should be a vector of collections
         if (*colls).header().tag() != ValueTag::Vector {
-            return crate::vector::clorus_vector_empty();
+            return crate::list::clorus_list_empty();
         }
 
         let vec_ptr = (*colls).as_ptr() as *mut PersistentVector;
@@ -70,7 +75,10 @@ pub extern "C" fn clorus_concat(colls: *mut Value) -> *mut Value {
             }
         }
 
-        Value::from_ptr(ValueTag::Vector, result as *mut u8)
+        let vector_result = Value::from_ptr(ValueTag::Vector, result as *mut u8);
+        let list_result = crate::list::clorus_vector_to_list(vector_result);
+        crate::value::clorus_release(vector_result);
+        list_result
     }
 }
 

@@ -1,0 +1,20 @@
+(ns tests.stdlib.test-core-concat-contract)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; Clorus materializes concat eagerly for now, but the public result is a
+    ;; sequence list, as callers of Clojure's concat expect.
+    (assert-eq "concat no args" (concat) '())
+    (assert-eq "concat no args seq" (seq? (concat)) true)
+    (assert-eq "concat one" (concat [1 2]) '(1 2))
+    (assert-eq "concat two" (concat [1 2] '(3 4)) '(1 2 3 4))
+    (assert-eq "concat many" (concat [1] [2] [3]) '(1 2 3))
+    (assert-eq "concat nil left" (concat nil [1]) '(1))
+    (assert-eq "concat nil right" (concat [1] nil) '(1))
+    (assert-eq "concat map entries" (count (concat {:a 1} #{2 3})) 3)
+    (println "core concat contract passed")))

@@ -2856,14 +2856,15 @@ impl<'ctx> CodeGen<'ctx> {
 
             "concat" => {
                 if args.is_empty() {
-                    // (concat) with no args returns empty vector
-                    let vec_empty_fn = self
+                    // (concat) returns an empty sequence, represented by a
+                    // real List in Clorus's finite sequence runtime.
+                    let list_empty_fn = self
                         .module
-                        .get_function("clorus_vector_empty")
-                        .ok_or("clorus_vector_empty not declared")?;
+                        .get_function("clorus_list_empty")
+                        .ok_or("clorus_list_empty not declared")?;
                     let result = self
                         .builder
-                        .build_call(vec_empty_fn, &[], "empty_vec")
+                        .build_call(list_empty_fn, &[], "empty_concat")
                         .unwrap();
                     return Ok(result
                         .try_as_basic_value()

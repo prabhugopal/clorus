@@ -639,8 +639,7 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     /// Helper: compile a sequence for syntax-quote, handling unquote-splicing.
-    /// Builds as a vector throughout regardless of `as_vector` (splicing via
-    /// clorus_concat only knows how to produce one), then converts to a real
+    /// Builds as a vector throughout regardless of `as_vector`, then converts to a real
     /// list at the end when `as_vector` is false -- `` `(1 ~@xs 4) `` must
     /// come out list-shaped (list? true, prints with parens) even though the
     /// splice machinery works in terms of vectors internally.
@@ -680,7 +679,9 @@ impl<'ctx> CodeGen<'ctx> {
                     // (1 2 3 4), not (1 [2 3] 4). clorus_concat flattens a
                     // vector-of-collections into one vector, so wrap the
                     // accumulator-so-far and the spliced collection as a
-                    // 2-element vector and concat that.
+                    // 2-element vector and concat that. Public concat returns a List
+                    // sequence, so convert it back to the private vector accumulator
+                    // representation before continuing.
                     let spliced_val = self.compile_expr(inner)?;
 
                     let pair = self
@@ -721,7 +722,23 @@ impl<'ctx> CodeGen<'ctx> {
                         .build_call(concat_fn, &[pair.into()], &format!("sq_seq_splice_{}", i))
                         .unwrap();
 
-                    vec_val = concat_call
+                    let concat_sequence = concat_call
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                    let list_to_vector_fn = self
+                        .module
+                        .get_function("clorus_list_to_vector")
+                        .ok_or("clorus_list_to_vector not declared")?;
+                    vec_val = self
+                        .builder
+                        .build_call(
+                            list_to_vector_fn,
+                            &[concat_sequence.into()],
+                            &format!("sq_seq_splice_to_vector_{}", i),
+                        )
+                        .unwrap()
                         .try_as_basic_value()
                         .left()
                         .unwrap()

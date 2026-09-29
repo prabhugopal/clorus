@@ -24,6 +24,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_no_arg_value_fn("clorus_list_empty");
         self.declare_value_fn("clorus_list_cons", 2);
         self.declare_value_fn("clorus_vector_to_list", 1);
+        self.declare_value_fn("clorus_list_to_vector", 1);
 
         // ===== Map Functions =====
         self.declare_no_arg_value_fn("clorus_map_empty");
