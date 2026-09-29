@@ -106,9 +106,44 @@ impl Drop for LazySeqCell {
     }
 }
 
+/// Construct a native lazy-sequence value from a zero-arity thunk. This is an
+/// internal runtime primitive; the language-level `lazy-seq` form will own its
+/// syntax and arity checks.
+#[no_mangle]
+pub extern "C" fn clorus_lazy_seq_new(thunk: *mut Value) -> *mut Value {
+    unsafe { Value::from_lazy_seq(Box::into_raw(Box::new(LazySeqCell::new(thunk)))) }
+}
+
+/// Force one lazy-sequence cell. Recursive realization is an ordinary Clorus
+/// exception, never a blocking wait or a poisoned cache entry.
+#[no_mangle]
+pub extern "C" fn clorus_lazy_seq_force(value: *mut Value) -> *mut Value {
+    unsafe {
+        if value.is_null() || (*value).tag() != crate::value::ValueTag::LazySeq {
+            return Value::nil();
+        }
+        match (*value).as_lazy_seq().as_ref().expect("lazy sequence cell missing").force() {
+            Ok(result) => result,
+            Err(()) => {
+                let message = Value::string("recursive lazy sequence realization");
+                let exception = Value::exception(message);
+                clorus_release(message);
+                exception
+            }
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn clorus_is_lazy_seq_i32(value: *mut Value) -> i32 {
+    unsafe {
+        (!value.is_null() && (*value).tag() == crate::value::ValueTag::LazySeq) as i32
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::LazySeqCell;
+    use super::{clorus_is_lazy_seq_i32, clorus_lazy_seq_force, clorus_lazy_seq_new, LazySeqCell};
     use crate::value::clorus_release;
 
     #[test]
@@ -123,6 +158,19 @@ mod tests {
             clorus_release(first);
             clorus_release(second);
             drop(cell);
+        }
+    }
+
+    #[test]
+    fn native_wrapper_forces_and_releases_cached_result() {
+        unsafe {
+            let lazy = clorus_lazy_seq_new(std::ptr::null_mut());
+            assert_eq!(clorus_is_lazy_seq_i32(lazy), 1);
+            let first = clorus_lazy_seq_force(lazy);
+            let second = clorus_lazy_seq_force(lazy);
+            clorus_release(first);
+            clorus_release(second);
+            clorus_release(lazy);
         }
     }
 }
