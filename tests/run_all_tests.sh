@@ -372,8 +372,8 @@ EOF
             && grep -q "(2 4 6 8)" "$repl_output_file" \
             && grep -q "(9 9 9)" "$repl_output_file" \
             && grep -q "(1 3 5)" "$repl_output_file" \
-            && grep -q "\[10 20 30\]" "$repl_output_file" \
-            && grep -q "\[30 40\]" "$repl_output_file" \
+            && grep -q "(10 20 30)" "$repl_output_file" \
+            && grep -q "(30 40)" "$repl_output_file" \
             && grep -q "#{1 2 3}" "$repl_output_file" \
             && grep -q "\[2 3 4\]" "$repl_output_file" \
             && grep -q "\[1 2\]" "$repl_output_file" \

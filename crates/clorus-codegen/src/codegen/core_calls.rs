@@ -3036,124 +3036,16 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "concat" => {
-                if args.is_empty() {
-                    // (concat) returns an empty sequence, represented by a
-                    // real List in Clorus's finite sequence runtime.
-                    let list_empty_fn = self
-                        .module
-                        .get_function("clorus_list_empty")
-                        .ok_or("clorus_list_empty not declared")?;
-                    let result = self
-                        .builder
-                        .build_call(list_empty_fn, &[], "empty_concat")
-                        .unwrap();
-                    return Ok(result
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value());
-                }
-
-                // (concat coll1 coll2 ...) - concatenate multiple collections
-                // For now, support 2 collections
-                if args.len() == 2 {
-                    let coll1 = self.compile_expr(&args[0])?;
-                    let coll2 = self.compile_expr(&args[1])?;
-
-                    // Build a vector containing the two collections
-                    let vec_empty_fn = self
-                        .module
-                        .get_function("clorus_vector_empty")
-                        .ok_or("clorus_vector_empty not declared")?;
-                    let vec_conj_fn = self
-                        .module
-                        .get_function("clorus_vector_conj")
-                        .ok_or("clorus_vector_conj not declared")?;
-
-                    let vec = self
-                        .builder
-                        .build_call(vec_empty_fn, &[], "concat_vec")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
-                    let vec = self
-                        .builder
-                        .build_call(vec_conj_fn, &[vec.into(), coll1.into()], "vec1")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
-                    let vec = self
-                        .builder
-                        .build_call(vec_conj_fn, &[vec.into(), coll2.into()], "vec2")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
-
-                    let concat_fn = self
-                        .module
-                        .get_function("clorus_concat")
-                        .ok_or("clorus_concat not declared")?;
-                    let result = self
-                        .builder
-                        .build_call(concat_fn, &[vec.into()], "concat_call")
-                        .unwrap();
-                    Ok(result
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value())
-                } else {
-                    // For more than 2 args, build a vector of all collections
-                    let vec_empty_fn = self
-                        .module
-                        .get_function("clorus_vector_empty")
-                        .ok_or("clorus_vector_empty not declared")?;
-                    let vec_conj_fn = self
-                        .module
-                        .get_function("clorus_vector_conj")
-                        .ok_or("clorus_vector_conj not declared")?;
-
-                    let mut vec = self
-                        .builder
-                        .build_call(vec_empty_fn, &[], "concat_vec")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
-
-                    for arg in args {
-                        let coll = self.compile_expr(arg)?;
-                        vec = self
-                            .builder
-                            .build_call(vec_conj_fn, &[vec.into(), coll.into()], "vec_conj")
-                            .unwrap()
-                            .try_as_basic_value()
-                            .left()
-                            .unwrap()
-                            .into_pointer_value();
-                    }
-
-                    let concat_fn = self
-                        .module
-                        .get_function("clorus_concat")
-                        .ok_or("clorus_concat not declared")?;
-                    let result = self
-                        .builder
-                        .build_call(concat_fn, &[vec.into()], "concat_call")
-                        .unwrap();
-                    Ok(result
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value())
-                }
+                // Inputs are evaluated eagerly, as ordinary arguments, but
+                // their contents remain lazy. Lower through the stdlib state
+                // machine rather than the old count/nth runtime helper so
+                // concat shares the seq/first/rest contract with map, filter,
+                // take, and drop.
+                let rewritten = Expr::Call {
+                    func: "concat-lazy".to_string(),
+                    args: vec![Expr::Vector(args.to_vec())],
+                };
+                self.compile_expr(&rewritten)
             }
 
             "interleave" => {

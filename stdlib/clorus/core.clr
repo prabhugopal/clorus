@@ -22,6 +22,25 @@
     (- x (mod x 1))
     (+ x (mod (- x) 1))))
 
+;; concat-step emits exactly one element from the current input collection.
+;; When that collection is exhausted it advances to the next supplied
+;; collection, without realizing either the current tail or later inputs.
+(defn concat-step [current remaining]
+  (lazy-seq
+    (let [current-seq (seq current)]
+      (if current-seq
+        (__clorus_seq_cons (first current-seq)
+                           (concat-step (rest current-seq) remaining))
+        (let [remaining-seq (seq remaining)]
+          (if remaining-seq
+            (concat-step (first remaining-seq) (rest remaining-seq))
+            nil))))))
+
+;; Internal target for the compiler's public `concat` lowering. Keeping the
+;; state machine in Clorus makes its sequencing, errors, and lazy tails follow
+;; the same `seq`/`first`/`rest` protocol as every other core producer.
+(defn concat-lazy [colls]
+  (concat-step (first colls) (rest colls)))
 
 ;; partial - Partial function application
 ;; Takes a function and some arguments, returns a new function that takes
@@ -92,8 +111,15 @@
     (or (string? coll) (coll? coll)) (= (count coll) 0)
     true (throw "empty? expects a countable collection")))
 
-;; take - Take first n elements
-;; Example: (take 3 [1 2 3 4 5]) ; => [1 2 3]
+(defn take-lazy [n coll]
+  (lazy-seq
+    (if (or (<= n 0) (empty? coll))
+      nil
+      (__clorus_seq_cons (first coll)
+                         (take-lazy (dec n) (rest coll))))))
+
+;; take - Take first n elements lazily.
+;; Example: (take 3 [1 2 3 4 5]) ; => (1 2 3)
 (defn take
   ([n]
    (fn [rf]
@@ -106,26 +132,18 @@
               (if (= c n) (ensure-reduced (rf result input)) (rf result input))
               result)))))))
   ([n coll]
-  (if (vector? coll)
-    (let [coll-count (count coll)
-          limit (if (< n coll-count) n coll-count)]
-      (loop [i 0
-             acc []]
-        (if (>= i limit)
-          acc
-          (recur (+ i 1)
-                 (__clorus_conj acc (nth coll i))))))
-    (loop [remaining coll
-           n n
-           acc []]
-      (if (or (<= n 0) (empty? remaining))
-        acc
-        (recur (rest remaining)
-               (dec n)
-               (__clorus_conj acc (first remaining))))))))
+   (take-lazy n coll)))
 
-;; drop - Drop first n elements
-;; Example: (drop 2 [1 2 3 4 5]) ; => [3 4 5]
+(defn drop-lazy [n coll]
+  (lazy-seq
+    (loop [remaining coll
+           remaining-n n]
+      (if (or (<= remaining-n 0) (empty? remaining))
+        (seq remaining)
+        (recur (rest remaining) (dec remaining-n))))))
+
+;; drop - Drop first n elements lazily.
+;; Example: (drop 2 [1 2 3 4 5]) ; => (3 4 5)
 (defn drop
   ([n]
    (fn [rf]
@@ -135,20 +153,7 @@
          ([result input]
           (if (> (swap! counter inc) n) (rf result input) result))))))
   ([n coll]
-  (if (vector? coll)
-    (let [len (count coll)
-          start (if (< n len) n len)]
-      (loop [i start
-             acc []]
-        (if (>= i len)
-          acc
-          (recur (+ i 1)
-                 (__clorus_conj acc (nth coll i))))))
-    (loop [remaining coll
-           n n]
-      (if (or (<= n 0) (empty? remaining))
-        remaining
-        (recur (rest remaining) (dec n)))))))
+   (drop-lazy n coll)))
 
 ;; Native lazy transform helpers. `map` emits one source item per realized
 ;; sequence step; `filter` may advance until it finds the next accepted item.
@@ -413,7 +418,11 @@
     (throw (str fname " expects function"))))
 
 (defn ensure-coll [fname coll]
-  (if (coll? coll)
+  ;; LazySeq and SeqNode values are sequences, but intentionally are not
+  ;; persistent collections. Public consumers that accept a collection must
+  ;; therefore accept both categories or recursive algorithms such as sort
+  ;; reject their own lazy partitions.
+  (if (or (coll? coll) (seq? coll))
     coll
     (throw (str fname " expects collection"))))
 

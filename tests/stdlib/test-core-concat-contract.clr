@@ -7,8 +7,8 @@
 
 (defn -main [& _args]
   (do
-    ;; Clorus materializes concat eagerly for now, but the public result is a
-    ;; sequence list, as callers of Clojure's concat expect.
+    ;; concat is lazy while retaining Clojure's sequence result contract for
+    ;; finite inputs.
     (assert-eq "concat no args" (concat) '())
     (assert-eq "concat no args seq" (seq? (concat)) true)
     (assert-eq "concat one" (concat [1 2]) '(1 2))

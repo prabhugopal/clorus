@@ -109,6 +109,27 @@
 (assert-eq "filter consumes an infinite source by prefix" [1 3 5 7]
            (take 4 (filter odd? (range))))
 
+(let [calls (atom 0)
+      xs (take 2 (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))]
+  (assert-eq "take is deferred" 0 @calls)
+  (assert-eq "take realizes one source item" 1 (first xs))
+  (assert-eq "take realizes only its requested prefix" 1 @calls))
+
+(assert-eq "take bounds an infinite source" [0 1 2 3]
+           (take 4 (range)))
+(assert-eq "drop consumes an infinite source by prefix" [5 6 7]
+           (take 3 (drop 5 (range))))
+
+(let [calls (atom 0)
+      xs (concat [1] (map (fn [x] (do (swap! calls inc) x)) [2 3]))]
+  (assert-eq "concat is deferred" 0 @calls)
+  (assert-eq "concat realizes its eager prefix" 1 (first xs))
+  (assert-eq "concat preserves a deferred later input" 0 @calls)
+  (assert-eq "concat reaches the next input incrementally" 2 (first (rest xs)))
+  (assert-eq "concat realizes only the reached item" 1 @calls))
+(assert-eq "concat consumes an infinite source by prefix" [0 1 2 10 11]
+           (take 5 (concat (range 3) (range 10))))
+
 ;; Consumers must traverse the same sequence protocol. In particular, `into`
 ;; is implemented in terms of `reduce`; it cannot rely on a collection's eager
 ;; count when its input is a lazy transform.

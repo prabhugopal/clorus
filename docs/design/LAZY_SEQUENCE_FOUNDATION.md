@@ -83,10 +83,12 @@ continues to use `count` for finite counted collections.
    source compatibility. Empty `cycle` terminates as an empty sequence.
 7. Done: convert two-argument `map` and `filter` to incremental native lazy
    transforms; their transducer arities are unchanged.
-8. Convert `concat`, `take`, `drop`, `interleave`, and `dedupe` one family at
-   a time. Each conversion requires
+8. Done: convert `take`, `drop`, and `concat` to incremental native lazy transforms;
+   their transducer arities are unchanged.
+9. Convert `interleave` and `dedupe` one family at a time. Each
+   conversion requires
    finite JIT/AOT/Clojure parity plus an infinite-prefix test.
-9. Add a reducing-function protocol before exposing transducer arities for
+10. Add a reducing-function protocol before exposing transducer arities for
    lazy transforms such as `dedupe`.
 
 No eager API becomes lazy without the matching contract and parity cases.
