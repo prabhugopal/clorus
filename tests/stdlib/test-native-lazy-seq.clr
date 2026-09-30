@@ -30,13 +30,24 @@
 (let [xs (lazy-seq (list 1 2 3))]
   (assert-eq "lazy-seq is not empty" false (empty? xs))
   (assert-eq "take traverses lazy-seq" [1 2] (take 2 xs))
-  (assert-eq "drop traverses lazy-seq" 3 (first (drop 2 xs))))
+  (assert-eq "drop traverses lazy-seq" 3 (first (drop 2 xs)))
+  (assert-eq "count traverses lazy-seq" 3 (count xs))
+  (assert-eq "nth traverses lazy-seq" 2 (nth xs 1))
+  (assert-eq "last traverses lazy-seq" 3 (last xs)))
 
 (assert-eq "lazy-seq rejects non-sequence bodies"
            true
            (try
              (do
                (first (lazy-seq 42))
+               false)
+             (catch e (string? e))))
+
+(assert-eq "lazy count propagates thunk errors"
+           true
+           (try
+             (do
+               (count (lazy-seq 42))
                false)
              (catch e (string? e))))
 

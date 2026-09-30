@@ -766,22 +766,19 @@ impl<'ctx> CodeGen<'ctx> {
 
                 let count_fn = self
                     .module
-                    .get_function("clorus_count")
-                    .ok_or("count not declared")?;
+                    .get_function("clorus_count_value")
+                    .ok_or("clorus_count_value not declared")?;
 
                 let result = self
                     .builder
                     .build_call(count_fn, &[coll_ptr.into()], "count_call")
                     .unwrap();
 
-                // count returns i64, box as number
-                let count_i64 = result.try_as_basic_value().left().unwrap().into_int_value();
-                let count_float = self
-                    .builder
-                    .build_signed_int_to_float(count_i64, self.context.f64_type(), "count_to_float")
-                    .unwrap();
-
-                Ok(self.box_number(count_float))
+                Ok(result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value())
             }
 
             "meta" => {

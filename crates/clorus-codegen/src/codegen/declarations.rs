@@ -152,6 +152,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_rest", 1);
         self.declare_value_fn("clorus_last", 1);
         self.declare_value_to_i64_fn("clorus_count");
+        self.declare_value_fn("clorus_count_value", 1);
         self.declare_value_to_i32_fn("clorus_value_is_nil");
 
         // ===== TCP socket primitives (crate::net in clorus-runtime) =====

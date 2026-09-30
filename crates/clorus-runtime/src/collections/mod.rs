@@ -172,6 +172,13 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
 
     unsafe {
         match (*coll).header().tag() {
+            ValueTag::LazySeq => {
+                let seq = crate::lazy_seq::clorus_lazy_seq_force(coll);
+                if crate::value::clorus_is_exception(seq) { return seq; }
+                let result = clorus_nth(seq, index);
+                crate::value::clorus_release(seq);
+                result
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 PersistentVector::nth(vec_ptr, index as u64)
@@ -370,6 +377,13 @@ pub extern "C" fn clorus_last(coll: *mut Value) -> *mut Value {
 
     unsafe {
         match (*coll).header().tag() {
+            ValueTag::LazySeq => {
+                let seq = crate::lazy_seq::clorus_lazy_seq_force(coll);
+                if crate::value::clorus_is_exception(seq) { return seq; }
+                let result = clorus_last(seq);
+                crate::value::clorus_release(seq);
+                result
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 let count = (*vec_ptr).count();
@@ -450,6 +464,32 @@ pub extern "C" fn clorus_count(coll: *mut Value) -> i64 {
             _ => 0,
         }
     }
+}
+
+/// Count through the language-value ABI, preserving lazy-sequence exceptions.
+///
+/// `clorus_count` intentionally remains an i64 kernel primitive for runtime
+/// loops. The public compiler lowering uses this Value-returning companion so
+/// a failing lazy realization cannot be misreported as numeric zero.
+#[no_mangle]
+pub extern "C" fn clorus_count_value(coll: *mut Value) -> *mut Value {
+    if coll.is_null() {
+        return Value::long(0);
+    }
+
+    unsafe {
+        if (*coll).header().tag() == ValueTag::LazySeq {
+            let seq = crate::lazy_seq::clorus_lazy_seq_force(coll);
+            if crate::value::clorus_is_exception(seq) {
+                return seq;
+            }
+            let count = clorus_count(seq);
+            crate::value::clorus_release(seq);
+            return Value::long(count);
+        }
+    }
+
+    Value::long(clorus_count(coll))
 }
 
 /// Return an empty collection of the same kind as coll.

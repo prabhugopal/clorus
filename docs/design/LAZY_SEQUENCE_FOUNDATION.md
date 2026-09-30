@@ -16,14 +16,23 @@ Add `ValueTag::LazySeq` whose payload is a heap-owned cell containing:
 ```text
 state: unforced | forcing(thread-id) | realized
 thunk: Function value                 ; retained until realization
-realized: nil | canonical List        ; retained after realization
+realized: nil | canonical finite List ; retained after realization
 ```
 
 The thunk is a zero-arity Clorus function. On forcing it returns either `nil`
 or a Clorus sequenceable value. Vectors, maps, and sets are normalized through
 `seq` once and cached as the canonical list representation. Other values are a
-language exception. A sequence tail may itself be another `LazySeq` or a
-`List`.
+language exception.
+
+### Current boundary
+
+This first milestone delays production of one finite canonical sequence. It
+does **not** yet model a sequence cell whose tail is an arbitrary `Value`, so
+it cannot express a lazy tail or an unbounded Clojure sequence such as
+zero-arity `range`. The persistent `ListNode` tail is currently another list
+node, not a lazy value. A native `SeqNode { head, tail: Value }` (or an
+equivalent general sequence-step representation) is required before migrating
+infinite or incrementally produced core functions.
 
 Forcing is synchronized. A different thread waits for the current realization
 and observes its cached result; a recursive attempt by the owning thread is a
@@ -47,7 +56,7 @@ traversal is then expressed through these operations:
 | `rest` | Calls `seq`; returns the tail or empty list. |
 | `next` | Calls `rest`, then `seq`. |
 | `seq?` | True for realized list cells and native lazy sequence values. |
-| `count`, `nth`, `last` | Not lazy-aware in the initial foundation; do not use them to consume a lazy value yet. |
+| `count`, `nth`, `last` | Force the cell, then operate on its cached canonical sequence. `count` uses a value-returning runtime boundary so force errors propagate rather than becoming zero. |
 
 `empty?` calls `seq` for sequence values, realizing at most the first cell. It
 continues to use `count` for finite counted collections.
@@ -59,12 +68,15 @@ continues to use `count` for finite counted collections.
 2. Done: route `seq`, `first`, and `rest` through the native cell in both JIT
    and AOT, including a finite public regression.
 3. Done: add the public `lazy-seq` form and verify lexical capture,
-   memoization, normalization, error handling, and JIT/AOT behavior.
-4. Next: make `count`, `nth`, and `last` lazy-aware with an explicit bounded
-   consumption policy, then convert `range`, `repeat`, `iterate`, `concat`, `map`, `filter`, `take`,
-   `drop`, `interleave`, and `dedupe` one family at a time. Each conversion
-   requires finite JIT/AOT/Clojure parity plus an infinite-prefix test.
-5. Add a reducing-function protocol before exposing transducer arities for
+   memoization, normalization, error handling, and JIT/AOT behavior. Route
+   `count`, `nth`, and `last` through its forcing boundary as well.
+4. Add a native general sequence-step representation, then extend printing,
+   equality, hashing, and the sequence protocol to traverse it safely.
+5. Define bounded-consumption and termination policy before converting
+   `range`, `repeat`, `iterate`, `concat`, `map`, `filter`, `take`, `drop`,
+   `interleave`, and `dedupe` one family at a time. Each conversion requires
+   finite JIT/AOT/Clojure parity plus an infinite-prefix test.
+6. Add a reducing-function protocol before exposing transducer arities for
    lazy transforms such as `dedupe`.
 
 No eager API becomes lazy without the matching contract and parity cases.
@@ -72,7 +84,7 @@ No eager API becomes lazy without the matching contract and parity cases.
 ## Non-goals for the first milestone
 
 - Character values and string sequencing
-- Lazy `count`, `nth`, or `last`
+- General lazy tails or unbounded sequence producers
 - Parallel realization, futures, promises, or IPC
 - Reusing the atom-backed map representation from `clorus.lazy`
 
