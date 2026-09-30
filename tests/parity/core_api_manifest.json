@@ -33,7 +33,7 @@
     {"name": "interleave", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine interleave contract", "gap": "finite eager sequence only; character/string and lazy semantics await their runtime support"},
     {"name": "interpose", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine interpose contract", "gap": "finite eager sequence only; character/string and lazy semantics await their runtime support"},
     {"name": "dedupe", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine dedupe contract", "gap": "finite eager sequence only; transducer arity awaits a protocol-level reducing-function contract"},
-    {"name": "seq", "owner": "sequence-runtime", "status": "implemented", "coverage": "core parity, dual-engine, REPL", "gap": "finite collection contract only; string and lazy sequences await character and lazy-runtime support"},
+    {"name": "seq", "owner": "sequence-runtime", "status": "implemented", "coverage": "core parity, dual-engine, REPL, native lazy sequence", "gap": "string sequencing awaits a dedicated character value type"},
     {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "find", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "map-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},

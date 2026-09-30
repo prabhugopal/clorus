@@ -350,7 +350,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
         <tr><td><code>reify</code></td><td><span class="pill missing">Missing</span></td><td class="evidence">Zero occurrences anywhere in source.</td></tr>
         <tr><td>Macros / <code>defmacro</code> / gensym</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">3,334-line macro engine, auto-gensym tested.</td></tr>
         <tr><td>Metadata</td><td><span class="pill implemented">Implemented</span></td><td class="evidence"><code>meta</code>/<code>with-meta</code>/<code>vary-meta</code>/<code>alter-meta!</code> all present.</td></tr>
-        <tr><td>Laziness / <code>lazy-seq</code></td><td><span class="pill partial">Bolted on</span></td><td class="evidence">Userland atom-memoized library with parallel <code>lazy-first</code>/<code>lazy-map</code> API — not integrated with core <code>seq</code>/<code>map</code>/<code>filter</code>.</td></tr>
+        <tr><td>Laziness / <code>lazy-seq</code></td><td><span class="pill partial">Native foundation</span></td><td class="evidence">Native memoized lazy cells and sequence steps integrate with core <code>seq</code>/<code>first</code>/<code>rest</code>, <code>map</code>, <code>filter</code>, and unbounded producer arities. More core transforms remain to migrate; string sequencing still needs character values.</td></tr>
         <tr><td>Atoms</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">CAS-based swap/reset.</td></tr>
         <tr><td>Refs + STM</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">Real MVCC — versioned read/write sets, commute support.</td></tr>
         <tr><td>Agents</td><td><span class="pill implemented">Implemented</span></td><td class="evidence">737-line runtime module.</td></tr>
@@ -458,7 +458,7 @@ footer .sources{margin-top:10px; font-family:var(--font-display); font-size:12px
         <li>Root-cause and fix the 5 remaining failing tests (<code>test-numeric.clr</code> and 4 stdlib long-tail/sort tests) — each becomes a permanent regression test in Phase 3.</li>
         <li><span class="pill implemented">done</span> Fixed <code>merge</code>'s hardcoded 1-argument arity to accept idiomatic <code>(merge m1 m2 ...)</code>. Deleting the dead shadowed <code>keys</code>/<code>vals</code> stdlib defs is still open (harmless, low priority).</li>
         <li><span class="pill implemented">done</span> <code>recur</code> self-tail-calls now have guaranteed TCO (implicit phi-node loop, same mechanism as <code>loop</code>) instead of hoping the optimizer cooperates — fixed-arity, multi-arity, variadic, and <code>letfn</code> all covered.</li>
-        <li>Integrate <code>lazy-seq</code> with core <code>seq</code>/<code>first</code>/<code>rest</code>/<code>map</code>/<code>filter</code> instead of a parallel <code>lazy-</code> API.</li>
+        <li><span class="pill implemented">done</span> Native <code>lazy-seq</code> now integrates with core <code>seq</code>/<code>first</code>/<code>rest</code>/<code>map</code>/<code>filter</code>; migrate the remaining core sequence transforms incrementally with JIT/AOT infinite-prefix regressions.</li>
       </ul>
     </div>
     <div class="phase">

@@ -1450,25 +1450,106 @@ impl<'ctx> CodeGen<'ctx> {
                 // Compile the reducing function - supports both named functions and inline lambdas
                 let func_val = self.compile_expr(&args[0])?;
 
-                let (init_val, coll_ptr, start_index) = if args.len() == 3 {
+                let coll_ptr = if args.len() == 3 {
+                    self.compile_expr(&args[2])?
+                } else {
+                    self.compile_expr(&args[1])?
+                };
+
+                // Reduction must use the sequence protocol rather than an
+                // index/count loop.  A native lazy sequence deliberately has
+                // no eager count, and indexing it repeatedly would both skip
+                // it under the old count-based implementation and make a
+                // finite lazy reduction quadratic.  `seq`, `first`, and
+                // `rest` are the common contract for every sequential value.
+                let seq_fn = self
+                    .module
+                    .get_function("clorus_seq")
+                    .ok_or("seq not declared")?;
+                let first_fn = self
+                    .module
+                    .get_function("clorus_first")
+                    .ok_or("first not declared")?;
+                let rest_fn = self
+                    .module
+                    .get_function("clorus_rest")
+                    .ok_or("rest not declared")?;
+                let sequence = self
+                    .builder
+                    .build_call(seq_fn, &[coll_ptr.into()], "reduce_sequence")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                // `seq` is a forcing boundary. Preserve an exception from an
+                // invalid lazy body rather than treating it as an empty input
+                // or feeding nil into the reducing function.
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+                let is_exception_fn = self
+                    .module
+                    .get_function("clorus_is_exception_i32")
+                    .ok_or("clorus_is_exception_i32 not declared")?;
+                let initial_is_exception_i32 = self
+                    .builder
+                    .build_call(
+                        is_exception_fn,
+                        &[sequence.into()],
+                        "reduce_initial_is_exception",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let initial_is_exception = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        initial_is_exception_i32,
+                        self.context.i32_type().const_zero(),
+                        "reduce_initial_exception",
+                    )
+                    .unwrap();
+                let initial_error_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_initial_error");
+                let reduce_start_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_start");
+                let result_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_result");
+                self.builder
+                    .build_conditional_branch(
+                        initial_is_exception,
+                        initial_error_block,
+                        reduce_start_block,
+                    )
+                    .unwrap();
+                self.builder.position_at_end(initial_error_block);
+                self.builder.build_unconditional_branch(result_block).unwrap();
+                let initial_error_exit = self.builder.get_insert_block().unwrap();
+                self.builder.position_at_end(reduce_start_block);
+
+                let (init_val, initial_remaining) = if args.len() == 3 {
                     // (reduce f init coll) - explicit init value
                     let init_val = self.compile_expr(&args[1])?;
-                    let coll_ptr = self.compile_expr(&args[2])?;
-                    (init_val, coll_ptr, self.context.i64_type().const_zero())
+                    (init_val, sequence)
                 } else {
-                    // (reduce f coll) - use first element as init
-                    let coll_ptr = self.compile_expr(&args[1])?;
-
-                    // Get first element using nth
-                    let nth_fn = self
-                        .module
-                        .get_function("clorus_nth")
-                        .ok_or("nth not declared")?;
+                    // (reduce f coll) - use the first sequence element as
+                    // init and begin at its remainder.
                     let first_elem = self
                         .builder
                         .build_call(
-                            nth_fn,
-                            &[coll_ptr.into(), self.context.i64_type().const_zero().into()],
+                            first_fn,
+                            &[sequence.into()],
                             "first_elem",
                         )
                         .unwrap()
@@ -1477,43 +1558,46 @@ impl<'ctx> CodeGen<'ctx> {
                         .unwrap()
                         .into_pointer_value();
 
-                    // Start from index 1 since we used index 0 as init
-                    (
-                        first_elem,
-                        coll_ptr,
-                        self.context.i64_type().const_int(1, false),
-                    )
+                    let rest = self
+                        .builder
+                        .build_call(rest_fn, &[sequence.into()], "initial_rest")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                    // `rest` returns the canonical empty list at the end;
+                    // normalize it with `seq` so the loop's nil sentinel is
+                    // consistent for every collection representation.
+                    let remaining = self
+                        .builder
+                        .build_call(seq_fn, &[rest.into()], "initial_remaining")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                    (first_elem, remaining)
                 };
 
-                let count_fn = self
-                    .module
-                    .get_function("clorus_count")
-                    .ok_or("count not declared")?;
-                let count_i64 = self
-                    .builder
-                    .build_call(count_fn, &[coll_ptr.into()], "coll_count")
-                    .unwrap()
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_int_value();
-
                 // Loop setup
-                let current_fn = self
-                    .builder
-                    .get_insert_block()
-                    .unwrap()
-                    .get_parent()
-                    .unwrap();
                 let loop_block = self.context.append_basic_block(current_fn, "reduce_loop");
+                let loop_error_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_sequence_error");
+                let loop_check_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_sequence_check");
                 let body_block = self.context.append_basic_block(current_fn, "reduce_body");
                 let end_block = self.context.append_basic_block(current_fn, "reduce_end");
 
-                let index_alloca = self
+                let remaining_alloca = self
                     .builder
-                    .build_alloca(self.context.i64_type(), "index")
+                    .build_alloca(coll_ptr.get_type(), "remaining")
                     .unwrap();
-                self.builder.build_store(index_alloca, start_index).unwrap();
+                self.builder
+                    .build_store(remaining_alloca, initial_remaining)
+                    .unwrap();
 
                 let acc_alloca = self
                     .builder
@@ -1525,18 +1609,66 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Loop condition
                 self.builder.position_at_end(loop_block);
-                let current_index = self
+                let current_remaining = self
                     .builder
-                    .build_load(self.context.i64_type(), index_alloca, "current_index")
+                    .build_load(coll_ptr.get_type(), remaining_alloca, "current_remaining")
+                    .unwrap()
+                    .into_pointer_value();
+                let remaining_is_exception_i32 = self
+                    .builder
+                    .build_call(
+                        is_exception_fn,
+                        &[current_remaining.into()],
+                        "reduce_remaining_is_exception",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let remaining_is_exception = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        remaining_is_exception_i32,
+                        self.context.i32_type().const_zero(),
+                        "reduce_remaining_exception",
+                    )
+                    .unwrap();
+                self.builder
+                    .build_conditional_branch(
+                        remaining_is_exception,
+                        loop_error_block,
+                        loop_check_block,
+                    )
+                    .unwrap();
+
+                self.builder.position_at_end(loop_error_block);
+                self.builder
+                    .build_store(acc_alloca, current_remaining)
+                    .unwrap();
+                self.builder.build_unconditional_branch(end_block).unwrap();
+
+                self.builder.position_at_end(loop_check_block);
+                let is_nil_fn = self
+                    .module
+                    .get_function("clorus_value_is_nil")
+                    .ok_or("clorus_value_is_nil not declared")?;
+                let is_nil_i32 = self
+                    .builder
+                    .build_call(is_nil_fn, &[current_remaining.into()], "remaining_is_nil")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
                     .unwrap()
                     .into_int_value();
                 let condition = self
                     .builder
                     .build_int_compare(
-                        inkwell::IntPredicate::SLT,
-                        current_index,
-                        count_i64,
-                        "loop_cond",
+                        inkwell::IntPredicate::EQ,
+                        is_nil_i32,
+                        self.context.i32_type().const_zero(),
+                        "remaining_not_empty",
                     )
                     .unwrap();
                 self.builder
@@ -1545,13 +1677,9 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Loop body
                 self.builder.position_at_end(body_block);
-                let nth_fn = self
-                    .module
-                    .get_function("clorus_nth")
-                    .ok_or("nth not declared")?;
                 let elem = self
                     .builder
-                    .build_call(nth_fn, &[coll_ptr.into(), current_index.into()], "elem")
+                    .build_call(first_fn, &[current_remaining.into()], "elem")
                     .unwrap()
                     .try_as_basic_value()
                     .left()
@@ -1634,6 +1762,49 @@ impl<'ctx> CodeGen<'ctx> {
                     .left()
                     .unwrap()
                     .into_pointer_value();
+
+                // A reducing function may itself fail. This is an immediate
+                // result, just like an error forced from a lazy tail.
+                let new_acc_is_exception_i32 = self
+                    .builder
+                    .build_call(
+                        is_exception_fn,
+                        &[new_acc.into()],
+                        "reduce_acc_is_exception",
+                    )
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_int_value();
+                let new_acc_is_exception = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        new_acc_is_exception_i32,
+                        self.context.i32_type().const_zero(),
+                        "reduce_acc_exception",
+                    )
+                    .unwrap();
+                let reducer_error_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_acc_error");
+                let reduced_check_block = self
+                    .context
+                    .append_basic_block(current_fn, "reduce_reduced_check");
+                self.builder
+                    .build_conditional_branch(
+                        new_acc_is_exception,
+                        reducer_error_block,
+                        reduced_check_block,
+                    )
+                    .unwrap();
+
+                self.builder.position_at_end(reducer_error_block);
+                self.builder.build_store(acc_alloca, new_acc).unwrap();
+                self.builder.build_unconditional_branch(end_block).unwrap();
+
+                self.builder.position_at_end(reduced_check_block);
                 self.builder.build_store(acc_alloca, new_acc).unwrap();
 
                 // Early termination: a reducing function signals "stop" by
@@ -1724,15 +1895,25 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_unconditional_branch(end_block).unwrap();
 
                 self.builder.position_at_end(continue_block);
-                let next_index = self
+                let next_rest = self
                     .builder
-                    .build_int_add(
-                        current_index,
-                        self.context.i64_type().const_int(1, false),
-                        "next_index",
-                    )
+                    .build_call(rest_fn, &[current_remaining.into()], "next_rest")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                let next_remaining = self
+                    .builder
+                    .build_call(seq_fn, &[next_rest.into()], "next_remaining")
+                    .unwrap()
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+                self.builder
+                    .build_store(remaining_alloca, next_remaining)
                     .unwrap();
-                self.builder.build_store(index_alloca, next_index).unwrap();
                 self.builder.build_unconditional_branch(loop_block).unwrap();
 
                 // End
@@ -1742,8 +1923,22 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_load(init_val.get_type(), acc_alloca, "final_acc")
                     .unwrap()
                     .into_pointer_value();
+                self.builder.build_unconditional_branch(result_block).unwrap();
+                let end_exit = self.builder.get_insert_block().unwrap();
 
-                Ok(final_acc)
+                self.builder.position_at_end(result_block);
+                let result = self
+                    .builder
+                    .build_phi(
+                        self.context.i8_type().ptr_type(AddressSpace::default()),
+                        "reduce_result_value",
+                    )
+                    .unwrap();
+                result.add_incoming(&[
+                    (&sequence, initial_error_exit),
+                    (&final_acc, end_exit),
+                ]);
+                Ok(result.as_basic_value().into_pointer_value())
             }
 
             "atom" => {

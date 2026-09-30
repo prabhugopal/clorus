@@ -180,10 +180,9 @@ layouts behave the same way.
 
 ### 4.2 Remove duplicate definitions by policy
 
-`core.clr` and `transducers.clr` intentionally use overlapping names such as
+`core.clr` and `transducers.clr` historically used overlapping names such as
 `map`, `filter`, `take`, and `drop`, but overload-by-load-order is not a
-stable module design. Choose one of these designs and encode it in namespace
-resolution:
+stable module design. The resolved policy is encoded in namespace resolution:
 
 1. `clorus.core/map` is eager and `clorus.transducers/map` is explicitly
    qualified; or
@@ -191,9 +190,11 @@ resolution:
    one-arity form produces a transducer and collection arities perform the
    collection transform.
 
-The recommended path is (2), because it gives users one familiar public name.
-The implementation can delegate to internal helpers, but all arities and
-error behavior live behind one public var.
+Clorus uses (2): `clorus.core/map` and `filter` own both their transducer and
+collection arities; `transducers.clr` deliberately does not redefine them.
+The two-argument collection arities are native lazy transforms. The
+implementation delegates to internal helpers, but all arities and error
+behavior live behind one public var.
 
 ### 4.3 Standard-library completion order
 

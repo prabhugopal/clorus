@@ -373,8 +373,21 @@ Hierarchy support (`derive`/`isa?`) and `:default` dispatch also exist — see `
 
 ## Sequences
 
-### Lazy Sequences ✅ 90% Complete
-Full library in `stdlib/lazy.clr`:
+### Native Lazy Sequences 🟡 Foundation Complete
+Core `lazy-seq` is a native, memoized sequence value. Core `seq`, `first`,
+`rest`, `map`, `filter`, and the unbounded arities of `range`, `repeat`,
+`repeatedly`, `iterate`, and `cycle` operate on it incrementally. `take` is
+used to bound an infinite result:
+
+```clojure
+(take 5 (map #(* % %) (filter odd? (range))))
+;; => [1 9 25 49 81]
+```
+
+`stdlib/clorus/lazy.clr` is an older experimental, explicitly-loaded library;
+its `lazy-*` APIs are not the core sequence protocol.
+
+### Experimental `clorus.lazy` library
 
 #### Construction
 ```clojure
@@ -400,12 +413,12 @@ Full library in `stdlib/lazy.clr`:
 (doall coll)                ; Force all side effects
 ```
 
-### Eager Sequences ✅ 100% Complete
-Stdlib implementations:
+### Finite sequence operations
+Stdlib implementations and realization helpers:
 
 ```clojure
-(map inc [1 2 3])           ; => [2 3 4]
-(filter even? [1 2 3 4])    ; => [2 4]
+(map inc [1 2 3])           ; => (2 3 4)
+(filter even? [1 2 3 4])    ; => (2 4)
 (reduce + 0 [1 2 3])        ; => 6
 (remove odd? [1 2 3 4])     ; => [2 4]
 (keep identity [1 nil 3])   ; => [1 3]

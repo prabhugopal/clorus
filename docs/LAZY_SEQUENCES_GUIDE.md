@@ -1,4 +1,10 @@
-# Clorus Lazy Sequences - User Guide
+# Clorus Lazy Sequences - Experimental `clorus.lazy` Guide
+
+> Note: Clorus now has a native core `lazy-seq` protocol. Use core `range`,
+> `repeat`, `repeatedly`, `iterate`, `cycle`, `map`, `filter`, `seq`, `first`,
+> `rest`, and `take` for new code. This guide documents the older
+> explicitly-loaded `clorus.lazy` experiment and its separate `lazy-*` API;
+> it is not auto-loaded and is not the core protocol.
 
 ## Overview
 

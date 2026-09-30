@@ -81,10 +81,12 @@ continues to use `count` for finite counted collections.
 6. Done: add Clojure-compatible unbounded arities for `repeat`, `repeatedly`,
    `iterate`, and `cycle`, retaining Clorus's existing finite arities for
    source compatibility. Empty `cycle` terminates as an empty sequence.
-7. Convert `concat`, `map`, `filter`, `take`, `drop`, `interleave`, and
-   `dedupe` one family at a time. Each conversion requires
+7. Done: convert two-argument `map` and `filter` to incremental native lazy
+   transforms; their transducer arities are unchanged.
+8. Convert `concat`, `take`, `drop`, `interleave`, and `dedupe` one family at
+   a time. Each conversion requires
    finite JIT/AOT/Clojure parity plus an infinite-prefix test.
-8. Add a reducing-function protocol before exposing transducer arities for
+9. Add a reducing-function protocol before exposing transducer arities for
    lazy transforms such as `dedupe`.
 
 No eager API becomes lazy without the matching contract and parity cases.

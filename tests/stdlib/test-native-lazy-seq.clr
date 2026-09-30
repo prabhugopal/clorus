@@ -98,4 +98,37 @@
 (assert-eq "cycle empty input terminates" []
            (take 3 (cycle [])))
 
+(let [calls (atom 0)
+      xs (map (fn [x] (do (swap! calls inc) (* x 2))) [1 2 3])]
+  (assert-eq "map is deferred" 0 @calls)
+  (assert-eq "map realizes one item" 2 (first xs))
+  (assert-eq "map realizes one item only" 1 @calls)
+  (assert-eq "map consumes an infinite source by prefix" [0 2 4 6]
+             (take 4 (map (fn [x] (* x 2)) (range)))))
+
+(assert-eq "filter consumes an infinite source by prefix" [1 3 5 7]
+           (take 4 (filter odd? (range))))
+
+;; Consumers must traverse the same sequence protocol. In particular, `into`
+;; is implemented in terms of `reduce`; it cannot rely on a collection's eager
+;; count when its input is a lazy transform.
+(assert-eq "reduce consumes a lazy map" 20
+           (reduce + 0 (take 4 (map (fn [x] (* x 2)) (range)))))
+(assert-eq "into consumes a lazy map" [2 3 4]
+           (into [] (map inc [1 2 3])))
+(assert-eq "into composes lazy map and filter" [1 9]
+           (into [] (filter odd? (map (fn [x] (* x x)) [1 2 3 4]))))
+(assert-eq "reduce propagates lazy forcing errors" true
+           (try
+             (do
+               (reduce + 0 (lazy-seq 42))
+               false)
+             (catch e (string? e))))
+(assert-eq "reduce propagates reducing function errors" true
+           (try
+             (do
+               (reduce (fn [acc x] (throw "reduce boom")) 0 [1])
+               false)
+             (catch e (string? e))))
+
 (println "native lazy-seq passed")
