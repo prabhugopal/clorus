@@ -902,36 +902,73 @@
      (throw "range step cannot be 0")
      (range-helper start end step []))))
 
-;; repeat - Repeat value n times
-(defn repeat [n x]
-  (let [n (ensure-number "repeat" n)]
-    (loop [n n
-           acc []]
-      (if (<= n 0)
-        acc
-        (recur (dec n) (__clorus_conj acc x))))))
+;; Incremental producer helpers. Each creates one native sequence step and
+;; leaves the remaining work inside a LazySeq tail.
+(defn repeat-unbounded [x]
+  (lazy-seq
+    (__clorus_seq_cons x (repeat-unbounded x))))
 
-;; repeatedly - Call function n times
-(defn repeatedly [n f]
-  (let [n (ensure-number "repeatedly" n)
-        f (ensure-fn "repeatedly" f)]
-    (loop [n n
-           acc []]
-      (if (<= n 0)
-        acc
-        (recur (dec n) (__clorus_conj acc (f)))))))
+(defn repeatedly-unbounded [f]
+  (lazy-seq
+    (__clorus_seq_cons (f) (repeatedly-unbounded f))))
 
-;; cycle - Cycle through collection infinitely (returns first n cycles)
-(defn cycle [n coll]
-  (let [n (ensure-number "cycle" n)
-        coll (ensure-coll "cycle" coll)]
-    (loop [n n
-           acc []]
-      (if (<= n 0)
-        acc
-        (recur (dec n) (concat acc coll))))))
+(defn iterate-unbounded [f x]
+  (lazy-seq
+    (__clorus_seq_cons x (iterate-unbounded f (f x)))))
 
-;; iterate - Generate sequence by repeatedly applying function
+(defn cycle-unbounded [original remaining]
+  (lazy-seq
+    (if (empty? remaining)
+      (if (empty? original)
+        nil
+        (cycle-unbounded original original))
+      (__clorus_seq_cons (first remaining)
+                         (cycle-unbounded original (rest remaining))))))
+
+;; repeat - Clojure's one-arity form is unbounded; retain the existing finite
+;; two-arity form for source compatibility.
+(defn repeat
+  ([x]
+   (repeat-unbounded x))
+  ([n x]
+   (let [n (ensure-number "repeat" n)]
+     (loop [n n
+            acc []]
+       (if (<= n 0)
+         acc
+         (recur (dec n) (__clorus_conj acc x)))))))
+
+;; repeatedly - Clojure's one-arity form is unbounded; retain the existing
+;; finite two-arity form for source compatibility.
+(defn repeatedly
+  ([f]
+   (repeatedly-unbounded (ensure-fn "repeatedly" f)))
+  ([n f]
+   (let [n (ensure-number "repeatedly" n)
+         f (ensure-fn "repeatedly" f)]
+     (loop [n n
+            acc []]
+       (if (<= n 0)
+         acc
+         (recur (dec n) (__clorus_conj acc (f))))))))
+
+;; cycle - Clojure's one-arity form is unbounded; retain the existing form
+;; where n is the number of full cycles to build eagerly.
+(defn cycle
+  ([coll]
+   (let [coll (ensure-coll "cycle" coll)]
+     (cycle-unbounded coll coll)))
+  ([n coll]
+   (let [n (ensure-number "cycle" n)
+         coll (ensure-coll "cycle" coll)]
+     (loop [n n
+            acc []]
+       (if (<= n 0)
+         acc
+         (recur (dec n) (concat acc coll)))))))
+
+;; iterate - Clojure's two-arity form is unbounded; retain the existing finite
+;; three-arity form where n is the requested item count.
 ;; (iterate 5 inc 0) => [0 1 2 3 4]
 (defn iterate-helper [n f x acc]
   (loop [n n
@@ -941,10 +978,13 @@
       acc
       (recur (dec n) (f current) (__clorus_conj acc current)))))
 
-(defn iterate [n f x]
-  (let [n (ensure-number "iterate" n)
-        f (ensure-fn "iterate" f)]
-    (iterate-helper n f x [])))
+(defn iterate
+  ([f x]
+   (iterate-unbounded (ensure-fn "iterate" f) x))
+  ([n f x]
+   (let [n (ensure-number "iterate" n)
+         f (ensure-fn "iterate" f)]
+     (iterate-helper n f x []))))
 
 ;; ============================================================================
 ;; Map Utilities

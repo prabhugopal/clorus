@@ -85,4 +85,17 @@
   (assert-eq "lazy range display is bounded" true
              (includes? rendered "...")))
 
+;; Clojure-compatible unbounded arities share the native sequence-step path;
+;; the original finite arities remain covered by the long-tail suite.
+(assert-eq "repeat one-arity is lazy" [7 7 7 7]
+           (take 4 (repeat 7)))
+(assert-eq "repeatedly one-arity is lazy" [5 5 5]
+           (take 3 (repeatedly (fn [] 5))))
+(assert-eq "iterate two-arity is lazy" [1 2 4 8 16]
+           (take 5 (iterate (fn [x] (* x 2)) 1)))
+(assert-eq "cycle one-arity is lazy" [1 2 1 2 1]
+           (take 5 (cycle [1 2])))
+(assert-eq "cycle empty input terminates" []
+           (take 3 (cycle [])))
+
 (println "native lazy-seq passed")

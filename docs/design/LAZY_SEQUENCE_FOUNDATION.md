@@ -78,11 +78,13 @@ continues to use `count` for finite counted collections.
 5. Done: add a 64-element bounded display representation and exact structural
    equality/hash for finite general sequences. General sequence traversal is
    iterative, so semantic non-termination never becomes a Rust stack overflow.
-6. Convert `repeat`, `repeatedly`, `iterate`, `cycle`, `concat`, `map`,
-   `filter`, `take`, `drop`, `interleave`, and `dedupe` one family at a time.
-   Each conversion requires
+6. Done: add Clojure-compatible unbounded arities for `repeat`, `repeatedly`,
+   `iterate`, and `cycle`, retaining Clorus's existing finite arities for
+   source compatibility. Empty `cycle` terminates as an empty sequence.
+7. Convert `concat`, `map`, `filter`, `take`, `drop`, `interleave`, and
+   `dedupe` one family at a time. Each conversion requires
    finite JIT/AOT/Clojure parity plus an infinite-prefix test.
-7. Add a reducing-function protocol before exposing transducer arities for
+8. Add a reducing-function protocol before exposing transducer arities for
    lazy transforms such as `dedupe`.
 
 No eager API becomes lazy without the matching contract and parity cases.
