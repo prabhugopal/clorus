@@ -14,6 +14,76 @@ use regex_lite::Regex;
 use std::ffi::CStr;
 use std::os::raw::c_char;
 
+/// A REPL/display safety boundary for possibly unbounded sequences.  This is
+/// deliberately internal for now; a user-configurable `*print-length*` needs
+/// dynamic-var support rather than another global setting.
+const GENERAL_SEQUENCE_PRINT_LIMIT: usize = 64;
+
+/// Render a sequence without walking beyond the display boundary.
+///
+/// Each printed element may force one lazy cell.  The tail after the final
+/// displayed element is never forced merely to decide whether to show `...`.
+unsafe fn bounded_sequence_to_string(
+    value: *mut Value,
+    render_element: unsafe fn(*mut Value) -> String,
+) -> String {
+    let mut current = crate::collections::clorus_seq(value);
+    if crate::value::clorus_is_exception(current) {
+        let rendered = render_element(current);
+        crate::value::clorus_release(current);
+        return rendered;
+    }
+
+    let mut parts = Vec::new();
+    let mut truncated = false;
+
+    loop {
+        if current.is_null() || (*current).tag() == ValueTag::Nil {
+            if !current.is_null() {
+                crate::value::clorus_release(current);
+            }
+            break;
+        }
+
+        let first = crate::collections::clorus_first(current);
+        parts.push(render_element(first));
+        if !first.is_null() {
+            crate::value::clorus_release(first);
+        }
+
+        let next = crate::collections::clorus_rest(current);
+        crate::value::clorus_release(current);
+
+        if parts.len() == GENERAL_SEQUENCE_PRINT_LIMIT {
+            // Empty lists and nil are already known to be exhausted. Every
+            // other tail might yield another item, but must stay unforced.
+            truncated = !next.is_null()
+                && (*next).tag() != ValueTag::Nil
+                && !((*next).tag() == ValueTag::List
+                    && crate::collections::clorus_count(next) == 0);
+            if !next.is_null() {
+                crate::value::clorus_release(next);
+            }
+            break;
+        }
+
+        current = crate::collections::clorus_seq(next);
+        if !next.is_null() {
+            crate::value::clorus_release(next);
+        }
+        if crate::value::clorus_is_exception(current) {
+            parts.push(render_element(current));
+            crate::value::clorus_release(current);
+            break;
+        }
+    }
+
+    if truncated {
+        parts.push("...".to_string());
+    }
+    format!("({})", parts.join(" "))
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -98,6 +168,9 @@ pub(crate) unsafe fn value_to_rust_string(val: *mut Value) -> String {
                 crate::value::clorus_release(current);
             }
             format!("({})", parts.join(" "))
+        }
+        ValueTag::LazySeq | ValueTag::SeqNode => {
+            bounded_sequence_to_string(val, value_to_rust_string)
         }
         ValueTag::HashMap => {
             let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
@@ -1267,11 +1340,9 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
                 crate::net::SocketHandle::Stream(None) => "#<tcp-stream: closed>".to_string(),
             }
         }
-        ValueTag::LazySeq => "#<lazy-seq>".to_string(),
-        // Traversing a sequence step while printing could realize an
-        // unbounded producer. A bounded Clojure-style printer is a separate
-        // protocol addition; keep this diagnostic representation safe today.
-        ValueTag::SeqNode => "#<seq>".to_string(),
+        ValueTag::LazySeq | ValueTag::SeqNode => {
+            bounded_sequence_to_string(val, value_to_pr_string)
+        }
     }
 }
 

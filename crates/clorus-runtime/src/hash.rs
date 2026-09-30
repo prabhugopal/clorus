@@ -77,6 +77,7 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
                 let list_ptr = (*val).as_ptr() as *mut crate::list::PersistentList;
                 crate::list::list_hash(list_ptr)
             }
+            ValueTag::LazySeq | ValueTag::SeqNode => hash_sequential(val),
             ValueTag::HashMap => {
                 let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
                 let mut state = 0u64;
@@ -99,7 +100,7 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
             }
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer | ValueTag::Socket | ValueTag::LazySeq | ValueTag::SeqNode => {
+            ValueTag::OpaquePointer | ValueTag::Socket => {
                 (*val).as_ptr() as u64
             }
             ValueTag::Exception => {
@@ -107,5 +108,39 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
                 hash_combine(0xEC7E_0001, clorus_hash(payload))
             }
         }
+    }
+}
+
+/// Exact ordered hash across general sequence values.
+///
+/// The absence of a bound is intentional: an arbitrary bound would give equal
+/// finite sequences different hashes after the cut-off and violate hash-map
+/// correctness. Hashing an unbounded sequence therefore has the same
+/// non-termination contract as Clojure.
+unsafe fn hash_sequential(value: *mut Value) -> u64 {
+    let mut current = crate::collections::clorus_seq(value);
+    let mut state = 0_u64;
+
+    loop {
+        if crate::value::clorus_is_exception(current) {
+            let result = clorus_hash(current);
+            crate::value::clorus_release(current);
+            return result;
+        }
+        if current.is_null() || (*current).tag() == ValueTag::Nil {
+            if !current.is_null() {
+                crate::value::clorus_release(current);
+            }
+            return state;
+        }
+
+        let element = crate::collections::clorus_first(current);
+        state = hash_combine(state, clorus_hash(element));
+        crate::value::clorus_release(element);
+
+        let rest = crate::collections::clorus_rest(current);
+        crate::value::clorus_release(current);
+        current = crate::collections::clorus_seq(rest);
+        crate::value::clorus_release(rest);
     }
 }

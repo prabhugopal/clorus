@@ -75,6 +75,14 @@
                               (lazy-seq (__clorus_seq_cons 2 nil))))]
   (assert-eq "general sequence step count" 2 (count xs))
   (assert-eq "general sequence step last" 2 (last xs))
-  (assert-eq "general sequence step rest" 2 (first (rest xs))))
+  (assert-eq "general sequence step rest" 2 (first (rest xs)))
+  (assert-eq "general sequence structural equality" true (= xs [1 2]))
+  (assert-eq "general sequence bounded display" "(1 2)" (str xs)))
+
+(let [rendered (str (range))]
+  (assert-eq "lazy range display starts with a prefix" true
+             (starts-with? rendered "(0 1 2"))
+  (assert-eq "lazy range display is bounded" true
+             (includes? rendered "...")))
 
 (println "native lazy-seq passed")

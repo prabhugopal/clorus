@@ -52,6 +52,14 @@ traversal is then expressed through these operations:
 | `seq?` | True for realized list cells and native lazy sequence values. |
 | `count`, `nth`, `last` | Force the cell, then operate on its cached canonical sequence. `count` uses a value-returning runtime boundary so force errors propagate rather than becoming zero. |
 
+Display traversal is bounded to 64 elements and prints `...` when a remaining
+tail might continue; it never forces an additional tail merely to decide that.
+Equality and hashing do not use that display bound: they remain exact,
+structural, and stack-safe across vectors, lists, `SeqNode`, and `LazySeq`.
+Consequently, comparing or hashing distinct unbounded sequences has Clojure's
+natural non-termination behavior, while comparing the same value uses identity
+as a fast path.
+
 `empty?` calls `seq` for sequence values, realizing at most the first cell. It
 continues to use `count` for finite counted collections.
 
@@ -67,9 +75,9 @@ continues to use `count` for finite counted collections.
 4. Done: add `SeqNode`, an owned head plus a non-forced sequence tail; route
    `seq`, `first`, `rest`, `nth`, `last`, and public `count` through it.
    Zero-arity `range` is the first unbounded producer.
-5. Define bounded printer, equality, and hashing semantics for general
-   sequences. Until then a sequence step prints safely as `#<seq>` and uses
-   identity equality/hash, avoiding accidental traversal of an infinite value.
+5. Done: add a 64-element bounded display representation and exact structural
+   equality/hash for finite general sequences. General sequence traversal is
+   iterative, so semantic non-termination never becomes a Rust stack overflow.
 6. Convert `repeat`, `repeatedly`, `iterate`, `cycle`, `concat`, `map`,
    `filter`, `take`, `drop`, `interleave`, and `dedupe` one family at a time.
    Each conversion requires
@@ -82,7 +90,7 @@ No eager API becomes lazy without the matching contract and parity cases.
 ## Non-goals for the first milestone
 
 - Character values and string sequencing
-- Bounded printing and structural equality/hash for general sequences
+- User-configurable dynamic print bounds (`*print-length*`)
 - Parallel realization, futures, promises, or IPC
 - Reusing the atom-backed map representation from `clorus.lazy`
 
