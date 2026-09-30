@@ -8,6 +8,7 @@ use clorus_codegen::namespace_context::{ImportBinding, NamespaceContext};
 use clorus_syntax::{Expr, RequireSpec};
 use clorus_syntax::macros::{expand_macros_with_registry, MacroRegistry};
 use inkwell::context::Context;
+use inkwell::execution_engine::ExecutionEngine;
 use inkwell::OptimizationLevel;
 use std::collections::{HashSet, HashMap};
 use std::env;
@@ -148,6 +149,13 @@ pub struct ReplEngine<'ctx> {
     /// Track executed init forms for later reference
     /// Stores parsed expressions that have been successfully compiled and executed
     executed_init_exprs: Vec<(String, Expr)>,
+    /// The module that produced the currently live REPL values. A native
+    /// lazy sequence retains a JIT closure and may be forced after its input
+    /// expression returns, so disposing this engine would turn that closure
+    /// into a dangling machine-code pointer. Replacing it only after the
+    /// next complete replay keeps the current state valid without retaining
+    /// every historical replay indefinitely.
+    active_jit_engine: Option<ExecutionEngine<'ctx>>,
 }
 
 impl<'ctx> ReplEngine<'ctx> {
@@ -167,6 +175,7 @@ impl<'ctx> ReplEngine<'ctx> {
             module_exprs: Vec::new(),
             macro_registry: MacroRegistry::new(),
             executed_init_exprs: Vec::new(),
+            active_jit_engine: None,
         };
 
         // Note: Stdlib is now loaded separately in lib.rs to avoid O(n²) recompilation
@@ -1096,12 +1105,14 @@ impl<'ctx> ReplEngine<'ctx> {
         }
         unsafe {
             type EvalFunc = unsafe extern "C" fn() -> *mut u8;
-            let jit_fn = engine.get_function::<EvalFunc>(&latest_fn_name)
-                .map_err(|e| format!("Function not found: {}", e))?;
-            if repl_debug_enabled() {
-                eprintln!("DEBUG eval_internal: Calling JIT function...");
-            }
-            let value = jit_fn.call();
+            let value = {
+                let jit_fn = engine.get_function::<EvalFunc>(&latest_fn_name)
+                    .map_err(|e| format!("Function not found: {}", e))?;
+                if repl_debug_enabled() {
+                    eprintln!("DEBUG eval_internal: Calling JIT function...");
+                }
+                jit_fn.call()
+            };
             if repl_debug_enabled() {
                 eprintln!("DEBUG eval_internal: JIT function returned successfully");
             }
@@ -1122,6 +1133,10 @@ impl<'ctx> ReplEngine<'ctx> {
             }
 
             self.macro_registry = macro_registry;
+            // Keep the generated code alive for closures stored in native
+            // values (notably LazySeq). The prior engine remains alive while
+            // this full replay executes, then is replaced atomically here.
+            self.active_jit_engine = Some(engine);
             Ok(EvalResult { value, kind: eval_kind })
         }
     }

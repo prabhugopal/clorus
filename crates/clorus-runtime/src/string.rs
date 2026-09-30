@@ -389,57 +389,43 @@ pub extern "C" fn clorus_join(sep: *mut Value, coll: *mut Value) -> *mut Value {
             return rust_string_to_value(String::new());
         }
 
-        // Handle vectors and lists
-        match (*coll).header().tag() {
-            ValueTag::Vector => {
-                let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
-                let count = (*vec_ptr).count();
-
-                let mut parts = Vec::new();
-                for i in 0..count {
-                    let elem = PersistentVector::nth(vec_ptr, i);
-                    parts.push(value_to_rust_string(elem));
-                    crate::value::clorus_release(elem);
-                }
-
-                rust_string_to_value(parts.join(&separator))
-            }
-            ValueTag::List => {
-                let list_ptr = (*coll).as_ptr() as *mut crate::list::PersistentList;
-                let mut current = (*list_ptr).clone();
-                let mut parts = Vec::new();
-
-                while !current.is_empty() {
-                    let elem = current.first();
-                    parts.push(value_to_rust_string(elem));
-                    current = current.rest();
-                }
-
-                rust_string_to_value(parts.join(&separator))
-            }
-            ValueTag::HashMap | ValueTag::HashSet => {
-                // Matches Clojure: maps/sets are seqable, so join walks
-                // their entries/elements too -- (join "," {:a 1}) => "[:a 1]".
-                // Reuses the same seqable-vector helper collections::mod
-                // uses for first/rest/last/nth/take/drop/concat.
-                match crate::collections::coll_as_seqable_vector(coll) {
-                    Some(seq_vec) => {
-                        let vec_ptr = (*seq_vec).as_ptr() as *mut PersistentVector;
-                        let count = (*vec_ptr).count();
-                        let mut parts = Vec::new();
-                        for i in 0..count {
-                            let elem = PersistentVector::nth(vec_ptr, i);
-                            parts.push(value_to_rust_string(elem));
-                            crate::value::clorus_release(elem);
-                        }
-                        crate::value::clorus_release(seq_vec);
-                        rust_string_to_value(parts.join(&separator))
-                    }
-                    None => rust_string_to_value(String::new()),
-                }
-            }
-            _ => rust_string_to_value(String::new()),
+        // Join is a sequence consumer. Walking `seq`/`first`/`rest` keeps
+        // vectors, lists, maps, sets, and native lazy sequences on the same
+        // contract; count/nth-only loops silently treated a LazySeq as empty.
+        let mut current = crate::collections::clorus_seq(coll);
+        if crate::value::clorus_is_exception(current) {
+            return current;
         }
+
+        let mut parts = Vec::new();
+        loop {
+            if current.is_null() || (*current).tag() == ValueTag::Nil {
+                if !current.is_null() {
+                    crate::value::clorus_release(current);
+                }
+                break;
+            }
+
+            let elem = crate::collections::clorus_first(current);
+            if crate::value::clorus_is_exception(elem) {
+                crate::value::clorus_release(current);
+                return elem;
+            }
+            parts.push(value_to_rust_string(elem));
+            crate::value::clorus_release(elem);
+
+            let rest = crate::collections::clorus_rest(current);
+            crate::value::clorus_release(current);
+            current = crate::collections::clorus_seq(rest);
+            if !rest.is_null() {
+                crate::value::clorus_release(rest);
+            }
+            if crate::value::clorus_is_exception(current) {
+                return current;
+            }
+        }
+
+        rust_string_to_value(parts.join(&separator))
     }
 }
 

@@ -2209,6 +2209,27 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
                 ValueTag::Nil => {
                     println!("=> nil");
                 }
+                ValueTag::Vector
+                | ValueTag::List
+                | ValueTag::HashMap
+                | ValueTag::HashSet
+                | ValueTag::LazySeq
+                | ValueTag::SeqNode => {
+                    use clorus_runtime::string::clorus_pr_str;
+                    let rendered = clorus_pr_str(value);
+                    if rendered.is_null() {
+                        println!("=> <unprintable sequence>");
+                    } else {
+                        let c_str = clorus_value_as_cstring(rendered);
+                        if c_str.is_null() {
+                            println!("=> <unprintable sequence>");
+                        } else {
+                            println!("=> {}", std::ffi::CStr::from_ptr(c_str).to_string_lossy());
+                            clorus_free_cstring(c_str);
+                        }
+                        clorus_runtime::value::clorus_release(rendered);
+                    }
+                }
                 _ => {
                     println!("=> {:?}", *value);
                 }

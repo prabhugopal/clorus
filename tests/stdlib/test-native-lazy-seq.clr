@@ -118,6 +118,8 @@
            (into [] (map inc [1 2 3])))
 (assert-eq "into composes lazy map and filter" [1 9]
            (into [] (filter odd? (map (fn [x] (* x x)) [1 2 3 4]))))
+(assert-eq "join consumes a lazy map" "2,4,6"
+           (join "," (map (fn [x] (* x 2)) [1 2 3])))
 (assert-eq "reduce propagates lazy forcing errors" true
            (try
              (do

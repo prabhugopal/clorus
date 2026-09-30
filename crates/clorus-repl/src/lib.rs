@@ -115,8 +115,15 @@ fn display_value(value_ptr: *mut u8) -> String {
             ValueTag::Nil => {
                 "nil".to_string()
             }
-            ValueTag::Vector | ValueTag::List | ValueTag::HashMap | ValueTag::HashSet => {
-                // Use clorus_pr_str for proper formatting of collections
+            ValueTag::Vector
+            | ValueTag::List
+            | ValueTag::HashMap
+            | ValueTag::HashSet
+            | ValueTag::LazySeq
+            | ValueTag::SeqNode => {
+                // Use Clorus's bounded readable printer for all collection
+                // and sequence representations. Native lazy values must
+                // never fall through to Rust's `LazySeq(0x...)` debug form.
                 let pr_str_result = clorus_pr_str(value);
                 if !pr_str_result.is_null() {
                     let result_str = display_value(pr_str_result as *mut u8);
