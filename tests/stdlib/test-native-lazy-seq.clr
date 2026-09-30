@@ -59,4 +59,22 @@
   (assert-eq "seq forces lazy-seq" nil (seq xs))
   (assert-eq "seq realizes once" 1 @calls))
 
+;; A sequence node keeps its tail lazy. This is the first unbounded producer:
+;; consuming a finite prefix must neither precompute nor print the rest.
+(let [xs (range)]
+  (assert-eq "zero-arity range is a sequence" true (seq? xs))
+  (assert-eq "zero-arity range starts at zero" 0 (first xs))
+  (assert-eq "nth traverses lazy range" 4 (nth xs 4))
+  (assert-eq "take bounds lazy range" [0 1 2 3 4] (take 5 xs))
+  (assert-eq "drop preserves lazy range tail" [3 4 5] (take 3 (drop 3 xs))))
+
+;; Exercise finite general steps too: `count` and `last` must traverse a lazy
+;; tail iteratively, while `rest` preserves the tail instead of materializing.
+(let [xs (lazy-seq
+           (__clorus_seq_cons 1
+                              (lazy-seq (__clorus_seq_cons 2 nil))))]
+  (assert-eq "general sequence step count" 2 (count xs))
+  (assert-eq "general sequence step last" 2 (last xs))
+  (assert-eq "general sequence step rest" 2 (first (rest xs))))
+
 (println "native lazy-seq passed")

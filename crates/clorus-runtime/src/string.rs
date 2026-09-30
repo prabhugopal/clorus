@@ -1268,6 +1268,10 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
             }
         }
         ValueTag::LazySeq => "#<lazy-seq>".to_string(),
+        // Traversing a sequence step while printing could realize an
+        // unbounded producer. A bounded Clojure-style printer is a separate
+        // protocol addition; keep this diagnostic representation safe today.
+        ValueTag::SeqNode => "#<seq>".to_string(),
     }
 }
 

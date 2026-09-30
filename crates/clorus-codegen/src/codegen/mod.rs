@@ -332,6 +332,7 @@ impl<'ctx> CodeGen<'ctx> {
             "compare",
             "__clorus_compare_values",
             "__clorus_conj",
+            "__clorus_seq_cons",
             "re-find",
             "re-matches",
             "re-seq",

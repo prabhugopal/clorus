@@ -204,6 +204,9 @@ impl<'ctx> CodeGen<'ctx> {
             ("seq", "clorus_seq", 1),
             ("last", "clorus_last", 1),
             ("empty", "clorus_empty", 1),
+            // Internal stdlib primitive: construct one sequence step while
+            // preserving a lazy tail. It is deliberately not public API.
+            ("__clorus_seq_cons", "clorus_seq_cons", 2),
             // `keys` and `vals` deliberately are *not* runtime fast paths.
             // Their public definitions live in clorus.core and validate that
             // their argument is a map.  Lowering them here bypasses those

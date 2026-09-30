@@ -179,6 +179,22 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
                 crate::value::clorus_release(seq);
                 result
             }
+            ValueTag::SeqNode => {
+                if index == 0 {
+                    crate::seq_node::seq_node_head(coll)
+                } else {
+                    let tail = crate::seq_node::seq_node_tail(coll);
+                    let result = if tail.is_null() || (*tail).tag() == ValueTag::Nil {
+                        Value::nil()
+                    } else {
+                        clorus_nth(tail, index - 1)
+                    };
+                    if !tail.is_null() {
+                        crate::value::clorus_release(tail);
+                    }
+                    result
+                }
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 PersistentVector::nth(vec_ptr, index as u64)
@@ -198,13 +214,11 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
     }
 }
 
-/// Return a real sequence for a non-empty finite collection.
+/// Return a real sequence for a non-empty collection.
 ///
-/// Clorus represents the public sequence contract with `ValueTag::List`:
-/// `seq?` recognizes it and the existing first/rest/count operations already
-/// handle it. Vectors, maps, and sets are materialized into that representation
-/// at this boundary; empty inputs return nil, as in Clojure. Strings are
-/// intentionally excluded until Clorus has a dedicated character value type.
+/// Finite collections materialize to `ValueTag::List`; native `SeqNode`
+/// values keep their possibly-lazy tails intact. Strings are intentionally
+/// excluded until Clorus has a dedicated character value type.
 #[no_mangle]
 pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
     if coll.is_null() {
@@ -214,6 +228,10 @@ pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
     unsafe {
         if (*coll).header().tag() == ValueTag::LazySeq {
             return crate::lazy_seq::clorus_lazy_seq_force(coll);
+        }
+        if (*coll).header().tag() == ValueTag::SeqNode {
+            (*coll).header().retain();
+            return coll;
         }
         if clorus_count(coll) == 0 {
             return Value::nil();
@@ -232,6 +250,7 @@ pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
                 result
             }
             ValueTag::LazySeq => unreachable!("lazy sequence handled before collection dispatch"),
+            ValueTag::SeqNode => unreachable!("sequence node handled before collection dispatch"),
             _ => Value::nil(),
         }
     }
@@ -289,6 +308,7 @@ pub extern "C" fn clorus_first(coll: *mut Value) -> *mut Value {
                 crate::value::clorus_release(seq);
                 result
             }
+            ValueTag::SeqNode => crate::seq_node::seq_node_head(coll),
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 if (*vec_ptr).is_empty() {
@@ -330,6 +350,17 @@ pub extern "C" fn clorus_rest(coll: *mut Value) -> *mut Value {
                 let result = clorus_rest(seq);
                 crate::value::clorus_release(seq);
                 result
+            }
+            ValueTag::SeqNode => {
+                let tail = crate::seq_node::seq_node_tail(coll);
+                if tail.is_null() || (*tail).tag() == ValueTag::Nil {
+                    if !tail.is_null() {
+                        crate::value::clorus_release(tail);
+                    }
+                    crate::list::clorus_list_empty()
+                } else {
+                    tail
+                }
             }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
@@ -384,6 +415,9 @@ pub extern "C" fn clorus_last(coll: *mut Value) -> *mut Value {
                 crate::value::clorus_release(seq);
                 result
             }
+            ValueTag::SeqNode => {
+                clorus_last_sequence(coll)
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 let count = (*vec_ptr).count();
@@ -426,6 +460,59 @@ pub extern "C" fn clorus_last(coll: *mut Value) -> *mut Value {
                 result
             }
             _ => Value::nil(),
+        }
+    }
+}
+
+/// Find the last value of a general sequence without growing the Rust stack.
+/// As in Clojure, an unbounded sequence never yields a result; it remains in
+/// this loop instead of eventually turning that semantic non-termination into
+/// a stack overflow.
+unsafe fn clorus_last_sequence(coll: *mut Value) -> *mut Value {
+    let mut current = clorus_seq(coll);
+    if crate::value::clorus_is_exception(current) {
+        return current;
+    }
+    let mut last = Value::nil();
+
+    loop {
+        if current.is_null() || (*current).tag() == ValueTag::Nil {
+            if !current.is_null() {
+                crate::value::clorus_release(current);
+            }
+            return last;
+        }
+
+        match (*current).tag() {
+            ValueTag::SeqNode => {
+                let head = crate::seq_node::seq_node_head(current);
+                crate::value::clorus_release(last);
+                last = head;
+                let next = crate::seq_node::seq_node_tail(current);
+                crate::value::clorus_release(current);
+                current = next;
+            }
+            ValueTag::LazySeq => {
+                let next = crate::lazy_seq::clorus_lazy_seq_force(current);
+                crate::value::clorus_release(current);
+                if crate::value::clorus_is_exception(next) {
+                    crate::value::clorus_release(last);
+                    return next;
+                }
+                current = next;
+            }
+            _ => {
+                let suffix_last = clorus_last(current);
+                crate::value::clorus_release(current);
+                if suffix_last.is_null() || (*suffix_last).tag() == ValueTag::Nil {
+                    if !suffix_last.is_null() {
+                        crate::value::clorus_release(suffix_last);
+                    }
+                    return last;
+                }
+                crate::value::clorus_release(last);
+                return suffix_last;
+            }
         }
     }
 }
@@ -478,18 +565,68 @@ pub extern "C" fn clorus_count_value(coll: *mut Value) -> *mut Value {
     }
 
     unsafe {
-        if (*coll).header().tag() == ValueTag::LazySeq {
-            let seq = crate::lazy_seq::clorus_lazy_seq_force(coll);
-            if crate::value::clorus_is_exception(seq) {
-                return seq;
-            }
-            let count = clorus_count(seq);
-            crate::value::clorus_release(seq);
-            return Value::long(count);
+        if matches!((*coll).header().tag(), ValueTag::LazySeq | ValueTag::SeqNode) {
+            return clorus_count_sequence_value(coll);
         }
     }
 
     Value::long(clorus_count(coll))
+}
+
+/// Count a general sequence iteratively. This deliberately has the same
+/// termination contract as Clojure's `count`: asking for the count of an
+/// unbounded sequence does not terminate, but it never recurses through Rust
+/// frames or converts a realization error into an ordinary number.
+unsafe fn clorus_count_sequence_value(coll: *mut Value) -> *mut Value {
+    let mut current = clorus_seq(coll);
+    if crate::value::clorus_is_exception(current) {
+        return current;
+    }
+
+    let mut count = 0_i64;
+    loop {
+        if current.is_null() || (*current).tag() == ValueTag::Nil {
+            if !current.is_null() {
+                crate::value::clorus_release(current);
+            }
+            return Value::long(count);
+        }
+
+        match (*current).tag() {
+            ValueTag::List => {
+                let suffix_count = clorus_count(current);
+                crate::value::clorus_release(current);
+                return Value::long(count.saturating_add(suffix_count));
+            }
+            ValueTag::SeqNode => {
+                count = match count.checked_add(1) {
+                    Some(next) => next,
+                    None => {
+                        crate::value::clorus_release(current);
+                        let message = Value::string("count overflowed i64");
+                        let exception = Value::exception(message);
+                        crate::value::clorus_release(message);
+                        return exception;
+                    }
+                };
+                let next = crate::seq_node::seq_node_tail(current);
+                crate::value::clorus_release(current);
+                current = next;
+            }
+            ValueTag::LazySeq => {
+                let next = crate::lazy_seq::clorus_lazy_seq_force(current);
+                crate::value::clorus_release(current);
+                if crate::value::clorus_is_exception(next) {
+                    return next;
+                }
+                current = next;
+            }
+            _ => {
+                crate::value::clorus_release(current);
+                return Value::long(count);
+            }
+        }
+    }
 }
 
 /// Return an empty collection of the same kind as coll.

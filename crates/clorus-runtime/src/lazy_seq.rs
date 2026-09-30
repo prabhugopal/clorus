@@ -83,7 +83,7 @@ impl LazySeqCell {
         // so `(seq lazy-value)` always yields the canonical list sequence.
         let sequenceable = result.is_null() || matches!(
             (*result).tag(),
-            ValueTag::Nil | ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet | ValueTag::LazySeq
+            ValueTag::Nil | ValueTag::List | ValueTag::Vector | ValueTag::HashMap | ValueTag::HashSet | ValueTag::LazySeq | ValueTag::SeqNode
         );
         if !sequenceable {
             let message = Value::string("lazy-seq body must return a sequence or nil");

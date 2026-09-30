@@ -85,6 +85,7 @@ fn metadata_type_name(val: *mut Value) -> &'static str {
             ValueTag::Exception => "exception",
             ValueTag::Socket => "socket",
             ValueTag::LazySeq => "lazy-seq",
+            ValueTag::SeqNode => "seq",
         }
     }
 }
@@ -252,6 +253,7 @@ pub enum ValueTag {
     Exception = 19,      // Language-level exception payload wrapper
     Socket = 20,         // TCP listener or stream handle (see crate::net)
     LazySeq = 21,        // Cached zero-arity thunk (see crate::lazy_seq)
+    SeqNode = 22,        // Immutable head plus a list/lazy/general sequence tail
 }
 
 /// Header for all heap-allocated values
@@ -515,6 +517,14 @@ impl Value {
 
     pub(crate) unsafe fn as_lazy_seq(&self) -> *mut crate::lazy_seq::LazySeqCell {
         self.data.ptr as *mut crate::lazy_seq::LazySeqCell
+    }
+
+    pub(crate) fn from_seq_node(node: *mut crate::seq_node::SeqNode) -> *mut Self {
+        Self::from_ptr(ValueTag::SeqNode, node as *mut u8)
+    }
+
+    pub(crate) unsafe fn as_seq_node(&self) -> *mut crate::seq_node::SeqNode {
+        self.data.ptr as *mut crate::seq_node::SeqNode
     }
 
     /// Create a var value from Var pointer
@@ -1315,6 +1325,11 @@ unsafe fn deallocate_value(val: *mut Value) {
             if !cell.is_null() { drop(Box::from_raw(cell)); }
             drop(Box::from_raw(val));
         }
+        ValueTag::SeqNode => {
+            let node = (*val).as_seq_node();
+            if !node.is_null() { drop(Box::from_raw(node)); }
+            drop(Box::from_raw(val));
+        }
     }
 }
 
@@ -1433,7 +1448,7 @@ pub extern "C" fn clorus_is_bool(val: *mut Value) -> bool {
     }
 }
 
-/// Check if a value is a sequence (a realized list or a native lazy sequence).
+/// Check if a value is a sequence (a list, lazy sequence, or sequence step).
 /// In Clojure, `seq?` remains false for vectors and other collections.
 #[no_mangle]
 pub extern "C" fn clorus_is_seq(val: *mut Value) -> bool {
@@ -1441,7 +1456,7 @@ pub extern "C" fn clorus_is_seq(val: *mut Value) -> bool {
         return false;
     }
     unsafe {
-        matches!((*val).header().tag(), ValueTag::List | ValueTag::LazySeq)
+        matches!((*val).header().tag(), ValueTag::List | ValueTag::LazySeq | ValueTag::SeqNode)
     }
 }
 
@@ -1453,7 +1468,7 @@ pub extern "C" fn clorus_is_coll(val: *mut Value) -> bool {
     }
     unsafe {
         let tag = (*val).header().tag();
-        tag == ValueTag::Vector || tag == ValueTag::List ||
+        tag == ValueTag::Vector || tag == ValueTag::List || tag == ValueTag::SeqNode ||
         tag == ValueTag::HashMap || tag == ValueTag::HashSet
     }
 }
@@ -1695,7 +1710,8 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
 
             ValueTag::Atom | ValueTag::Ref | ValueTag::Agent | ValueTag::Channel |
             ValueTag::Function | ValueTag::MultiArityFunction | ValueTag::Var |
-            ValueTag::OpaquePointer | ValueTag::Exception | ValueTag::Socket | ValueTag::LazySeq =>
+            ValueTag::OpaquePointer | ValueTag::Exception | ValueTag::Socket | ValueTag::LazySeq |
+            ValueTag::SeqNode =>
                 (*left).as_ptr() == (*right).as_ptr(),
         }
     }

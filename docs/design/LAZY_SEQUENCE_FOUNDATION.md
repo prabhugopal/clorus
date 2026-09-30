@@ -16,23 +16,17 @@ Add `ValueTag::LazySeq` whose payload is a heap-owned cell containing:
 ```text
 state: unforced | forcing(thread-id) | realized
 thunk: Function value                 ; retained until realization
-realized: nil | canonical finite List ; retained after realization
+realized: nil | canonical List | SeqNode ; retained after realization
 ```
 
 The thunk is a zero-arity Clorus function. On forcing it returns either `nil`
 or a Clorus sequenceable value. Vectors, maps, and sets are normalized through
 `seq` once and cached as the canonical list representation. Other values are a
-language exception.
-
-### Current boundary
-
-This first milestone delays production of one finite canonical sequence. It
-does **not** yet model a sequence cell whose tail is an arbitrary `Value`, so
-it cannot express a lazy tail or an unbounded Clojure sequence such as
-zero-arity `range`. The persistent `ListNode` tail is currently another list
-node, not a lazy value. A native `SeqNode { head, tail: Value }` (or an
-equivalent general sequence-step representation) is required before migrating
-infinite or incrementally produced core functions.
+language exception. A native `SeqNode { head, tail: Value }` represents the
+other sequence shape: its tail is `nil`, a finite `List`, another `SeqNode`, or
+a `LazySeq`. It owns both references without forcing the tail. This preserves
+the compact persistent-list implementation while allowing an incrementally
+produced sequence to be genuinely unbounded.
 
 Forcing is synchronized. A different thread waits for the current realization
 and observes its cached result; a recursive attempt by the owning thread is a
@@ -51,7 +45,7 @@ traversal is then expressed through these operations:
 
 | Operation | Lazy behavior |
 |---|---|
-| `seq` | Forces at most one cell; returns `nil` or a sequence cell. |
+| `seq` | Forces at most one cell; returns `nil`, a list, or a sequence step. |
 | `first` | Calls `seq`; returns the head or `nil`. |
 | `rest` | Calls `seq`; returns the tail or empty list. |
 | `next` | Calls `rest`, then `seq`. |
@@ -70,13 +64,17 @@ continues to use `count` for finite counted collections.
 3. Done: add the public `lazy-seq` form and verify lexical capture,
    memoization, normalization, error handling, and JIT/AOT behavior. Route
    `count`, `nth`, and `last` through its forcing boundary as well.
-4. Add a native general sequence-step representation, then extend printing,
-   equality, hashing, and the sequence protocol to traverse it safely.
-5. Define bounded-consumption and termination policy before converting
-   `range`, `repeat`, `iterate`, `concat`, `map`, `filter`, `take`, `drop`,
-   `interleave`, and `dedupe` one family at a time. Each conversion requires
+4. Done: add `SeqNode`, an owned head plus a non-forced sequence tail; route
+   `seq`, `first`, `rest`, `nth`, `last`, and public `count` through it.
+   Zero-arity `range` is the first unbounded producer.
+5. Define bounded printer, equality, and hashing semantics for general
+   sequences. Until then a sequence step prints safely as `#<seq>` and uses
+   identity equality/hash, avoiding accidental traversal of an infinite value.
+6. Convert `repeat`, `repeatedly`, `iterate`, `cycle`, `concat`, `map`,
+   `filter`, `take`, `drop`, `interleave`, and `dedupe` one family at a time.
+   Each conversion requires
    finite JIT/AOT/Clojure parity plus an infinite-prefix test.
-6. Add a reducing-function protocol before exposing transducer arities for
+7. Add a reducing-function protocol before exposing transducer arities for
    lazy transforms such as `dedupe`.
 
 No eager API becomes lazy without the matching contract and parity cases.
@@ -84,7 +82,7 @@ No eager API becomes lazy without the matching contract and parity cases.
 ## Non-goals for the first milestone
 
 - Character values and string sequencing
-- General lazy tails or unbounded sequence producers
+- Bounded printing and structural equality/hash for general sequences
 - Parallel realization, futures, promises, or IPC
 - Reusing the atom-backed map representation from `clorus.lazy`
 
@@ -100,7 +98,8 @@ Both JIT and AOT must demonstrate:
 ```
 
 The test suite also proves vector normalization, `empty?`/`take`/`drop`
-traversal, invalid thunk-result handling, JIT/AOT equivalence, and releasing
-unforced or realized cells without a use-after-free. Recursive forcing needs
-a language-level cycle construction test when self-referential lazy bindings
-are available.
+traversal, invalid thunk-result handling, zero-arity `range` prefix
+consumption, JIT/AOT equivalence, and releasing unforced/realized cells or a
+sequence-step lazy tail without a use-after-free. Recursive forcing needs a
+language-level cycle construction test when self-referential lazy bindings are
+available.
