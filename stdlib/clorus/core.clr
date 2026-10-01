@@ -195,6 +195,23 @@
                      (__clorus_conj tails (rest current)))
               nil)))))))
 
+;; Alternate source values and a separator without inspecting past the next
+;; required element. A pending separator is emitted only when its collection
+;; tail is known to be non-empty, so finite inputs never receive a trailing
+;; separator and infinite inputs remain consumable by a finite prefix.
+(defn interpose-lazy-step [separator coll emit-separator]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (if emit-separator
+        (__clorus_seq_cons separator
+                           (interpose-lazy-step separator coll false))
+        (__clorus_seq_cons (first coll)
+                           (interpose-lazy-step separator (rest coll) true))))))
+
+(defn interpose-lazy [separator coll]
+  (interpose-lazy-step separator coll false))
+
 ;; Native lazy transform helpers. `map` emits one source item per realized
 ;; sequence step; `filter` may advance until it finds the next accepted item.
 (defn map-lazy [f coll]

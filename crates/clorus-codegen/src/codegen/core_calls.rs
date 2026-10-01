@@ -3081,27 +3081,14 @@ impl<'ctx> CodeGen<'ctx> {
                     return Err("interpose requires 2 arguments: separator and collection".to_string());
                 }
 
-                // Clojure public API: (interpose separator coll). The native
-                // primitive uses (coll, separator), so the reordering belongs
-                // here at the one explicit ABI boundary.
-                let separator = self.compile_expr(&args[0])?;
-                let collection = self.compile_expr(&args[1])?;
-                let interpose_fn = self
-                    .module
-                    .get_function("clorus_interpose")
-                    .ok_or("clorus_interpose not declared")?;
-                Ok(self
-                    .builder
-                    .build_call(
-                        interpose_fn,
-                        &[collection.into(), separator.into()],
-                        "interpose_call",
-                    )
-                    .unwrap()
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
+                // The public form must not count/index its input: the source
+                // state machine emits a separator only when it has observed a
+                // following element, preserving lazy and infinite inputs.
+                let rewritten = Expr::Call {
+                    func: "interpose-lazy".to_string(),
+                    args: args.to_vec(),
+                };
+                self.compile_expr(&rewritten)
             }
 
             // String operations

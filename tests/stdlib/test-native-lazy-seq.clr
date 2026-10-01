@@ -154,6 +154,20 @@
 (assert-eq "interleave consumes infinite sources by prefix" [0 10 1 11 2 12]
            (take 6 (interleave (range) (range 10))))
 
+(let [calls (atom 0)
+      xs (interpose :sep (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))]
+  (assert-eq "interpose is deferred" 0 @calls)
+  (assert-eq "interpose realizes its first item" 1 (first xs))
+  (assert-eq "interpose realizes one source item" 1 @calls)
+  (assert-eq "interpose emits its separator without advancing input" :sep
+             (first (rest xs)))
+  (assert-eq "interpose still has one realized source item" 1 @calls)
+  (assert-eq "interpose advances at the next source item" 2
+             (first (rest (rest xs))))
+  (assert-eq "interpose realizes the next source item once" 2 @calls))
+(assert-eq "interpose consumes infinite sources by prefix" [0 :x 1 :x 2]
+           (take 5 (interpose :x (range))))
+
 ;; Consumers must traverse the same sequence protocol. In particular, `into`
 ;; is implemented in terms of `reduce`; it cannot rely on a collection's eager
 ;; count when its input is a lazy transform.
