@@ -2855,20 +2855,85 @@ impl<'ctx> CodeGen<'ctx> {
                     .collect::<Result<Vec<_>, _>>()?;
                 let fixed_count = fixed_args.len() as u64;
 
-                // Get collection count
+                // `apply` must realize a finite lazy argument sequence before
+                // sizing its native argument array. The raw i64 count helper
+                // intentionally treats LazySeq as opaque for runtime kernels;
+                // use the value-level count operation here because language
+                // `apply` follows normal sequence semantics.
                 let count_fn = self
                     .module
-                    .get_function("clorus_count")
-                    .ok_or("clorus_count not declared")?;
+                    .get_function("clorus_count_value")
+                    .ok_or("clorus_count_value not declared")?;
                 let count_result = self
                     .builder
                     .build_call(count_fn, &[coll_ptr.into()], "apply_count")
                     .unwrap();
-                let count_i64 = count_result
+                let count_value = count_result
+                    .try_as_basic_value()
+                    .left()
+                    .unwrap()
+                    .into_pointer_value();
+
+                // Counting a lazy sequence is a forcing boundary. Preserve a
+                // failure from its thunk exactly as `count` does instead of
+                // unboxing an exception payload as though it were a number.
+                let current_fn = self
+                    .builder
+                    .get_insert_block()
+                    .unwrap()
+                    .get_parent()
+                    .unwrap();
+                let is_exception_fn = self
+                    .module
+                    .get_function("clorus_is_exception_i32")
+                    .ok_or("clorus_is_exception_i32 not declared")?;
+                let is_exception_i32 = self
+                    .builder
+                    .build_call(
+                        is_exception_fn,
+                        &[count_value.into()],
+                        "apply_count_is_exception",
+                    )
+                    .unwrap()
                     .try_as_basic_value()
                     .left()
                     .unwrap()
                     .into_int_value();
+                let is_exception = self
+                    .builder
+                    .build_int_compare(
+                        inkwell::IntPredicate::NE,
+                        is_exception_i32,
+                        self.context.i32_type().const_zero(),
+                        "apply_count_exception",
+                    )
+                    .unwrap();
+                let exception_block = self
+                    .context
+                    .append_basic_block(current_fn, "apply_count_exception_block");
+                let apply_block = self
+                    .context
+                    .append_basic_block(current_fn, "apply_count_ok");
+                let result_block = self
+                    .context
+                    .append_basic_block(current_fn, "apply_result");
+                self.builder
+                    .build_conditional_branch(is_exception, exception_block, apply_block)
+                    .unwrap();
+
+                self.builder.position_at_end(exception_block);
+                self.builder.build_unconditional_branch(result_block).unwrap();
+                let exception_exit = self.builder.get_insert_block().unwrap();
+
+                self.builder.position_at_end(apply_block);
+                let count_i64 = self
+                    .builder
+                    .build_float_to_signed_int(
+                        self.unbox_number(count_value),
+                        self.context.i64_type(),
+                        "apply_count_i64",
+                    )
+                    .unwrap();
                 let fixed_count_i64 = self.context.i64_type().const_int(fixed_count, false);
                 let total_count_i64 = self
                     .builder
@@ -2882,12 +2947,6 @@ impl<'ctx> CodeGen<'ctx> {
                     .ok_or("clorus_nth not declared")?;
 
                 // Create loop blocks to append collection elements after fixed args.
-                let current_fn = self
-                    .builder
-                    .get_insert_block()
-                    .unwrap()
-                    .get_parent()
-                    .unwrap();
                 let loop_block = self.context.append_basic_block(current_fn, "apply_loop");
                 let body_block = self.context.append_basic_block(current_fn, "apply_body");
                 let end_block = self.context.append_basic_block(current_fn, "apply_end");
@@ -2997,7 +3056,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .get_function("clorus_function_call")
                     .ok_or("clorus_function_call not declared")?;
 
-                let result = self
+                let apply_result = self
                     .builder
                     .build_call(
                         function_call_fn,
@@ -3006,11 +3065,24 @@ impl<'ctx> CodeGen<'ctx> {
                     )
                     .unwrap();
 
-                Ok(result
+                let apply_result = apply_result
                     .try_as_basic_value()
                     .left()
                     .unwrap()
-                    .into_pointer_value())
+                    .into_pointer_value();
+                self.builder.build_unconditional_branch(result_block).unwrap();
+                let apply_exit = self.builder.get_insert_block().unwrap();
+
+                self.builder.position_at_end(result_block);
+                let result = self
+                    .builder
+                    .build_phi(value_ptr_type, "apply_result_value")
+                    .unwrap();
+                result.add_incoming(&[
+                    (&count_value, exception_exit),
+                    (&apply_result, apply_exit),
+                ]);
+                Ok(result.as_basic_value().into_pointer_value())
             }
 
             // New Collection API functions

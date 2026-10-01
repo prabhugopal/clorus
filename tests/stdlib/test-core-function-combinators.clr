@@ -1,0 +1,58 @@
+(ns tests.stdlib.test-core-function-combinators)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "comp supplies every original argument to its rightmost function"
+               ((comp inc +) 1 2 3)
+               7)
+    (assert-eq "comp applies remaining functions right to left"
+               ((comp inc inc inc) 1)
+               4)
+    (assert-eq "complement preserves variadic invocation"
+               ((complement =) 1 2)
+               true)
+    (assert-eq "partial combines bound and supplied arguments"
+               ((partial + 10) 1 2)
+               13)
+    (assert-eq "apply realizes finite lazy argument sequences"
+               (apply + (map inc [1 2 3]))
+               9)
+    (assert-eq "apply propagates lazy realization errors"
+               (throws? (fn [] (apply + (lazy-seq 42))))
+               true)
+    (assert-eq "fnil replaces nil but preserves false"
+               ((fnil (fn [a b c] [a b c]) :a :b :c) false nil nil)
+               [false :b :c])
+    (assert-eq "fnil preserves trailing arguments"
+               ((fnil (fn [& values] values) :a :b :c) nil 2 nil 4)
+               [:a 2 :c 4])
+    (assert-eq "every-pred is true for every predicate and argument"
+               ((every-pred number? pos?) 1 2 3)
+               true)
+    (assert-eq "every-pred short circuits false"
+               ((every-pred number? pos?) 1 -2 3)
+               false)
+    (assert-eq "every-pred with no arguments is true"
+               ((every-pred odd?))
+               true)
+    (assert-eq "some-fn returns the first truthy predicate result"
+               ((some-fn (fn [x] (if (= x 2) :first nil))
+                         (fn [x] (if (= x 1) :second nil)))
+                1 2)
+               :first)
+    (assert-eq "some-fn with no arguments is nil"
+               ((some-fn odd? even?))
+               nil)
+    "PASS"))

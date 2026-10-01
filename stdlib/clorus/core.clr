@@ -473,19 +473,16 @@
           nil
           coll))
 
-;; comp - Function composition
-;; Takes multiple functions and returns a new function that applies them
-;; right-to-left (like mathematical composition)
-;;
-;; Example: (def inc-then-double (comp (partial * 2) inc))
-;;          (inc-then-double 5) ; => 12
+;; comp - Function composition. In the common two- and three-function forms,
+;; the rightmost function receives every supplied argument; remaining functions
+;; receive the result.
 (defn comp
   ([] (fn [x] x))
   ([f] f)
   ([f g]
-   (fn [x] (f (g x))))
+   (fn [& args] (f (apply g args))))
   ([f g h]
-   (fn [x] (f (g (h x)))))
+   (fn [& args] (f (g (apply h args)))))
   ([f g h i & more]
    ;; Use reduce without init to compose all functions
    (reduce (fn [f1 f2] (fn [x] (f1 (f2 x))))
@@ -502,6 +499,56 @@
 (defn complement [f]
   (fn [& args]
     (not (apply f args))))
+
+;; fnil - Return a function which replaces nil in its first one, two, or three
+;; arguments before invoking f. Each generated function preserves Clojure's
+;; minimum arity: the one-default form needs one argument, the two-default form
+;; needs two, and so on.
+(defn fnil
+  ([f x]
+   (fn
+     ([a] (f (if (nil? a) x a)))
+     ([a b] (f (if (nil? a) x a) b))
+     ([a b c] (f (if (nil? a) x a) b c))
+     ([a b c & more]
+      (apply f (concat [(if (nil? a) x a) b c] more)))))
+  ([f x y]
+   (fn
+     ([a b] (f (if (nil? a) x a) (if (nil? b) y b)))
+     ([a b c] (f (if (nil? a) x a) (if (nil? b) y b) c))
+     ([a b c d] (f (if (nil? a) x a) (if (nil? b) y b) c d))
+     ([a b c d & more]
+      (apply f (concat [(if (nil? a) x a) (if (nil? b) y b) c d] more)))))
+  ([f x y z]
+   (fn
+     ([a b c]
+      (f (if (nil? a) x a) (if (nil? b) y b) (if (nil? c) z c)))
+     ([a b c d]
+      (f (if (nil? a) x a) (if (nil? b) y b) (if (nil? c) z c) d))
+     ([a b c d e]
+      (f (if (nil? a) x a) (if (nil? b) y b) (if (nil? c) z c) d e))
+     ([a b c d e & more]
+      (apply f
+             (concat [(if (nil? a) x a)
+                      (if (nil? b) y b)
+                      (if (nil? c) z c)
+                      d
+                      e]
+                     more))))))
+
+;; every-pred - Combine predicates into a predicate that requires every
+;; predicate to succeed for every supplied argument. Empty predicate and
+;; argument collections are vacuously true.
+(defn every-pred [& preds]
+  (fn [& args]
+    (every? (fn [pred] (every? pred args)) preds)))
+
+;; some-fn - Combine predicates into a function that returns the first truthy
+;; predicate result. Predicates are considered in declaration order, each over
+;; the complete argument list, matching Clojure's short-circuit ordering.
+(defn some-fn [& preds]
+  (fn [& args]
+    (some (fn [pred] (some pred args)) preds)))
 
 ;; juxt - Juxtaposition of functions
 ;; Returns a function that applies multiple functions to the same arguments
