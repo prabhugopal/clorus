@@ -85,7 +85,7 @@ continues to use `count` for finite counted collections.
    transforms; their transducer arities are unchanged.
 8. Done: convert `take`, `drop`, and `concat` to incremental native lazy transforms;
    their transducer arities are unchanged.
-9. Done: convert `dedupe`, `interleave`, `interpose`, `partition`, and `partition-all`
+9. Done: convert `dedupe`, `interleave`, `interpose`, `partition`, `partition-all`, and `partition-by`
    to incremental state-machine
    transforms. Each
    conversion requires

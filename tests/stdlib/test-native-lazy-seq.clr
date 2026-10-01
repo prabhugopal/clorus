@@ -177,6 +177,8 @@
            (take 3 (partition-all 2 (range))))
 (assert-eq "partition consumes an infinite source by prefix" [[0 1] [2 3] [4 5]]
            (take 3 (partition 2 (range))))
+(assert-eq "partition-by consumes an infinite source by prefix" [[0 1] [2 3] [4 5]]
+           (take 3 (partition-by (fn [x] (quot x 2)) (range))))
 
 ;; Consumers must traverse the same sequence protocol. In particular, `into`
 ;; is implemented in terms of `reduce`; it cannot rely on a collection's eager
