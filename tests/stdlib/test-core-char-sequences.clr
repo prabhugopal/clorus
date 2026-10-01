@@ -24,5 +24,8 @@
     (assert-eq "subs uses Unicode scalar indexes" (subs "aλb" 1 2) "λ")
     (assert-eq "index-of uses Unicode scalar indexes" (index-of "aλb" "b") 2)
     (assert-eq "last-index-of uses Unicode scalar indexes" (last-index-of "λaλ" "λ") 2)
+    (assert-eq "split empty delimiter produces Unicode character strings"
+               (split "aλ" "")
+               ["a" "λ"])
     (assert-eq "lazy sequence functions consume strings" (concat "ab" "λ") '(\a \b \λ))
     "PASS"))

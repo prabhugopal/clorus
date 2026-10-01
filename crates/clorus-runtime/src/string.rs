@@ -368,13 +368,20 @@ pub extern "C" fn clorus_split(s: *mut Value, delim: *mut Value) -> *mut Value {
             None => return crate::vector::clorus_vector_empty(),
         };
 
-        // Split by delimiter
-        let parts: Vec<&str> = if delimiter.is_empty() {
-            // Empty delimiter - split into chars
-            string.chars().map(|_| "").collect()
-        } else {
-            string.split(&delimiter).collect()
-        };
+        if delimiter.is_empty() {
+            // Empty delimiter splits at Unicode scalar boundaries. Keep the
+            // result values as strings: `split` is a string API even though
+            // string sequencing itself yields Char values.
+            let mut result = PersistentVector::empty();
+            for ch in string.chars() {
+                let part_val = rust_string_to_value(ch.to_string());
+                result = PersistentVector::conj(result, part_val);
+                crate::value::clorus_release(part_val);
+            }
+            return Value::from_ptr(ValueTag::Vector, result as *mut u8);
+        }
+
+        let parts: Vec<&str> = string.split(&delimiter).collect();
 
         // Create vector of string values
         let mut result = PersistentVector::empty();
