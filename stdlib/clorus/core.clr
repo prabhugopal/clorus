@@ -111,6 +111,12 @@
     (or (string? coll) (coll? coll)) (= (count coll) 0)
     true (throw "empty? expects a countable collection")))
 
+;; sequential? - True for ordered sequence values, not maps or sets.
+;; Vectors are sequential even though `seq?` describes the canonical list and
+;; lazy sequence representations produced during traversal.
+(defn sequential? [x]
+  (or (vector? x) (list? x) (seq? x)))
+
 (defn take-lazy [n coll]
   (lazy-seq
     (if (or (<= n 0) (empty? coll))
@@ -194,6 +200,25 @@
 
 (defn distinct-lazy [coll]
   (distinct-lazy-step #{} coll))
+
+;; Flatten only sequential values, matching Clojure: maps and sets are leaves
+;; when nested, and a non-sequential root has no flattened elements.
+(defn flatten-seq-lazy [coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [item (first coll)
+            tail (rest coll)]
+        (if (sequential? item)
+          ;; `concat` retains both branches as lazy tails. In particular, the
+          ;; outer input is not traversed beyond the nested item being emitted.
+          (concat (flatten-seq-lazy item) (flatten-seq-lazy tail))
+          (__clorus_seq_cons item (flatten-seq-lazy tail)))))))
+
+(defn flatten-lazy [coll]
+  (if (sequential? coll)
+    (flatten-seq-lazy coll)
+    nil))
 
 ;; Force one item from each input sequence to decide whether a full round is
 ;; available. `concat` emits the prepared finite round before it reaches the

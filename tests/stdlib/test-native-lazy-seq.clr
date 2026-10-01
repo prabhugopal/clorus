@@ -209,6 +209,22 @@
 (assert-eq "distinct consumes an infinite source by prefix" [0 1 2 3]
            (take 4 (distinct (map (fn [x] (quot x 2)) (range)))))
 
+(let [calls (atom 0)
+      xs (flatten (map (fn [x] (do (swap! calls inc) [x [x]])) [1 2 3]))]
+  (assert-eq "flatten is deferred" 0 @calls)
+  (assert-eq "flatten realizes the first nested source item" 1 (first xs))
+  (assert-eq "flatten does not precompute outer items" 1 @calls)
+  (assert-eq "flatten descends the current nested item first" 1 (first (rest xs)))
+  (assert-eq "flatten retains the same source prefix while descending" 1 @calls)
+  (assert-eq "flatten advances the outer source incrementally" 2
+             (first (rest (rest xs))))
+  (assert-eq "flatten invokes only reached outer mappings" 2 @calls))
+(assert-eq "flatten consumes nested infinite input by prefix" [0 0 1 1 2]
+           (take 5 (flatten (map (fn [x] [x [x]]) (range)))))
+(assert-eq "flatten retains nested map and set leaves" [{:a 1} #{2} 3]
+           (flatten [{:a 1} #{2} [3]]))
+(assert-eq "flatten ignores a non-sequential root" [] (flatten {:a 1}))
+
 (let [left-calls (atom 0)
       right-calls (atom 0)
       xs (interleave (map (fn [x] (do (swap! left-calls inc) x)) [1 2])

@@ -3080,6 +3080,22 @@ impl<'ctx> CodeGen<'ctx> {
                 self.compile_expr(&rewritten)
             }
 
+            "flatten" => {
+                if args.len() != 1 {
+                    return Err("flatten requires 1 argument: collection".to_string());
+                }
+
+                // The legacy helper recursively realizes vectors/lists into
+                // a vector. Public flatten instead follows the language's
+                // sequential? predicate and retains the depth-first walk as
+                // a native lazy sequence, shared by JIT and AOT.
+                let rewritten = Expr::Call {
+                    func: "flatten-lazy".to_string(),
+                    args: args.to_vec(),
+                };
+                self.compile_expr(&rewritten)
+            }
+
             "interleave" => {
                 // `interleave` is variadic, so package its already-evaluated
                 // inputs in a finite vector. `interleave-lazy` then realizes
