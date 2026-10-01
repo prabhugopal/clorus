@@ -5,6 +5,16 @@
 
 use crate::value::Value;
 
+/// Calling convention used by a function value.
+///
+/// `Legacy` remains available for native runtime callbacks which expose a
+/// fixed Rust/C ABI. Compiler-generated Clorus functions use `CallFrame`, a
+/// single stable ABI which carries the complete argument array and count.
+/// Keeping the distinction explicit prevents an unsafe transmute from
+/// treating a native callback as generated code (or vice versa).
+const CALL_CONVENTION_LEGACY: u8 = 0;
+const CALL_CONVENTION_FRAME: u8 = 1;
+
 #[inline]
 fn call_error_logging_enabled() -> bool {
     std::env::var("CLORUS_LOG_CALL_ERRORS")
@@ -21,6 +31,11 @@ pub struct FunctionData {
     pub func_ptr: *const u8,
     /// Arity (number of parameters)
     pub arity: i32,
+    /// ABI expected by `func_ptr`; see the calling-convention constants above.
+    call_convention: u8,
+    /// Explicit padding keeps the trailing captured-value array naturally
+    /// aligned on every supported target.
+    _padding: [u8; 3],
     /// Number of captured environment values
     env_size: u32,
     // Following this struct in memory is an array of *mut Value (captured environment)
@@ -44,6 +59,12 @@ pub struct MultiArityFunctionData {
     pub arity_count: u32,
     /// Number of captured environment values (shared across all arities)
     pub env_size: u32,
+    /// ABI shared by every function pointer in the variants array.
+    call_convention: u8,
+    // The variants contain pointers and therefore require 8-byte alignment.
+    // Keep this header exactly 16 bytes so `ptr.offset(1)` is aligned even
+    // though the header itself has no pointer field.
+    _padding: [u8; 7],
     // Following this struct in memory:
     // 1. Array of ArityVariant: [ArityVariant; arity_count]
     // 2. Array of captured values: [*mut Value; env_size]
@@ -64,6 +85,33 @@ pub extern "C" fn clorus_function_new(
     env: *const *mut Value,
     env_size: u32,
 ) -> *mut Value {
+    function_new_with_convention(func_ptr, arity, env, env_size, CALL_CONVENTION_LEGACY)
+}
+
+/// Create a compiler-generated function value using the uniform call-frame
+/// ABI: `fn(args: *const *mut Value, arg_count: i32, env: *mut i8) -> Value`.
+///
+/// This is deliberately separate from `clorus_function_new`: embedders can
+/// continue to register small, typed native callbacks through the legacy API,
+/// while generated language functions are no longer limited by a handwritten
+/// set of host signatures.
+#[no_mangle]
+pub extern "C" fn clorus_function_new_call_frame(
+    func_ptr: *const u8,
+    arity: i32,
+    env: *const *mut Value,
+    env_size: u32,
+) -> *mut Value {
+    function_new_with_convention(func_ptr, arity, env, env_size, CALL_CONVENTION_FRAME)
+}
+
+fn function_new_with_convention(
+    func_ptr: *const u8,
+    arity: i32,
+    env: *const *mut Value,
+    env_size: u32,
+    call_convention: u8,
+) -> *mut Value {
     use std::alloc::{alloc, Layout};
 
     unsafe {
@@ -79,6 +127,8 @@ pub extern "C" fn clorus_function_new(
         // Initialize function data
         (*ptr).func_ptr = func_ptr;
         (*ptr).arity = arity;
+        (*ptr).call_convention = call_convention;
+        (*ptr)._padding = [0; 3];
         (*ptr).env_size = env_size;
 
         // Copy environment pointers (after the FunctionData struct)
@@ -97,6 +147,43 @@ pub extern "C" fn clorus_function_new(
 
         // Wrap in Value
         Value::from_function(ptr)
+    }
+}
+
+type CallFrameFunction = unsafe extern "C" fn(*const *mut Value, i32, *mut i8) -> *mut Value;
+
+unsafe fn call_frame_function(
+    func_ptr: *const u8,
+    args: *const *mut Value,
+    arg_count: i32,
+    env_ptr: *mut i8,
+) -> *mut Value {
+    let function: CallFrameFunction = std::mem::transmute(func_ptr);
+    function(args, arg_count, env_ptr)
+}
+
+/// Collect the tail of a call frame for a compiler-generated variadic
+/// function. Zero trailing arguments use nil, matching direct variadic calls
+/// and keeping the representation independent of the caller (JIT or AOT).
+#[no_mangle]
+pub extern "C" fn clorus_call_frame_rest(
+    args: *const *mut Value,
+    start: i32,
+    arg_count: i32,
+) -> *mut Value {
+    unsafe {
+        if start < 0 || arg_count < start || (arg_count > 0 && args.is_null()) {
+            return Value::nil();
+        }
+        if start == arg_count {
+            return Value::nil();
+        }
+
+        let mut rest_vec = crate::vector::clorus_vector_empty();
+        for i in start..arg_count {
+            rest_vec = crate::vector::clorus_vector_conj(rest_vec, *args.offset(i as isize));
+        }
+        rest_vec
     }
 }
 
@@ -220,6 +307,12 @@ pub extern "C" fn clorus_function_call(
     arg_count: i32,
 ) -> *mut Value {
     unsafe {
+        if arg_count < 0 {
+            if call_error_logging_enabled() {
+                eprintln!("Function call received a negative argument count: {}", arg_count);
+            }
+            return Value::nil();
+        }
         if func_val.is_null() {
             if call_error_logging_enabled() {
                 eprintln!("Attempted to call null as function");
@@ -281,6 +374,21 @@ pub extern "C" fn clorus_function_call(
         } else {
             std::ptr::null_mut()
         };
+
+        if encoded_arity < 0 && arg_count < -encoded_arity - 1 {
+            if call_error_logging_enabled() {
+                eprintln!(
+                    "Arity mismatch: variadic function expected at least {}, got {}",
+                    -encoded_arity - 1,
+                    arg_count
+                );
+            }
+            return Value::nil();
+        }
+
+        if (*func_data).call_convention == CALL_CONVENTION_FRAME {
+            return call_frame_function(func_ptr, args, arg_count, env_ptr);
+        }
 
         if encoded_arity >= 0 {
             call_non_variadic_function(func_ptr, args, arg_count, env_ptr)
@@ -354,6 +462,40 @@ pub extern "C" fn clorus_multi_arity_function_new(
     env: *const *mut Value,
     env_size: u32,
 ) -> *mut Value {
+    multi_arity_function_new_with_convention(
+        arities,
+        arity_count,
+        env,
+        env_size,
+        CALL_CONVENTION_LEGACY,
+    )
+}
+
+/// Create a multi-arity compiler-generated closure whose variants all use the
+/// uniform call-frame ABI documented by `clorus_function_new_call_frame`.
+#[no_mangle]
+pub extern "C" fn clorus_multi_arity_function_new_call_frame(
+    arities: *const ArityVariant,
+    arity_count: u32,
+    env: *const *mut Value,
+    env_size: u32,
+) -> *mut Value {
+    multi_arity_function_new_with_convention(
+        arities,
+        arity_count,
+        env,
+        env_size,
+        CALL_CONVENTION_FRAME,
+    )
+}
+
+fn multi_arity_function_new_with_convention(
+    arities: *const ArityVariant,
+    arity_count: u32,
+    env: *const *mut Value,
+    env_size: u32,
+    call_convention: u8,
+) -> *mut Value {
     use std::alloc::{alloc, Layout};
 
     unsafe {
@@ -370,6 +512,8 @@ pub extern "C" fn clorus_multi_arity_function_new(
         // Initialize header
         (*ptr).arity_count = arity_count;
         (*ptr).env_size = env_size;
+        (*ptr).call_convention = call_convention;
+        (*ptr)._padding = [0; 7];
 
         // Copy arity variants (after header)
         let variants_dest = ptr.offset(1) as *mut ArityVariant;
@@ -402,6 +546,12 @@ pub extern "C" fn clorus_multi_arity_function_call(
     arg_count: i32,
 ) -> *mut Value {
     unsafe {
+        if arg_count < 0 {
+            if call_error_logging_enabled() {
+                eprintln!("Multi-arity function received a negative argument count: {}", arg_count);
+            }
+            return Value::nil();
+        }
         // Extract multi-arity function data
         let multi_func_data = (*func_val).as_multi_arity_function();
 
@@ -451,11 +601,48 @@ pub extern "C" fn clorus_multi_arity_function_call(
 
         let func_ptr = (*matched_variant).func_ptr;
         let encoded_arity = (*matched_variant).arity;
-        if encoded_arity >= 0 {
+        if (*multi_func_data).call_convention == CALL_CONVENTION_FRAME {
+            call_frame_function(func_ptr, args, arg_count, env_ptr)
+        } else if encoded_arity >= 0 {
             call_non_variadic_function(func_ptr, args, arg_count, env_ptr)
         } else {
             let fixed_count = -encoded_arity - 1;
             call_variadic_function(func_ptr, args, arg_count, fixed_count, env_ptr)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    extern "C" fn count_call_frame(
+        _args: *const *mut Value,
+        arg_count: i32,
+        _env: *mut i8,
+    ) -> *mut Value {
+        Value::long(arg_count as i64)
+    }
+
+    #[test]
+    fn call_frame_accepts_arbitrary_fixed_arity() {
+        unsafe {
+            let function = clorus_function_new_call_frame(
+                count_call_frame as *const u8,
+                7,
+                std::ptr::null(),
+                0,
+            );
+            let args = (0..7).map(Value::long).collect::<Vec<_>>();
+            let result = clorus_function_call(function, args.as_ptr(), args.len() as i32);
+
+            assert_eq!((*result).as_long(), 7);
+
+            crate::value::clorus_release(result);
+            crate::value::clorus_release(function);
+            for arg in args {
+                crate::value::clorus_release(arg);
+            }
         }
     }
 }

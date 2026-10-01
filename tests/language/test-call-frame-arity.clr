@@ -1,0 +1,49 @@
+(ns tests.language.test-call-frame-arity)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+;; These calls intentionally pass through local function values. Direct named
+;; calls have always had their full static signature available; this covers the
+;; runtime closure boundary used by higher-order functions and apply.
+(defn sum7 [a b c d e f g]
+  (+ a b c d e f g))
+
+(defn invoke7 [fn-value]
+  (fn-value 1 2 3 4 5 6 7))
+
+(defn count-tail [a b c d e f & tail]
+  (count tail))
+
+(defn invoke8 [fn-value]
+  (fn-value 1 2 3 4 5 6 7 8))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "fixed seven-argument closure through local call"
+               (invoke7 sum7)
+               28)
+    (assert-eq "apply fixed seven-argument closure"
+               (apply sum7 [1 2 3 4 5 6 7])
+               28)
+    (assert-eq "variadic closure with six fixed arguments"
+               (invoke8 count-tail)
+               2)
+    (assert-eq "capturing seven-argument closure through apply"
+               (let [offset 10
+                     fn-value (fn [a b c d e f g]
+                                (+ offset a b c d e f g))]
+                 (apply fn-value [1 2 3 4 5 6 7]))
+               38)
+    (let [fn-value (fn
+                     ([a b c d e f g] 7)
+                     ([a b c d e f & tail] (count tail)))]
+      (assert-eq "multi-arity closure prefers exact seven-arity"
+                 (fn-value 1 2 3 4 5 6 7)
+                 7)
+      (assert-eq "multi-arity closure selects variadic call frame"
+                 (fn-value 1 2 3 4 5 6 7 8)
+                 2))
+    "PASS"))

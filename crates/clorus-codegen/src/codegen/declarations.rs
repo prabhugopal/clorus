@@ -181,6 +181,11 @@ impl<'ctx> CodeGen<'ctx> {
         );
         self.module
             .add_function("clorus_function_new", function_new_type, None);
+        self.module.add_function(
+            "clorus_function_new_call_frame",
+            function_new_type,
+            None,
+        );
 
         // clorus_function_call(func: *mut Value, args: *const *mut Value, arg_count: i32) -> *mut Value
         let function_call_type = i8_ptr_type.fn_type(
@@ -209,6 +214,24 @@ impl<'ctx> CodeGen<'ctx> {
             multi_arity_function_new_type,
             None,
         );
+        self.module.add_function(
+            "clorus_multi_arity_function_new_call_frame",
+            multi_arity_function_new_type,
+            None,
+        );
+
+        // clorus_call_frame_rest(args: *const *mut Value, start: i32,
+        //                        arg_count: i32) -> *mut Value
+        let call_frame_rest_type = i8_ptr_type.fn_type(
+            &[
+                i8_ptr_type.ptr_type(AddressSpace::default()).into(),
+                self.context.i32_type().into(),
+                self.context.i32_type().into(),
+            ],
+            false,
+        );
+        self.module
+            .add_function("clorus_call_frame_rest", call_frame_rest_type, None);
 
         // clorus_multi_arity_function_call(func: *mut Value, args: *const *mut Value, arg_count: i32) -> *mut Value
         let multi_arity_function_call_type = i8_ptr_type.fn_type(

@@ -100,6 +100,10 @@ pub struct CodeGen<'ctx> {
     /// Function signature metadata for direct-call argument shaping
     /// Maps function name -> (fixed_param_count, has_rest_param)
     function_signatures: HashMap<String, (usize, bool)>,
+    /// Uniform call-frame adapters for compiler-generated functions.
+    /// Direct calls keep using `functions`; values passed through locals or
+    /// higher-order APIs use these adapters instead.
+    function_call_frames: HashMap<String, FunctionValue<'ctx>>,
     /// Rust FFI libraries available for use
     rust_libraries: HashMap<String, RustLibrary>,
     /// Namespace context for symbol resolution
@@ -186,6 +190,7 @@ impl<'ctx> CodeGen<'ctx> {
             globals: HashMap::new(),
             functions: HashMap::new(),
             function_signatures: HashMap::new(),
+            function_call_frames: HashMap::new(),
             rust_libraries: HashMap::new(),
             namespace: NamespaceContext::default_namespace(),
             generated_symbol_prefix: Self::sanitize_symbol_fragment(module_name),
@@ -934,14 +939,21 @@ impl<'ctx> CodeGen<'ctx> {
 
                     if let Some((resolved_name, function)) = function {
                         // Function reference - wrap in function value
-                        // Call clorus_function_new with the function pointer and arity
+                        // Compiler-generated functions use a call-frame adapter
+                        // when passed as values. Native runtime functions retain
+                        // their explicit ABI through the legacy constructor.
+                        let call_frame = self.function_call_frames.get(&resolved_name).copied();
                         let func_new_fn = self
                             .module
-                            .get_function("clorus_function_new")
-                            .ok_or("clorus_function_new not declared")?;
+                            .get_function(if call_frame.is_some() {
+                                "clorus_function_new_call_frame"
+                            } else {
+                                "clorus_function_new"
+                            })
+                            .ok_or("function constructor not declared")?;
 
                         // Get function pointer (cast to *const u8)
-                        let func_ptr = function.as_global_value().as_pointer_value();
+                        let func_ptr = call_frame.unwrap_or(function).as_global_value().as_pointer_value();
                         let i8_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
                         let func_ptr_cast = self
                             .builder
@@ -1761,6 +1773,15 @@ impl<'ctx> CodeGen<'ctx> {
                     fn_values.push((name.clone(), function, params.clone(), rest_param.clone()));
                 }
 
+                let mut fn_call_frames = Vec::with_capacity(fn_values.len());
+                for (_name, function, params, rest_param) in &fn_values {
+                    fn_call_frames.push(self.create_call_frame_adapter(
+                        *function,
+                        params.len(),
+                        rest_param.is_some(),
+                    )?);
+                }
+
                 // Step 2: Compile function bodies
                 for (i, (_name, function, params, rest_param)) in fn_values.iter().enumerate() {
                     let (_fn_name, _fn_params, _fn_rest, fn_body) = &bindings[i];
@@ -1778,10 +1799,12 @@ impl<'ctx> CodeGen<'ctx> {
                     // Create function Value* objects for each letfn function
                     let clorus_make_fn = self
                         .module
-                        .get_function("clorus_function_new")
-                        .ok_or("clorus_function_new not declared")?;
+                        .get_function("clorus_function_new_call_frame")
+                        .ok_or("clorus_function_new_call_frame not declared")?;
 
-                    for (letfn_name, letfn_fn, letfn_params, letfn_rest) in &fn_values {
+                    for (fn_index, (letfn_name, _letfn_fn, letfn_params, letfn_rest)) in
+                        fn_values.iter().enumerate()
+                    {
                         let runtime_arity =
                             Self::runtime_arity(letfn_params.len(), letfn_rest.is_some());
                         let arity_val = self
@@ -1790,7 +1813,7 @@ impl<'ctx> CodeGen<'ctx> {
                             .const_int(runtime_arity as u64, true);
 
                         // Cast function pointer to *const u8
-                        let fn_ptr = letfn_fn.as_global_value().as_pointer_value();
+                        let fn_ptr = fn_call_frames[fn_index].as_global_value().as_pointer_value();
 
                         // No captures for letfn functions (they reference each other but not outer scope)
                         let null_env = self
@@ -1872,10 +1895,10 @@ impl<'ctx> CodeGen<'ctx> {
                 // Step 3: In the outer scope, create function Value* objects and bind to variables
                 let clorus_make_fn = self
                     .module
-                    .get_function("clorus_function_new")
-                    .ok_or("clorus_function_new not declared")?;
+                    .get_function("clorus_function_new_call_frame")
+                    .ok_or("clorus_function_new_call_frame not declared")?;
 
-                for (name, function, params, rest_param) in &fn_values {
+                for (fn_index, (name, _function, params, rest_param)) in fn_values.iter().enumerate() {
                     let runtime_arity = Self::runtime_arity(params.len(), rest_param.is_some());
                     let arity_val = self
                         .context
@@ -1883,7 +1906,7 @@ impl<'ctx> CodeGen<'ctx> {
                         .const_int(runtime_arity as u64, true);
 
                     // Function pointer
-                    let fn_ptr = function.as_global_value().as_pointer_value();
+                    let fn_ptr = fn_call_frames[fn_index].as_global_value().as_pointer_value();
 
                     // No captures for letfn functions
                     let null_env = self
@@ -2204,6 +2227,8 @@ impl<'ctx> CodeGen<'ctx> {
 
                 let fn_type = value_ptr_type.fn_type(&param_types, false);
                 let function = self.module.add_function(&lambda_name, fn_type, None);
+                let call_frame =
+                    self.create_call_frame_adapter(function, params.len(), rest_param.is_some())?;
 
                 // Add function to table (for potential recursive calls)
                 self.functions.insert(lambda_name.clone(), function);
@@ -2361,10 +2386,10 @@ impl<'ctx> CodeGen<'ctx> {
                 // clorus_function_new(func_ptr: *const u8, arity: i32, env: *const *mut Value, env_size: u32) -> *mut Value
                 let function_new_fn = self
                     .module
-                    .get_function("clorus_function_new")
-                    .ok_or("clorus_function_new not declared")?;
+                    .get_function("clorus_function_new_call_frame")
+                    .ok_or("clorus_function_new_call_frame not declared")?;
 
-                let fn_ptr = function.as_global_value().as_pointer_value();
+                let fn_ptr = call_frame.as_global_value().as_pointer_value();
                 let runtime_arity = Self::runtime_arity(params.len(), rest_param.is_some());
                 let arity = self
                     .context
@@ -2445,6 +2470,11 @@ impl<'ctx> CodeGen<'ctx> {
 
                     let fn_type = value_ptr_type.fn_type(&param_types, false);
                     let function = self.module.add_function(&arity_name, fn_type, None);
+                    let call_frame = self.create_call_frame_adapter(
+                        function,
+                        arity.params.len(),
+                        arity.rest_param.is_some(),
+                    )?;
 
                     // Save current state
                     let saved_vars = self.variables.clone();
@@ -2529,7 +2559,7 @@ impl<'ctx> CodeGen<'ctx> {
                     // Store function with its arity
                     let arity_count =
                         Self::runtime_arity(arity.params.len(), arity.rest_param.is_some());
-                    arity_functions.push((arity_count, function));
+                    arity_functions.push((arity_count, function, call_frame));
                 }
 
                 // Now create the multi-arity closure value with captured environment
@@ -2609,7 +2639,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_alloca(arity_variants_array_type, "arity_variants")
                     .unwrap();
 
-                for (i, (arity_count, function)) in arity_functions.iter().enumerate() {
+                for (i, (arity_count, _function, call_frame)) in arity_functions.iter().enumerate() {
                     // Create ArityVariant struct: { arity: i32, func_ptr: *const u8 }
                     let variant_ptr = unsafe {
                         self.builder
@@ -2649,7 +2679,7 @@ impl<'ctx> CodeGen<'ctx> {
                             )
                             .unwrap()
                     };
-                    let fn_ptr = function.as_global_value().as_pointer_value();
+                    let fn_ptr = call_frame.as_global_value().as_pointer_value();
                     self.builder
                         .build_store(func_ptr_field_ptr, fn_ptr)
                         .unwrap();
@@ -2664,8 +2694,8 @@ impl<'ctx> CodeGen<'ctx> {
                 // Call clorus_multi_arity_function_new
                 let multi_arity_function_new_fn = self
                     .module
-                    .get_function("clorus_multi_arity_function_new")
-                    .ok_or("clorus_multi_arity_function_new not declared")?;
+                    .get_function("clorus_multi_arity_function_new_call_frame")
+                    .ok_or("clorus_multi_arity_function_new_call_frame not declared")?;
 
                 let arity_count = i32_type.const_int(arity_functions.len() as u64, false);
                 let env_size = i32_type.const_int(free_vars.len() as u64, false);
@@ -3806,6 +3836,9 @@ impl<'ctx> CodeGen<'ctx> {
                 self.functions.insert(mangled_name.clone(), function);
                 self.function_signatures
                     .insert(mangled_name.clone(), (1, false));
+                let call_frame = self.create_call_frame_adapter(function, 1, false)?;
+                self.function_call_frames
+                    .insert(mangled_name.clone(), call_frame);
                 self.multimethod_dispatch
                     .insert(name.clone(), *dispatch_fn.clone());
                 // Redefining defmulti resets its method/preference table in this compile unit.
@@ -3840,15 +3873,15 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Create and store var-backed function value so #'name carries metadata.
-                let function_ptr = function.as_global_value().as_pointer_value();
+                let function_ptr = call_frame.as_global_value().as_pointer_value();
                 let function_ptr_as_i8 = self
                     .builder
                     .build_pointer_cast(function_ptr, value_ptr_type, "defmulti_func_ptr_cast")
                     .unwrap();
                 let function_new_fn = self
                     .module
-                    .get_function("clorus_function_new")
-                    .ok_or("clorus_function_new not declared")?;
+                    .get_function("clorus_function_new_call_frame")
+                    .ok_or("clorus_function_new_call_frame not declared")?;
                 let arity_val = self.context.i32_type().const_int(1, false);
                 let null_env = value_ptr_type
                     .ptr_type(AddressSpace::default())

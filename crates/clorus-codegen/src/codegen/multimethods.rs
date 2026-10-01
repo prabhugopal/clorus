@@ -40,11 +40,12 @@ impl<'ctx> CodeGen<'ctx> {
 
         if methods.len() == 1 {
             let method = &methods[0];
+            let call_frame = self.create_call_frame_adapter(method.function, method.arity, false)?;
             let function_new_fn = self
                 .module
-                .get_function("clorus_function_new")
-                .ok_or("clorus_function_new not declared")?;
-            let fn_ptr = method.function.as_global_value().as_pointer_value();
+                .get_function("clorus_function_new_call_frame")
+                .ok_or("clorus_function_new_call_frame not declared")?;
+            let fn_ptr = call_frame.as_global_value().as_pointer_value();
             let fn_ptr_cast = self
                 .builder
                 .build_pointer_cast(fn_ptr, value_ptr_type, &format!("{}_fn_ptr_cast", label))
@@ -80,6 +81,10 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
         unique_methods.sort_by_key(|m| m.arity);
+        let mut call_frames = Vec::with_capacity(unique_methods.len());
+        for method in &unique_methods {
+            call_frames.push(self.create_call_frame_adapter(method.function, method.arity, false)?);
+        }
 
         let arity_variant_type = self
             .context
@@ -126,7 +131,7 @@ impl<'ctx> CodeGen<'ctx> {
                     )
                     .unwrap()
             };
-            let fn_ptr = method.function.as_global_value().as_pointer_value();
+            let fn_ptr = call_frames[i].as_global_value().as_pointer_value();
             self.builder.build_store(fn_ptr_field, fn_ptr).unwrap();
         }
 
@@ -141,8 +146,8 @@ impl<'ctx> CodeGen<'ctx> {
 
         let multi_arity_fn = self
             .module
-            .get_function("clorus_multi_arity_function_new")
-            .ok_or("clorus_multi_arity_function_new not declared")?;
+            .get_function("clorus_multi_arity_function_new_call_frame")
+            .ok_or("clorus_multi_arity_function_new_call_frame not declared")?;
         let null_env = value_ptr_type
             .ptr_type(AddressSpace::default())
             .const_null();

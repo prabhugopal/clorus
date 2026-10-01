@@ -2,6 +2,107 @@ use super::*;
 use clorus_syntax::ast::FunctionArity;
 
 impl<'ctx> CodeGen<'ctx> {
+    /// Build the stable runtime entry point for a compiler-generated function.
+    ///
+    /// The target retains Clorus's direct-call ABI (`arg1, ..., rest?, env`),
+    /// which lets static calls stay simple and optimizable. The adapter is the
+    /// only pointer placed in a first-class function value, and always has the
+    /// uniform ABI `(*mut Value*, i32, env) -> *mut Value`. This means dynamic
+    /// calls, `apply`, callbacks, and JIT/AOT all share one arity-independent
+    /// boundary instead of a finite runtime transmute table.
+    pub(super) fn create_call_frame_adapter(
+        &mut self,
+        target: FunctionValue<'ctx>,
+        fixed_param_count: usize,
+        has_rest_param: bool,
+    ) -> Result<FunctionValue<'ctx>, String> {
+        let saved_block = self.builder.get_insert_block();
+        let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let args_ptr_type = value_ptr_type.ptr_type(AddressSpace::default());
+        let i32_type = self.context.i32_type();
+        let adapter_type = value_ptr_type.fn_type(
+            &[args_ptr_type.into(), i32_type.into(), value_ptr_type.into()],
+            false,
+        );
+        let target_name = target
+            .get_name()
+            .to_str()
+            .map_err(|_| "Function name is not valid UTF-8".to_string())?;
+        let adapter_name = format!(
+            "{}_call_frame_{}",
+            target_name,
+            self.module.get_functions().count()
+        );
+        let adapter = self.module.add_function(&adapter_name, adapter_type, None);
+        let entry = self.context.append_basic_block(adapter, "entry");
+        self.builder.position_at_end(entry);
+
+        let args = adapter.get_nth_param(0).unwrap().into_pointer_value();
+        let arg_count = adapter.get_nth_param(1).unwrap().into_int_value();
+        let env = adapter.get_nth_param(2).unwrap().into_pointer_value();
+        let mut target_args: Vec<BasicMetadataValueEnum> =
+            Vec::with_capacity(fixed_param_count + usize::from(has_rest_param) + 1);
+
+        for index in 0..fixed_param_count {
+            let arg_ptr = unsafe {
+                self.builder
+                    .build_gep(
+                        value_ptr_type,
+                        args,
+                        &[i32_type.const_int(index as u64, false)],
+                        &format!("call_frame_arg_{}", index),
+                    )
+                    .unwrap()
+            };
+            let arg = self
+                .builder
+                .build_load(value_ptr_type, arg_ptr, &format!("call_frame_load_{}", index))
+                .unwrap()
+                .into_pointer_value();
+            target_args.push(arg.into());
+        }
+
+        if has_rest_param {
+            let rest_fn = self
+                .module
+                .get_function("clorus_call_frame_rest")
+                .ok_or("clorus_call_frame_rest not declared")?;
+            let rest = self
+                .builder
+                .build_call(
+                    rest_fn,
+                    &[
+                        args.into(),
+                        i32_type.const_int(fixed_param_count as u64, false).into(),
+                        arg_count.into(),
+                    ],
+                    "call_frame_rest",
+                )
+                .unwrap()
+                .try_as_basic_value()
+                .left()
+                .unwrap()
+                .into_pointer_value();
+            target_args.push(rest.into());
+        }
+
+        target_args.push(env.into());
+        let result = self
+            .builder
+            .build_call(target, &target_args, "call_frame_target")
+            .unwrap()
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value();
+        self.builder.build_return(Some(&result)).unwrap();
+
+        if let Some(block) = saved_block {
+            self.builder.position_at_end(block);
+        }
+        Ok(adapter)
+    }
+
     /// Wrap a function body in an implicit self-loop so that `recur` at the
     /// tail of the body gets guaranteed O(1)-stack tail recursion -- a real
     /// LLVM loop via phi nodes, the same mechanism `loop`/`recur` already
@@ -154,6 +255,9 @@ impl<'ctx> CodeGen<'ctx> {
         self.functions.insert(mangled_name.clone(), function);
         self.function_signatures
             .insert(mangled_name.clone(), (params.len(), rest_param.is_some()));
+        let call_frame = self.create_call_frame_adapter(function, params.len(), rest_param.is_some())?;
+        self.function_call_frames
+            .insert(mangled_name.clone(), call_frame);
 
         // Save current state
         let saved_vars = self.variables.clone();
@@ -225,15 +329,15 @@ impl<'ctx> CodeGen<'ctx> {
         // Create a function Value and store it in a Var-backed global so
         // #'name and (meta #'name) work for defn as well.
         let fn_value = {
-            let function_ptr = function.as_global_value().as_pointer_value();
+            let function_ptr = call_frame.as_global_value().as_pointer_value();
             let function_ptr_as_i8 = self
                 .builder
                 .build_pointer_cast(function_ptr, value_ptr_type, "defn_func_ptr_cast")
                 .unwrap();
             let function_new_fn = self
                 .module
-                .get_function("clorus_function_new")
-                .ok_or("clorus_function_new not declared")?;
+                .get_function("clorus_function_new_call_frame")
+                .ok_or("clorus_function_new_call_frame not declared")?;
             let runtime_arity = Self::runtime_arity(params.len(), rest_param.is_some());
             let arity_val = self
                 .context
@@ -509,6 +613,17 @@ impl<'ctx> CodeGen<'ctx> {
             self.functions.insert(base_name.clone(), *last_fn);
         }
 
+        let mut arity_call_frames = Vec::with_capacity(arity_functions.len());
+        for ((arity_name, function), arity) in arity_functions.iter().zip(arities.iter()) {
+            let call_frame = self.create_call_frame_adapter(
+                *function,
+                arity.params.len(),
+                arity.rest_param.is_some(),
+            )?;
+            self.function_call_frames.insert(arity_name.clone(), call_frame);
+            arity_call_frames.push(call_frame);
+        }
+
         // STEP 2: Now compile all function bodies (they can call any arity including themselves)
         for (arity_index, arity) in arities.iter().enumerate() {
             let function = arity_functions[arity_index].1;
@@ -579,7 +694,7 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_alloca(arity_variants_array_type, "defn_multi_arity_variants")
                 .unwrap();
 
-            for (i, (_, function)) in arity_functions.iter().enumerate() {
+            for (i, function) in arity_call_frames.iter().enumerate() {
                 let variant_ptr = unsafe {
                     self.builder
                         .build_gep(
@@ -636,8 +751,8 @@ impl<'ctx> CodeGen<'ctx> {
                 .unwrap();
             let multi_arity_function_new_fn = self
                 .module
-                .get_function("clorus_multi_arity_function_new")
-                .ok_or("clorus_multi_arity_function_new not declared")?;
+                .get_function("clorus_multi_arity_function_new_call_frame")
+                .ok_or("clorus_multi_arity_function_new_call_frame not declared")?;
             let arity_count = i32_type.const_int(arity_functions.len() as u64, false);
             let env_ptr = value_ptr_type
                 .ptr_type(AddressSpace::default())
