@@ -835,13 +835,16 @@
 
 ;; butlast - All but last element
 (defn butlast [coll]
-  (if (empty? (rest coll))
-    []
-    ;; cons always prepends regardless of collection type, unlike conj
-    ;; (which appends for a vector) -- conj here silently reversed the
-    ;; result, since this recursion builds up the tail first and needs
-    ;; each earlier element added to the FRONT of what's already built.
-    (cons (first coll) (butlast (rest coll)))))
+  ;; The one-element lookahead is necessary to decide whether the current
+  ;; item is the final element. It also makes an infinite input productive:
+  ;; every element has a successor, so each can be emitted incrementally.
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [tail (rest coll)]
+        (if (empty? tail)
+          nil
+          (__clorus_seq_cons (first coll) (butlast tail)))))))
 
 ;; stable merge helper for numeric sort
 (defn merge-sorted-numeric [left right]

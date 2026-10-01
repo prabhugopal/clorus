@@ -159,6 +159,16 @@
            (take 5 (mapcat (fn [x] [x x]) (range))))
 
 (let [calls (atom 0)
+      xs (butlast (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))]
+  (assert-eq "butlast is deferred" 0 @calls)
+  (assert-eq "butlast emits the first item with one-item lookahead" 1 (first xs))
+  (assert-eq "butlast realizes only the required lookahead" 2 @calls)
+  (assert-eq "butlast advances its lookahead incrementally" 2 (first (rest xs)))
+  (assert-eq "butlast reaches only the needed final lookahead" 3 @calls))
+(assert-eq "butlast is productive on an infinite source" [0 1 2 3]
+           (take 4 (butlast (range))))
+
+(let [calls (atom 0)
       xs (take 2 (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))]
   (assert-eq "take is deferred" 0 @calls)
   (assert-eq "take realizes one source item" 1 (first xs))
