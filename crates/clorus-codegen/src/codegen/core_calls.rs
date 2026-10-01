@@ -331,16 +331,20 @@ impl<'ctx> CodeGen<'ctx> {
             "derive" => self.compile_simple_2arg_call("derive", "clorus_derive", args),
             "underive" => self.compile_simple_2arg_call("underive", "clorus_underive", args),
             "keyword" => {
-                // keyword takes 1 arg: a string (or anything string-like) to
-                // intern as a keyword -- (keyword "foo") => :foo. Different
-                // from the compiler's many internal clorus_keyword call
-                // sites, which all pass a compile-time-known literal for
-                // :foo syntax itself; this is the first path that lets
-                // Clorus code construct a keyword from a *runtime* string.
-                if args.len() != 1 {
-                    return Err("keyword requires 1 argument: name".to_string());
-                }
-                let str_val = self.compile_expr(&args[0])?;
+                // keyword accepts a name or namespace/name pair. Different
+                // from compiler-internal clorus_keyword calls, this path
+                // constructs a keyword from runtime values.
+                let name_expr = match args {
+                    [name] => name.clone(),
+                    [namespace, name] => Expr::Call {
+                        func: "str".to_string(),
+                        args: vec![namespace.clone(), Expr::String("/".to_string()), name.clone()],
+                    },
+                    _ => {
+                        return Err("keyword requires 1 or 2 arguments: [namespace] name".to_string())
+                    }
+                };
+                let str_val = self.compile_expr(&name_expr)?;
                 let cstr_ptr = self.extract_cstring_from_value(str_val);
                 let keyword_fn = self
                     .module
@@ -349,6 +353,46 @@ impl<'ctx> CodeGen<'ctx> {
                 let result = self
                     .builder
                     .build_call(keyword_fn, &[cstr_ptr.into()], "keyword_call")
+                    .unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+            "symbol" => {
+                // symbol mirrors keyword's one- and two-argument construction
+                // forms but interns a symbol value instead of a keyword.
+                let name_expr = match args {
+                    [name] => name.clone(),
+                    [namespace, name] => Expr::Call {
+                        func: "str".to_string(),
+                        args: vec![namespace.clone(), Expr::String("/".to_string()), name.clone()],
+                    },
+                    _ => {
+                        return Err("symbol requires 1 or 2 arguments: [namespace] name".to_string())
+                    }
+                };
+                let str_val = self.compile_expr(&name_expr)?;
+                let cstr_ptr = self.extract_cstring_from_value(str_val);
+                let symbol_fn = self
+                    .module
+                    .get_function("clorus_symbol")
+                    .ok_or("clorus_symbol not declared")?;
+                let result = self
+                    .builder
+                    .build_call(symbol_fn, &[cstr_ptr.into()], "symbol_call")
+                    .unwrap();
+                Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
+            }
+            "namespace" => {
+                if args.len() != 1 {
+                    return Err("namespace requires 1 argument: keyword or symbol".to_string());
+                }
+                let val = self.compile_expr(&args[0])?;
+                let namespace_fn = self
+                    .module
+                    .get_function("clorus_namespace")
+                    .ok_or("clorus_namespace not declared")?;
+                let result = self
+                    .builder
+                    .build_call(namespace_fn, &[val.into()], "namespace_call")
                     .unwrap();
                 Ok(result.try_as_basic_value().left().unwrap().into_pointer_value())
             }

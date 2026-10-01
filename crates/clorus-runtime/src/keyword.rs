@@ -95,9 +95,9 @@ pub extern "C" fn clorus_keyword_name(val: *mut Value) -> *mut c_char {
 }
 
 /// Get the "name" of a keyword, symbol, or string, matching Clojure's
-/// (name x): the keyword/symbol name with no leading `:` or namespace
-/// separator, or the string itself unchanged. Returns null for any other
-/// type (real Clojure throws ClassCastException there).
+/// (name x): the local keyword/symbol name with no namespace separator, or
+/// the string itself unchanged. Returns null for any other type (real Clojure
+/// throws ClassCastException there).
 /// The returned string must be freed with clorus_free_cstring.
 #[no_mangle]
 pub extern "C" fn clorus_name(val: *mut Value) -> *mut c_char {
@@ -107,8 +107,16 @@ pub extern "C" fn clorus_name(val: *mut Value) -> *mut c_char {
 
     unsafe {
         let name = match (*val).header().tag() {
-            crate::value::ValueTag::Keyword => (*val).as_keyword(),
-            crate::value::ValueTag::Symbol => (*val).as_symbol(),
+            crate::value::ValueTag::Keyword => (*val)
+                .as_keyword()
+                .rsplit_once('/')
+                .map(|(_, name)| name)
+                .unwrap_or_else(|| (*val).as_keyword()),
+            crate::value::ValueTag::Symbol => (*val)
+                .as_symbol()
+                .rsplit_once('/')
+                .map(|(_, name)| name)
+                .unwrap_or_else(|| (*val).as_symbol()),
             crate::value::ValueTag::String => (*val).as_string(),
             _ => return std::ptr::null_mut(),
         };
@@ -116,6 +124,27 @@ pub extern "C" fn clorus_name(val: *mut Value) -> *mut c_char {
             Ok(c_str) => c_str.into_raw(),
             Err(_) => std::ptr::null_mut(),
         }
+    }
+}
+
+/// Return the namespace portion of a keyword or symbol as a language string,
+/// or nil when the value is unqualified. Strings do not have namespaces.
+#[no_mangle]
+pub extern "C" fn clorus_namespace(val: *mut Value) -> *mut Value {
+    if val.is_null() {
+        return Value::nil();
+    }
+
+    unsafe {
+        let qualified = match (*val).header().tag() {
+            crate::value::ValueTag::Keyword => (*val).as_keyword(),
+            crate::value::ValueTag::Symbol => (*val).as_symbol(),
+            _ => return Value::nil(),
+        };
+        qualified
+            .rsplit_once('/')
+            .map(|(namespace, _)| Value::string(namespace))
+            .unwrap_or_else(Value::nil)
     }
 }
 

@@ -1,0 +1,22 @@
+(ns tests.stdlib.test-core-identifiers)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "keyword one-arity" (keyword "user") :user)
+    (assert-eq "keyword two-arity" (keyword "app" "user") :app/user)
+    (assert-eq "name returns the local keyword name" (name :app/user) "user")
+    (assert-eq "name preserves strings" (name "app/user") "app/user")
+    (assert-eq "namespace returns a qualified keyword namespace" (namespace :app/user) "app")
+    (assert-eq "namespace of an unqualified keyword is nil" (namespace :user) nil)
+    (assert-eq "symbol one-arity" (symbol "user") 'user)
+    (assert-eq "symbol two-arity" (symbol "app" "user") 'app/user)
+    (assert-eq "name returns the local symbol name" (name (symbol "app" "user")) "user")
+    (assert-eq "namespace returns a qualified symbol namespace"
+               (namespace (symbol "app" "user"))
+               "app")
+    "PASS"))

@@ -89,6 +89,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_void_fn("clorus_free_cstring", 1);
         self.declare_value_fn("clorus_keyword", 1);
         self.declare_value_fn("clorus_symbol", 1);
+        self.declare_value_fn("clorus_namespace", 1);
         self.declare_value_fn("clorus_gensym", 1);
         self.declare_no_arg_value_fn("clorus_value_nil");
         self.declare_f64_to_value_fn("clorus_value_bool");
