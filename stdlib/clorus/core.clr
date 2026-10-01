@@ -639,6 +639,16 @@
 
 ;; take-while - Take elements while predicate is true
 ;; Example: (take-while (partial > 5) [1 2 3 6 7 1]) ; => [1 2 3]
+(defn take-while-lazy [pred coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [item (first coll)]
+        (if (pred item)
+          (__clorus_seq_cons item
+                             (take-while-lazy pred (rest coll)))
+          nil)))))
+
 (defn take-while
   ([pred]
    (fn [rf]
@@ -648,17 +658,19 @@
   ([pred coll]
   (let [pred (ensure-fn "take-while" pred)
         coll (ensure-coll "take-while" coll)]
-    (loop [remaining coll
-           acc []]
-      (if (empty? remaining)
-        acc
-        (let [x (first remaining)]
-          (if (pred x)
-            (recur (rest remaining) (__clorus_conj acc x))
-            acc)))))))
+    (take-while-lazy pred coll))))
 
 ;; drop-while - Drop elements while predicate is true
 ;; Example: (drop-while (partial > 5) [1 2 3 6 7 1]) ; => [6 7 1]
+(defn drop-while-lazy [pred coll]
+  (lazy-seq
+    (loop [remaining coll]
+      (if (empty? remaining)
+        nil
+        (if (pred (first remaining))
+          (recur (rest remaining))
+          (seq remaining))))))
+
 (defn drop-while
   ([pred]
    (fn [rf]
@@ -672,12 +684,7 @@
   ([pred coll]
   (let [pred (ensure-fn "drop-while" pred)
         coll (ensure-coll "drop-while" coll)]
-    (loop [remaining coll]
-      (if (empty? remaining)
-        []
-        (if (pred (first remaining))
-          (recur (rest remaining))
-          remaining))))))
+    (drop-while-lazy pred coll))))
 
 ;; split-at - Split collection at index n
 ;; Example: (split-at 3 [1 2 3 4 5]) ; => [[1 2 3] [4 5]]
