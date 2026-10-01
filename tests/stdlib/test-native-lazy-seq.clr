@@ -168,6 +168,16 @@
 (assert-eq "interpose consumes infinite sources by prefix" [0 :x 1 :x 2]
            (take 5 (interpose :x (range))))
 
+(let [calls (atom 0)
+      xs (partition-all 2 (map (fn [x] (do (swap! calls inc) x)) [1 2 3 4]))]
+  (assert-eq "partition-all is deferred" 0 @calls)
+  (assert-eq "partition-all realizes one bounded chunk" [1 2] (first xs))
+  (assert-eq "partition-all realizes only its chunk" 2 @calls))
+(assert-eq "partition-all consumes an infinite source by prefix" [[0 1] [2 3] [4 5]]
+           (take 3 (partition-all 2 (range))))
+(assert-eq "partition consumes an infinite source by prefix" [[0 1] [2 3] [4 5]]
+           (take 3 (partition 2 (range))))
+
 ;; Consumers must traverse the same sequence protocol. In particular, `into`
 ;; is implemented in terms of `reduce`; it cannot rely on a collection's eager
 ;; count when its input is a lazy transform.

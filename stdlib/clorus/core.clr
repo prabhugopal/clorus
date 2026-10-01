@@ -545,48 +545,41 @@
 
 ;; partition - Partition collection into chunks of size n
 ;; Example: (partition 2 [1 2 3 4 5 6]) ; => [[1 2] [3 4] [5 6]]
+(defn partition-lazy [n coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [chunk (vec (take n coll))]
+        ;; `partition` omits an incomplete final chunk, but realizing this
+        ;; one bounded chunk is all it needs to decide that contract.
+        (if (= (count chunk) n)
+          (__clorus_seq_cons chunk
+                             (partition-lazy n (drop n coll)))
+          nil)))))
+
 (defn partition [n coll]
   (let [n (ensure-number "partition" n)
         coll (ensure-coll "partition" coll)]
     (if (<= n 0)
       (throw "partition expects positive n")
-      (loop [remaining coll
-             acc []]
-        (if (< (count remaining) n)
-          acc
-          (let [chunk (take n remaining)]
-            (recur (drop n remaining)
-                   (__clorus_conj acc chunk))))))))
+      (partition-lazy n coll))))
 
 ;; partition-all - Like partition but includes incomplete final chunk
 ;; Example: (partition-all 2 [1 2 3 4 5]) ; => [[1 2] [3 4] [5]]
+(defn partition-all-lazy [n coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [chunk (vec (take n coll))]
+        (__clorus_seq_cons chunk
+                           (partition-all-lazy n (drop n coll)))))))
+
 (defn partition-all [n coll]
   (let [n (ensure-number "partition-all" n)
         coll (ensure-coll "partition-all" coll)]
     (if (<= n 0)
       (throw "partition-all expects positive n")
-      (if (vector? coll)
-        (let [len (count coll)]
-          (loop [i 0
-                 acc []]
-            (if (>= i len)
-              acc
-              (let [next-end (+ i n)
-                    end (if (< next-end len) next-end len)
-                    chunk (loop [j i
-                                 out []]
-                            (if (>= j end)
-                              out
-                              (recur (+ j 1)
-                                     (__clorus_conj out (nth coll j)))))]
-                (recur end (__clorus_conj acc chunk))))))
-        (loop [remaining coll
-               acc []]
-          (if (empty? remaining)
-            acc
-            (let [chunk (take n remaining)]
-              (recur (drop n remaining)
-                     (__clorus_conj acc chunk)))))))))
+      (partition-all-lazy n coll))))
 
 ;; partition-by - Partition collection by consecutive runs of (f item)
 ;; Example: (partition-by odd? [1 3 2 4 5]) ; => [[1 3] [2 4] [5]]
