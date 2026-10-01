@@ -511,7 +511,9 @@
 ;;          (stats [1 2 3 4]) ; => [4 1 4]
 (defn juxt [& fns]
   (fn [& args]
-    (map (fn [f] (apply f args)) fns)))
+    ;; Clojure's juxt promises a vector, not merely a sequence. Keep the
+    ;; public result shape stable even though ordinary `map` is lazy.
+    (mapv (fn [f] (apply f args)) fns)))
 
 ;; ============================================================================
 ;; Predicates

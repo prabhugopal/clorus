@@ -5,6 +5,7 @@
   {"name": "vector-eq", "expr": "(= [1 2 3] [1 2 3])"},
   {"name": "map-into-vector", "expr": "(into [] (map inc [1 2 3]))"},
   {"name": "filterv", "expr": "(filterv odd? [1 2 3 4 5])"},
+  {"name": "juxt-vector-result", "expr": "(let [f (juxt inc dec)] (f 3))"},
   {"name": "reduce-sum", "expr": "(reduce + [1 2 3 4 5])"},
   {"name": "str-join", "expr": "(str \"hello\" \"-\" 42)"},
   {"name": "assoc-map", "expr": "(assoc {:a 1} :b 2)"},
