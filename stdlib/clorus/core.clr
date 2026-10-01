@@ -659,6 +659,25 @@
 (defn vec [coll]
   (reduce conj [] coll))
 
+;; vector - Construct a vector from its arguments.
+(defn vector [& args]
+  (vec args))
+
+;; hash-set - Construct a set from its arguments.
+(defn hash-set [& args]
+  (set args))
+
+;; hash-map - Construct a map from key/value argument pairs.
+(defn hash-map [& args]
+  (if (odd? (count args))
+    (throw "hash-map requires an even number of key/value arguments")
+    (loop [result {}
+           remaining args]
+      (if (empty? remaining)
+        result
+        (recur (assoc result (first remaining) (first (rest remaining)))
+               (rest (rest remaining)))))))
+
 ;; zipmap - Create map from keys and values vectors
 ;; Example: (zipmap [:a :b :c] [1 2 3]) ; => {:a 1 :b 2 :c 3}
 (defn zipmap [keys vals]

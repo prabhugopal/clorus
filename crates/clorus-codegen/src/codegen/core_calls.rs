@@ -1223,13 +1223,16 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "conj" | "__clorus_conj" => {
-                // conj takes 2 args: collection, element
-                if args.len() != 2 {
-                    return Err("conj requires 2 arguments: collection, element".to_string());
+                // conj takes a collection followed by zero or more elements.
+                if args.is_empty() {
+                    return Err("conj requires at least 1 argument: collection".to_string());
                 }
 
                 let coll_ptr = self.compile_expr(&args[0])?;
-                let elem_ptr = self.compile_expr(&args[1])?;
+                let elem_ptrs = args[1..]
+                    .iter()
+                    .map(|arg| self.compile_expr(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 // Use generic clorus_conj which dispatches based on collection type
                 let conj_fn = self
@@ -1237,16 +1240,19 @@ impl<'ctx> CodeGen<'ctx> {
                     .get_function("clorus_conj")
                     .ok_or("clorus_conj not declared")?;
 
-                let result = self
-                    .builder
-                    .build_call(conj_fn, &[coll_ptr.into(), elem_ptr.into()], "conj_call")
-                    .unwrap();
+                let mut result_ptr = coll_ptr;
+                for elem_ptr in elem_ptrs {
+                    result_ptr = self
+                        .builder
+                        .build_call(conj_fn, &[result_ptr.into(), elem_ptr.into()], "conj_call")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                }
 
-                Ok(result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
+                Ok(result_ptr)
             }
 
             "list" => {
@@ -1322,90 +1328,109 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "disj" => {
-                // disj takes 2 args: set, element
-                if args.len() != 2 {
-                    return Err("disj requires 2 arguments: set, element".to_string());
+                // disj takes a set followed by zero or more elements.
+                if args.is_empty() {
+                    return Err("disj requires at least 1 argument: set".to_string());
                 }
 
                 let set_ptr = self.compile_expr(&args[0])?;
-                let elem_ptr = self.compile_expr(&args[1])?;
+                let elem_ptrs = args[1..]
+                    .iter()
+                    .map(|arg| self.compile_expr(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let disj_fn = self
                     .module
                     .get_function("clorus_set_disj")
                     .ok_or("clorus_set_disj not declared")?;
 
-                let result = self
-                    .builder
-                    .build_call(disj_fn, &[set_ptr.into(), elem_ptr.into()], "set_disj_call")
-                    .unwrap();
+                let mut result_ptr = set_ptr;
+                for elem_ptr in elem_ptrs {
+                    result_ptr = self
+                        .builder
+                        .build_call(disj_fn, &[result_ptr.into(), elem_ptr.into()], "set_disj_call")
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                }
 
-                Ok(result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
+                Ok(result_ptr)
             }
 
             "assoc" => {
-                // assoc takes 3 args: map, key, value
-                if args.len() != 3 {
-                    return Err("assoc requires 3 arguments: map, key, value".to_string());
+                // assoc takes a map followed by zero or more key/value pairs.
+                if args.is_empty() || args[1..].len() % 2 != 0 {
+                    return Err(
+                        "assoc requires a map followed by zero or more key/value pairs".to_string(),
+                    );
                 }
 
                 let map_ptr = self.compile_expr(&args[0])?;
-                let key_ptr = self.compile_expr(&args[1])?;
-                let val_ptr = self.compile_expr(&args[2])?;
+                let mut pairs = Vec::with_capacity(args[1..].len() / 2);
+                for pair in args[1..].chunks_exact(2) {
+                    pairs.push((self.compile_expr(&pair[0])?, self.compile_expr(&pair[1])?));
+                }
 
                 let assoc_fn = self
                     .module
                     .get_function("clorus_map_assoc")
                     .ok_or("clorus_map_assoc not declared")?;
 
-                let result = self
-                    .builder
-                    .build_call(
-                        assoc_fn,
-                        &[map_ptr.into(), key_ptr.into(), val_ptr.into()],
-                        "map_assoc_call",
-                    )
-                    .unwrap();
+                let mut result_ptr = map_ptr;
+                for (key_ptr, val_ptr) in pairs {
+                    result_ptr = self
+                        .builder
+                        .build_call(
+                            assoc_fn,
+                            &[result_ptr.into(), key_ptr.into(), val_ptr.into()],
+                            "map_assoc_call",
+                        )
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                }
 
-                Ok(result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
+                Ok(result_ptr)
             }
 
             "dissoc" => {
-                // dissoc takes 2 args: map, key
-                if args.len() != 2 {
-                    return Err("dissoc requires 2 arguments: map, key".to_string());
+                // dissoc takes a map followed by zero or more keys.
+                if args.is_empty() {
+                    return Err("dissoc requires at least 1 argument: map".to_string());
                 }
 
                 let map_ptr = self.compile_expr(&args[0])?;
-                let key_ptr = self.compile_expr(&args[1])?;
+                let key_ptrs = args[1..]
+                    .iter()
+                    .map(|arg| self.compile_expr(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let dissoc_fn = self
                     .module
                     .get_function("clorus_map_dissoc")
                     .ok_or("clorus_map_dissoc not declared")?;
 
-                let result = self
-                    .builder
-                    .build_call(
-                        dissoc_fn,
-                        &[map_ptr.into(), key_ptr.into()],
-                        "map_dissoc_call",
-                    )
-                    .unwrap();
+                let mut result_ptr = map_ptr;
+                for key_ptr in key_ptrs {
+                    result_ptr = self
+                        .builder
+                        .build_call(
+                            dissoc_fn,
+                            &[result_ptr.into(), key_ptr.into()],
+                            "map_dissoc_call",
+                        )
+                        .unwrap()
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value();
+                }
 
-                Ok(result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
+                Ok(result_ptr)
             }
 
             "contains?" => {
@@ -3083,28 +3108,6 @@ impl<'ctx> CodeGen<'ctx> {
                     (&apply_result, apply_exit),
                 ]);
                 Ok(result.as_basic_value().into_pointer_value())
-            }
-
-            // New Collection API functions
-            "dissoc" => {
-                if args.len() != 2 {
-                    return Err("dissoc requires 2 arguments: map, key".to_string());
-                }
-                let map_val = self.compile_expr(&args[0])?;
-                let key_val = self.compile_expr(&args[1])?;
-                let dissoc_fn = self
-                    .module
-                    .get_function("clorus_map_dissoc")
-                    .ok_or("clorus_map_dissoc not declared")?;
-                let result = self
-                    .builder
-                    .build_call(dissoc_fn, &[map_val.into(), key_val.into()], "dissoc_call")
-                    .unwrap();
-                Ok(result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
             }
 
             "concat" => {

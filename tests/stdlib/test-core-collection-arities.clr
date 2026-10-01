@@ -1,0 +1,32 @@
+(ns tests.stdlib.test-core-collection-arities)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do (f) false)
+    (catch e true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "vector constructs from arguments" (vector 1 2 3) [1 2 3])
+    (assert-eq "hash-map constructs from pairs" (hash-map :a 1 :b 2) {:a 1 :b 2})
+    (assert-eq "hash-map rejects an incomplete pair" (throws? (fn [] (hash-map :a))) true)
+    (assert-eq "hash-set removes duplicates" (hash-set 1 2 1) #{1 2})
+    (assert-eq "conj supports multiple vector elements" (conj [1] 2 3) [1 2 3])
+    (assert-eq "conj supports multiple list elements" (conj '() 1 2 3) '(3 2 1))
+    (assert-eq "conj zero elements returns the collection" (conj [1]) [1])
+    (assert-eq "assoc supports multiple key/value pairs"
+               (assoc {:a 1} :b 2 :c 3)
+               {:a 1 :b 2 :c 3})
+    (assert-eq "assoc zero pairs returns the map" (assoc {:a 1}) {:a 1})
+    (assert-eq "dissoc supports multiple keys"
+               (dissoc {:a 1 :b 2 :c 3} :a :c)
+               {:b 2})
+    (assert-eq "dissoc zero keys returns the map" (dissoc {:a 1}) {:a 1})
+    (assert-eq "disj supports multiple elements" (disj #{1 2 3} 1 3) #{2})
+    (assert-eq "disj zero elements returns the set" (disj #{1}) #{1})
+    "PASS"))
