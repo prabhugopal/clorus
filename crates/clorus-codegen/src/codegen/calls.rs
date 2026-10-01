@@ -217,7 +217,6 @@ impl<'ctx> CodeGen<'ctx> {
             // ((merge m1 m2 ...)), not a fixed 1-arg passthrough -- see
             // its dedicated case in compile_core_call.
             ("distinct", "clorus_distinct", 1),
-            ("dedupe", "clorus_dedupe", 1),
             ("flatten", "clorus_flatten", 1),
             // `interleave` is variadic. It has a dedicated lowering in
             // compile_core_call that packages all collection arguments into

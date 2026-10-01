@@ -130,6 +130,30 @@
 (assert-eq "concat consumes an infinite source by prefix" [0 1 2 10 11]
            (take 5 (concat (range 3) (range 10))))
 
+(let [calls (atom 0)
+      xs (dedupe (map (fn [x] (do (swap! calls inc) x)) [1 1 2 2 3]))]
+  (assert-eq "dedupe is deferred" 0 @calls)
+  (assert-eq "dedupe realizes its first item" 1 (first xs))
+  (assert-eq "dedupe realizes one source item" 1 @calls)
+  (assert-eq "dedupe skips adjacent duplicates lazily" 2 (first (rest xs)))
+  (assert-eq "dedupe realizes through the next distinct item" 3 @calls))
+(assert-eq "dedupe consumes an infinite source by prefix" [0 1 2 3]
+           (take 4 (dedupe (map (fn [x] (quot x 2)) (range)))))
+
+(let [left-calls (atom 0)
+      right-calls (atom 0)
+      xs (interleave (map (fn [x] (do (swap! left-calls inc) x)) [1 2])
+                     (map (fn [x] (do (swap! right-calls inc) x)) [10 20]))]
+  (assert-eq "interleave is deferred" [0 0] [@left-calls @right-calls])
+  (assert-eq "interleave realizes its first round" 1 (first xs))
+  (assert-eq "interleave forces one item per input for a round" [1 1]
+             [@left-calls @right-calls])
+  (assert-eq "interleave emits the prepared second head" 10 (first (rest xs)))
+  (assert-eq "interleave does not begin the next round early" [1 1]
+             [@left-calls @right-calls]))
+(assert-eq "interleave consumes infinite sources by prefix" [0 10 1 11 2 12]
+           (take 6 (interleave (range) (range 10))))
+
 ;; Consumers must traverse the same sequence protocol. In particular, `into`
 ;; is implemented in terms of `reduce`; it cannot rely on a collection's eager
 ;; count when its input is a lazy transform.

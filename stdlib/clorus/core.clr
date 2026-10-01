@@ -155,6 +155,46 @@
   ([n coll]
    (drop-lazy n coll)))
 
+;; dedupe emits the first item and then skips only consecutive equal values.
+;; The loop may consume several duplicates to discover the next output, but
+;; each successful step leaves the remaining input inside a lazy tail.
+(defn dedupe-lazy-step [has-previous previous coll]
+  (lazy-seq
+    (loop [remaining coll
+           has-previous has-previous
+           previous previous]
+      (if (empty? remaining)
+        nil
+        (let [item (first remaining)
+              tail (rest remaining)]
+          (if (and has-previous (= previous item))
+            (recur tail has-previous previous)
+            (__clorus_seq_cons item
+                               (dedupe-lazy-step true item tail))))))))
+
+(defn dedupe-lazy [coll]
+  (dedupe-lazy-step false nil coll))
+
+;; Force one item from each input sequence to decide whether a full round is
+;; available. `concat` emits the prepared finite round before it reaches the
+;; recursive lazy tail. Clojure's interleave terminates when any input is
+;; empty.
+(defn interleave-lazy [colls]
+  (lazy-seq
+    (if (empty? colls)
+      nil
+      (loop [remaining colls
+             heads []
+             tails []]
+        (if (empty? remaining)
+          (concat heads (interleave-lazy tails))
+          (let [current (seq (first remaining))]
+            (if current
+              (recur (rest remaining)
+                     (__clorus_conj heads (first current))
+                     (__clorus_conj tails (rest current)))
+              nil)))))))
+
 ;; Native lazy transform helpers. `map` emits one source item per realized
 ;; sequence step; `filter` may advance until it finds the next accepted item.
 (defn map-lazy [f coll]

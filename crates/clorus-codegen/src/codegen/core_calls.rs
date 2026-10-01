@@ -3048,52 +3048,32 @@ impl<'ctx> CodeGen<'ctx> {
                 self.compile_expr(&rewritten)
             }
 
-            "interleave" => {
-                // interleave is variadic (including its zero-argument empty
-                // sequence case). The runtime takes one vector containing
-                // all input collections, which keeps the ABI simple without
-                // restricting the source-level arity.
-                let vec_empty_fn = self
-                    .module
-                    .get_function("clorus_vector_empty")
-                    .ok_or("clorus_vector_empty not declared")?;
-                let vec_conj_fn = self
-                    .module
-                    .get_function("clorus_vector_conj")
-                    .ok_or("clorus_vector_conj not declared")?;
-                let mut colls = self
-                    .builder
-                    .build_call(vec_empty_fn, &[], "interleave_colls")
-                    .unwrap()
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value();
-
-                for arg in args {
-                    let coll = self.compile_expr(arg)?;
-                    colls = self
-                        .builder
-                        .build_call(vec_conj_fn, &[colls.into(), coll.into()], "interleave_coll")
-                        .unwrap()
-                        .try_as_basic_value()
-                        .left()
-                        .unwrap()
-                        .into_pointer_value();
+            "dedupe" => {
+                if args.len() != 1 {
+                    return Err("dedupe requires 1 argument: collection".to_string());
                 }
 
-                let interleave_fn = self
-                    .module
-                    .get_function("clorus_interleave")
-                    .ok_or("clorus_interleave not declared")?;
-                Ok(self
-                    .builder
-                    .build_call(interleave_fn, &[colls.into()], "interleave_call")
-                    .unwrap()
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value())
+                // Public dedupe must consume the language sequence protocol,
+                // not the finite count/nth runtime helper. The state-machine
+                // lives in clorus.core so it preserves lazy tails and works
+                // for unbounded inputs in both JIT and AOT execution.
+                let rewritten = Expr::Call {
+                    func: "dedupe-lazy".to_string(),
+                    args: args.to_vec(),
+                };
+                self.compile_expr(&rewritten)
+            }
+
+            "interleave" => {
+                // `interleave` is variadic, so package its already-evaluated
+                // inputs in a finite vector. `interleave-lazy` then realizes
+                // one round at a time through seq/first/rest rather than
+                // treating a LazySeq as count-zero in the old runtime loop.
+                let rewritten = Expr::Call {
+                    func: "interleave-lazy".to_string(),
+                    args: vec![Expr::Vector(args.to_vec())],
+                };
+                self.compile_expr(&rewritten)
             }
 
             "interpose" => {
