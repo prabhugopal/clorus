@@ -43,6 +43,7 @@
     {"name": "keep", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, native lazy sequence"},
     {"name": "keep-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "mapcat", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, native lazy sequence"},
+    {"name": "reductions", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, native lazy sequence"},
     {"name": "butlast", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, native lazy sequence"}
   ]
 }

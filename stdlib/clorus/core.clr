@@ -408,6 +408,30 @@
   ([f coll]
    (mapcat-lazy f coll)))
 
+;; reductions - Lazy running reductions. The accumulator is emitted before
+;; advancing input, and a reduced accumulator is emitted once before stopping.
+(defn reductions-tail-lazy [f acc coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [next-value (f acc (first coll))]
+        (if (reduced? next-value)
+          (__clorus_seq_cons (unreduced next-value) nil)
+          (__clorus_seq_cons next-value
+                             (reductions-tail-lazy f next-value (rest coll))))))))
+
+(defn reductions
+  ([f coll]
+   (lazy-seq
+     (if (empty? coll)
+       nil
+       (let [init (first coll)]
+         (__clorus_seq_cons init
+                            (reductions-tail-lazy f init (rest coll)))))))
+  ([f init coll]
+   (lazy-seq
+     (__clorus_seq_cons init (reductions-tail-lazy f init coll)))))
+
 ;; every? - True when pred is true for all elements
 (defn every? [pred coll]
   (loop [remaining coll]
