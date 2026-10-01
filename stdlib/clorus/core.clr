@@ -304,6 +304,15 @@
   ([pred coll]
    (filter-lazy pred coll)))
 
+;; filterv - Eagerly filter into a vector.
+;; Unlike `filter`, this is an explicit realization boundary and therefore
+;; remains suitable for callers that require persistent-vector output.
+(defn filterv [pred coll]
+  (reduce (fn [acc item]
+            (if (pred item) (conj acc item) acc))
+          []
+          coll))
+
 ;; keep - Apply f to items and keep non-nil results
 ;; Example: (keep (fn [x] (if (odd? x) x nil)) [1 2 3]) ; => [1 3]
 (defn keep-lazy [f coll]

@@ -20,4 +20,13 @@
                (let [factor 3]
                  (mapv (fn [x] (* x factor)) [1 2 3]))
                [3 6 9])
+    (assert-eq "filterv preserves vector output"
+               (filterv odd? [1 2 3 4 5])
+               [1 3 5])
+    (assert-eq "filterv consumes a lazy input"
+               (filterv odd? (take 6 (range)))
+               [1 3 5])
+    (assert-eq "filterv empty"
+               (filterv odd? [])
+               [])
     "PASS"))
