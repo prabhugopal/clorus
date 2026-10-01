@@ -1,0 +1,19 @@
+(ns tests.language.test-function-position-call)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "anonymous function expression"
+               ((fn [x] (+ x 1)) 4)
+               5)
+    (assert-eq "closure expression"
+               ((let [n 2] (fn [x] (+ n x))) 3)
+               5)
+    (assert-eq "produced function expression"
+               ((juxt inc dec) 3)
+               [4 2])
+    "PASS"))

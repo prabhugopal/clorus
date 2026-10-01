@@ -15,6 +15,7 @@
     {"name": "filter", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, REPL"},
     {"name": "filterv", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine stdlib tests"},
     {"name": "juxt", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine higher-order-function tests"},
+    {"name": "function-position invocation", "owner": "codegen", "status": "implemented", "coverage": "dual-engine language tests, core parity"},
     {"name": "remove", "owner": "source-core", "status": "implemented", "coverage": "transducer completion tests"},
     {"name": "take", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, REPL"},
     {"name": "drop", "owner": "source-core", "status": "implemented", "coverage": "transducer completion tests"},

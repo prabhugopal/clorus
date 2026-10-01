@@ -388,7 +388,12 @@ impl<'ctx> CodeGen<'ctx> {
             "update-in",
             "interleave",
             "interpose",
+            // These public APIs are dispatched here only to rewrite them to
+            // their source-level lazy state machines in `compile_core_call`.
+            // They are not runtime builtins.
+            "distinct",
             "dedupe",
+            "flatten",
             // I/O operations
             "print",
             "println",
@@ -487,6 +492,76 @@ impl<'ctx> CodeGen<'ctx> {
             .build_call(deref_fn, &[val_ptr.into()], &format!("{}_deref_var", label))
             .unwrap();
         Ok(result
+            .try_as_basic_value()
+            .left()
+            .unwrap()
+            .into_pointer_value())
+    }
+
+    /// Invoke a runtime function value when the callee is an expression
+    /// rather than a statically resolvable symbol, such as `((juxt inc dec) 3)`.
+    fn compile_function_value_call(
+        &mut self,
+        function_value: PointerValue<'ctx>,
+        args: &[Expr],
+        label: &str,
+    ) -> Result<PointerValue<'ctx>, String> {
+        let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+        let mut arg_values = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_values.push(self.compile_expr(arg)?);
+        }
+
+        let args_array_ptr = if arg_values.is_empty() {
+            value_ptr_type.ptr_type(AddressSpace::default()).const_null()
+        } else {
+            let array_type = value_ptr_type.array_type(arg_values.len() as u32);
+            let array_alloca = self
+                .builder
+                .build_alloca(array_type, &format!("{}_args", label))
+                .unwrap();
+
+            for (index, arg_value) in arg_values.iter().enumerate() {
+                let element_ptr = unsafe {
+                    self.builder
+                        .build_gep(
+                            array_type,
+                            array_alloca,
+                            &[
+                                self.context.i32_type().const_zero(),
+                                self.context.i32_type().const_int(index as u64, false),
+                            ],
+                            &format!("{}_arg_{}", label, index),
+                        )
+                        .unwrap()
+                };
+                self.builder.build_store(element_ptr, *arg_value).unwrap();
+            }
+
+            self.builder
+                .build_pointer_cast(
+                    array_alloca,
+                    value_ptr_type.ptr_type(AddressSpace::default()),
+                    &format!("{}_args_cast", label),
+                )
+                .unwrap()
+        };
+
+        let function_call_fn = self
+            .module
+            .get_function("clorus_function_call")
+            .ok_or("clorus_function_call not declared")?;
+        let arg_count = self.context.i32_type().const_int(arg_values.len() as u64, false);
+        let call_result = self
+            .builder
+            .build_call(
+                function_call_fn,
+                &[function_value.into(), args_array_ptr.into(), arg_count.into()],
+                label,
+            )
+            .unwrap();
+
+        Ok(call_result
             .try_as_basic_value()
             .left()
             .unwrap()
@@ -6240,7 +6315,12 @@ impl<'ctx> CodeGen<'ctx> {
                         _ => Err(format!("Unknown operator: {}", op)),
                     }
                 } else {
-                    Err("First element of list must be a symbol or keyword".to_string())
+                    let function_value = self.compile_expr(&list[0])?;
+                    self.compile_function_value_call(
+                        function_value,
+                        &list[1..],
+                        "expression_function_call",
+                    )
                 }
             }
 
