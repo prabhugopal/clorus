@@ -42,6 +42,7 @@
   {"name": "keep-retains-false", "expr": "(into [] (keep (fn [x] (if (= x 2) false nil)) [1 2 3]))"},
   {"name": "keep-indexed", "expr": "(into [] (keep-indexed (fn [i x] (if (even? i) x nil)) [10 20 30 40]))"},
   {"name": "keep-indexed-retains-false", "expr": "(into [] (keep-indexed (fn [i x] (if (= i 1) false nil)) [1 2 3]))"},
+  {"name": "mapcat", "expr": "(into [] (mapcat (fn [x] [x x]) [1 2 3]))"},
   {"name": "composed-map-filter", "expr": "(into [] (filter odd? (map #(* % %) [1 2 3 4])))"},
   {"name": "take-range", "expr": "(into [] (take 3 (range 10)))"},
   {"name": "partition-by", "expr": "(mapv (fn [xs] (into [] xs)) (partition-by odd? [1 3 2 4 5]))"},

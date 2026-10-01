@@ -135,6 +135,20 @@
            (take 4 (keep-indexed (fn [i x] (if (even? i) x nil)) (range))))
 
 (let [calls (atom 0)
+      xs (mapcat (fn [x] (do (swap! calls inc) [x x])) [1 2 3])]
+  (assert-eq "mapcat is deferred" 0 @calls)
+  (assert-eq "mapcat realizes its first mapped collection" 1 (first xs))
+  (assert-eq "mapcat does not invoke the next mapping early" 1 @calls)
+  (assert-eq "mapcat emits the current mapped tail first" 1 (first (rest xs)))
+  (assert-eq "mapcat preserves the current mapped collection" 1 @calls)
+  (assert-eq "mapcat advances the outer source incrementally" 2 (first (rest (rest xs))))
+  (assert-eq "mapcat invokes only reached mappings" 2 @calls))
+(assert-eq "mapcat skips empty mapped collections lazily" [0 2 4]
+           (take 3 (mapcat (fn [x] (if (even? x) [x] [])) (range))))
+(assert-eq "mapcat consumes an infinite source by prefix" [0 0 1 1 2]
+           (take 5 (mapcat (fn [x] [x x]) (range))))
+
+(let [calls (atom 0)
       xs (take 2 (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))]
   (assert-eq "take is deferred" 0 @calls)
   (assert-eq "take realizes one source item" 1 (first xs))

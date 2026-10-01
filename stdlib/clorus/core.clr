@@ -335,6 +335,20 @@
 
 ;; mapcat - Map then concatenate
 ;; Example: (mapcat (fn [x] [x x]) [1 2]) ; => [1 1 2 2]
+(defn mapcat-lazy-step [f remaining current]
+  (lazy-seq
+    (loop [outer remaining
+           inner current]
+      (if (empty? inner)
+        (if (empty? outer)
+          nil
+          (recur (rest outer) (f (first outer))))
+        (__clorus_seq_cons (first inner)
+                           (mapcat-lazy-step f outer (rest inner)))))))
+
+(defn mapcat-lazy [f coll]
+  (mapcat-lazy-step f coll nil))
+
 (defn mapcat
   ([f]
    (fn [rf]
@@ -347,12 +361,7 @@
                 result
                 (f input))))))
   ([f coll]
-  (loop [remaining coll
-         acc []]
-    (if (empty? remaining)
-      acc
-      (recur (rest remaining)
-             (concat acc (f (first remaining))))))))
+   (mapcat-lazy f coll)))
 
 ;; every? - True when pred is true for all elements
 (defn every? [pred coll]
