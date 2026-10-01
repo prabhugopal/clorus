@@ -181,6 +181,24 @@
 (defn dedupe-lazy [coll]
   (dedupe-lazy-step false nil coll))
 
+;; The zero-argument form of dedupe is a transducer. State belongs to the
+;; reducer instance (not the input collection), so separate transductions do
+;; not share their previous value. `started` distinguishes an actual nil item
+;; from the initial state.
+(defn dedupe-xf []
+  (fn [rf]
+    (let [started (atom false)
+          previous (atom nil)]
+      (fn
+        ([result] (rf result))
+        ([result input]
+         (if (and @started (= @previous input))
+           result
+           (do
+             (reset! started true)
+             (reset! previous input)
+             (rf result input))))))))
+
 ;; Unlike dedupe, distinct must remember every emitted value. The persistent
 ;; set is carried by the lazy tail, so only the reached prefix is examined and
 ;; retained. `contains?` distinguishes a stored nil or false from absence.

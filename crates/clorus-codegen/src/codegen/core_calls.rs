@@ -3169,8 +3169,18 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "dedupe" => {
+                if args.is_empty() {
+                    // `(dedupe)` is the stateful transducer form. The state
+                    // machine is source-level so it shares the same reducer
+                    // completion and reduced-value contract as map/filter.
+                    let rewritten = Expr::Call {
+                        func: "dedupe-xf".to_string(),
+                        args: vec![],
+                    };
+                    return self.compile_expr(&rewritten);
+                }
                 if args.len() != 1 {
-                    return Err("dedupe requires 1 argument: collection".to_string());
+                    return Err("dedupe requires zero arguments (transducer) or one collection".to_string());
                 }
 
                 // Public dedupe must consume the language sequence protocol,
