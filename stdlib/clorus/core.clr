@@ -473,9 +473,19 @@
           nil
           coll))
 
-;; comp - Function composition. In the common two- and three-function forms,
-;; the rightmost function receives every supplied argument; remaining functions
-;; receive the result.
+;; Apply a composition chain. The final (rightmost) function receives the
+;; caller's original arguments; each preceding function receives one result.
+;; Keeping the traversal in a named helper avoids building nested captured
+;; closures for arbitrary-length compositions.
+(defn comp-apply [fns args]
+  (let [f (first fns)
+        remaining (rest fns)]
+    (if (empty? remaining)
+      (apply f args)
+      (f (comp-apply remaining args)))))
+
+;; comp - Function composition. The rightmost function receives every supplied
+;; argument; remaining functions receive the result, from right to left.
 (defn comp
   ([] (fn [x] x))
   ([f] f)
@@ -484,9 +494,9 @@
   ([f g h]
    (fn [& args] (f (g (apply h args)))))
   ([f g h i & more]
-   ;; Use reduce without init to compose all functions
-   (reduce (fn [f1 f2] (fn [x] (f1 (f2 x))))
-           (cons f (cons g (cons h (cons i more)))))))
+   (let [fns (concat [f g h i] more)]
+     (fn [& args]
+       (comp-apply fns args)))))
 
 ;; constantly - Returns a function that always returns the same value
 ;; Example: (def always-42 (constantly 42))

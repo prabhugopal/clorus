@@ -20,6 +20,9 @@
     (assert-eq "comp applies remaining functions right to left"
                ((comp inc inc inc) 1)
                4)
+    (assert-eq "comp supports arbitrary composition depth and a variadic rightmost function"
+               ((comp inc inc inc inc +) 1 2 3)
+               10)
     (assert-eq "complement preserves variadic invocation"
                ((complement =) 1 2)
                true)

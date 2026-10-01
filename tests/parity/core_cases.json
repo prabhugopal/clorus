@@ -8,6 +8,7 @@
   {"name": "juxt-vector-result", "expr": "((juxt inc dec) 3)"},
   {"name": "anonymous-function-position-call", "expr": "((fn [x] (+ x 1)) 4)"},
   {"name": "comp-variadic-rightmost", "expr": "((comp inc +) 1 2 3)"},
+  {"name": "comp-arbitrary-depth", "expr": "((comp inc inc inc inc +) 1 2 3)"},
   {"name": "fnil-replaces-nil-only", "expr": "((fnil (fn [a b] [a b]) :a :b) false nil)"},
   {"name": "every-pred", "expr": "((every-pred number? pos?) 1 2 3)"},
   {"name": "some-fn-order", "expr": "((some-fn (fn [x] (if (= x 2) :first nil)) (fn [x] (if (= x 1) :second nil))) 1 2)"},
