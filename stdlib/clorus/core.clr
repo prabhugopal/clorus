@@ -175,6 +175,26 @@
 (defn dedupe-lazy [coll]
   (dedupe-lazy-step false nil coll))
 
+;; Unlike dedupe, distinct must remember every emitted value. The persistent
+;; set is carried by the lazy tail, so only the reached prefix is examined and
+;; retained. `contains?` distinguishes a stored nil or false from absence.
+(defn distinct-lazy-step [seen coll]
+  (lazy-seq
+    (loop [remaining coll
+           seen-values seen]
+      (if (empty? remaining)
+        nil
+        (let [item (first remaining)]
+          (if (contains? seen-values item)
+            (recur (rest remaining) seen-values)
+            (__clorus_seq_cons item
+                               (distinct-lazy-step
+                                (__clorus_conj seen-values item)
+                                (rest remaining)))))))))
+
+(defn distinct-lazy [coll]
+  (distinct-lazy-step #{} coll))
+
 ;; Force one item from each input sequence to decide whether a full round is
 ;; available. `concat` emits the prepared finite round before it reaches the
 ;; recursive lazy tail. Clojure's interleave terminates when any input is

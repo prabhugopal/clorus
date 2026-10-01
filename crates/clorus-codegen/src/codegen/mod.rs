@@ -388,7 +388,6 @@ impl<'ctx> CodeGen<'ctx> {
             "update-in",
             "interleave",
             "interpose",
-            "distinct",
             "dedupe",
             "flatten",
             // I/O operations

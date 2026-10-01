@@ -3064,6 +3064,22 @@ impl<'ctx> CodeGen<'ctx> {
                 self.compile_expr(&rewritten)
             }
 
+            "distinct" => {
+                if args.len() != 1 {
+                    return Err("distinct requires 1 argument: collection".to_string());
+                }
+
+                // The legacy runtime helper consumes a finite collection via
+                // count/nth. Route the public API through the stdlib state
+                // machine so it preserves lazy tails and carries its persistent
+                // seen set only as far as a consumer realizes the sequence.
+                let rewritten = Expr::Call {
+                    func: "distinct-lazy".to_string(),
+                    args: args.to_vec(),
+                };
+                self.compile_expr(&rewritten)
+            }
+
             "interleave" => {
                 // `interleave` is variadic, so package its already-evaluated
                 // inputs in a finite vector. `interleave-lazy` then realizes

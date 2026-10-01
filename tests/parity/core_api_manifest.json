@@ -32,6 +32,7 @@
     {"name": "concat", "owner": "source-core", "status": "implemented", "coverage": "dual-engine core and native lazy sequence tests", "gap": "string sequencing awaits a dedicated character value type"},
     {"name": "interleave", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests", "gap": "string sequencing awaits a dedicated character value type"},
     {"name": "interpose", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests", "gap": "string sequencing awaits a dedicated character value type"},
+    {"name": "distinct", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests"},
     {"name": "dedupe", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests", "gap": "transducer arity awaits a protocol-level reducing-function contract"},
     {"name": "seq", "owner": "sequence-runtime", "status": "implemented", "coverage": "core parity, dual-engine, REPL, native lazy sequence", "gap": "string sequencing awaits a dedicated character value type"},
     {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},

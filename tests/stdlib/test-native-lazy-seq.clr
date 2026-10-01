@@ -199,6 +199,16 @@
 (assert-eq "dedupe consumes an infinite source by prefix" [0 1 2 3]
            (take 4 (dedupe (map (fn [x] (quot x 2)) (range)))))
 
+(let [calls (atom 0)
+      xs (distinct (map (fn [x] (do (swap! calls inc) (quot x 2))) (range)))]
+  (assert-eq "distinct is deferred" 0 @calls)
+  (assert-eq "distinct realizes its first item" 0 (first xs))
+  (assert-eq "distinct realizes one source item" 1 @calls)
+  (assert-eq "distinct skips duplicates incrementally" 1 (first (rest xs)))
+  (assert-eq "distinct realizes only the prefix needed for next distinct item" 3 @calls))
+(assert-eq "distinct consumes an infinite source by prefix" [0 1 2 3]
+           (take 4 (distinct (map (fn [x] (quot x 2)) (range)))))
+
 (let [left-calls (atom 0)
       right-calls (atom 0)
       xs (interleave (map (fn [x] (do (swap! left-calls inc) x)) [1 2])
