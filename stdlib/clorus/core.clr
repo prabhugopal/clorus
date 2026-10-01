@@ -1406,6 +1406,50 @@
 (defn list? [x]
   (__clorus_is_list x))
 
+;; next - The sequence after the first item, or nil when no items remain.
+;; `seq` preserves the language's canonical empty value across vectors, lists,
+;; maps, and lazy sequences.
+(defn next [coll]
+  (seq (rest coll)))
+
+;; peek/pop - Persistent-stack operations for vectors and lists. Vectors are
+;; stacks at their right edge while lists are stacks at their left edge, as in
+;; Clojure. Empty stacks are rejected by pop rather than silently returning a
+;; value, which prevents a missed underflow from travelling through a program.
+(defn peek [coll]
+  (cond
+    (nil? coll) nil
+    (empty? coll) nil
+    (vector? coll) (nth coll (dec (count coll)))
+    (list? coll) (first coll)
+    :else (throw "peek requires a vector, list, or nil")))
+
+(defn pop [coll]
+  (cond
+    (nil? coll) (throw "pop requires a non-empty vector or list")
+    (empty? coll) (throw "pop requires a non-empty vector or list")
+    (vector? coll) (vec (take (dec (count coll)) coll))
+    (list? coll) (rest coll)
+    :else (throw "pop requires a non-empty vector or list")))
+
+;; subvec - Return the half-open [start, end) slice of a vector. This is a
+;; value-level implementation: it intentionally returns a fresh vector so the
+;; portable JIT and AOT paths have identical lifetime and mutation semantics.
+(defn subvec
+  ([v start]
+   (subvec v start (count v)))
+  ([v start end]
+   (if (vector? v)
+     (let [size (count v)]
+       (if (and (number? start)
+                (number? end)
+                (<= 0 start)
+                (<= start end)
+                (<= end size))
+         (vec (take (- end start) (drop start v)))
+         (throw "subvec indices must be within the vector bounds")))
+     (throw "subvec requires a vector"))))
+
 ;; map? - Check if value is a map
 (defn map? [x]
   (__clorus_is_map x))

@@ -56,9 +56,17 @@ def clorus_eval_all(cases, expected_literals, engine: str):
     """Check all expressions in one Clorus process for the selected engine."""
     with tempfile.NamedTemporaryFile("w", suffix=".clr", delete=False) as f:
         for index, case in enumerate(cases):
+            expected = expected_literals[index]
+            # Clojure's printed list values are forms in Clorus source, so
+            # they need quoting to remain data. Other pr-str literals in this
+            # corpus (numbers, booleans, strings, keywords, maps, vectors,
+            # and sets) are already self-evaluating; quoting booleans changes
+            # their meaning in the current reader.
+            if expected.startswith("("):
+                expected = f"(quote {expected})"
             f.write(
                 f'(println "__CLORUS_PARITY_RESULT_{index}__" '
-                f'(= {case["expr"]} {expected_literals[index]}))\n'
+                f'(= {case["expr"]} {expected}))\n'
             )
         path = f.name
     try:

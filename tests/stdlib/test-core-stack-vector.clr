@@ -1,0 +1,27 @@
+(ns tests.stdlib.test-core-stack-vector)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do (f) false)
+    (catch e true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "next returns the remaining sequence" (next [1 2 3]) '(2 3))
+    (assert-eq "next returns nil for one item" (next [1]) nil)
+    (assert-eq "peek reads a vector's right edge" (peek [1 2 3]) 3)
+    (assert-eq "peek reads a list's left edge" (peek '(1 2 3)) 1)
+    (assert-eq "peek empty collection is nil" (peek []) nil)
+    (assert-eq "pop removes a vector's right edge" (pop [1 2 3]) [1 2])
+    (assert-eq "pop removes a list's left edge" (pop '(1 2 3)) '(2 3))
+    (assert-eq "pop rejects an empty vector" (throws? (fn [] (pop []))) true)
+    (assert-eq "subvec two-arity uses the vector end" (subvec [1 2 3 4] 2) [3 4])
+    (assert-eq "subvec returns a half-open range" (subvec [1 2 3 4] 1 3) [2 3])
+    (assert-eq "subvec rejects invalid bounds" (throws? (fn [] (subvec [1 2] 2 1))) true)
+    (assert-eq "subvec rejects non-vectors" (throws? (fn [] (subvec '(1 2) 0 1))) true)
+    "PASS"))
