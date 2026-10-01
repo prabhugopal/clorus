@@ -261,25 +261,26 @@
 
 ;; keep - Apply f to items and keep non-nil results
 ;; Example: (keep (fn [x] (if (odd? x) x nil)) [1 2 3]) ; => [1 3]
-(defn keep [f coll]
-  (if (vector? coll)
-    (let [len (count coll)]
-      (loop [i 0
-             acc []]
-        (if (>= i len)
-          acc
-          (let [v (f (nth coll i))]
-            (if (nil? v)
-              (recur (+ i 1) acc)
-              (recur (+ i 1) (__clorus_conj acc v)))))))
-    (loop [remaining coll
-           acc []]
+(defn keep-lazy [f coll]
+  (lazy-seq
+    (loop [remaining coll]
       (if (empty? remaining)
-        acc
-        (let [v (f (first remaining))]
-          (if (nil? v)
-              (recur (rest remaining) acc)
-              (recur (rest remaining) (__clorus_conj acc v))))))))
+        nil
+        (let [value (f (first remaining))]
+          (if (nil? value)
+            (recur (rest remaining))
+            (__clorus_seq_cons value (keep-lazy f (rest remaining)))))))))
+
+(defn keep
+  ([f]
+   (fn [rf]
+     (fn
+       ([result] (rf result))
+       ([result input]
+        (let [value (f input)]
+          (if (nil? value) result (rf result value)))))))
+  ([f coll]
+   (keep-lazy f coll)))
 
 ;; map-indexed - Apply f to each [index item] pair.
 ;; The one-argument form is a transducer; the two-argument form eagerly
@@ -306,6 +307,18 @@
 
 ;; keep-indexed - Apply f to each [index item] pair and retain non-nil values.
 ;; False is a valid retained value, matching Clojure's keep semantics.
+(defn keep-indexed-lazy [f index coll]
+  (lazy-seq
+    (loop [i index
+           remaining coll]
+      (if (empty? remaining)
+        nil
+        (let [value (f i (first remaining))]
+          (if (nil? value)
+            (recur (inc i) (rest remaining))
+            (__clorus_seq_cons value
+                               (keep-indexed-lazy f (inc i) (rest remaining)))))))))
+
 (defn keep-indexed
   ([f]
    (fn [rf]
@@ -318,15 +331,7 @@
             (do (swap! counter inc)
                 (if (nil? value) result (rf result value)))))))))
   ([f coll]
-   (loop [i 0
-          remaining coll
-          acc []]
-     (if (empty? remaining)
-       acc
-       (let [value (f i (first remaining))]
-         (recur (inc i)
-                (rest remaining)
-                (if (nil? value) acc (__clorus_conj acc value))))))))
+   (keep-indexed-lazy f 0 coll)))
 
 ;; mapcat - Map then concatenate
 ;; Example: (mapcat (fn [x] [x x]) [1 2]) ; => [1 1 2 2]

@@ -29,14 +29,15 @@
     {"name": "empty", "owner": "native-kernel", "status": "implemented", "coverage": "core parity, dual-engine empty/not-empty contract"},
     {"name": "empty?", "owner": "source-core", "status": "implemented", "coverage": "dual-engine empty/not-empty contract"},
     {"name": "not-empty", "owner": "source-core", "status": "implemented", "coverage": "dual-engine empty/not-empty contract"},
-    {"name": "concat", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine concat contract", "gap": "finite eager sequence only; character/string and lazy semantics await their runtime support"},
-    {"name": "interleave", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine interleave contract", "gap": "finite eager sequence only; character/string and lazy semantics await their runtime support"},
-    {"name": "interpose", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine interpose contract", "gap": "finite eager sequence only; character/string and lazy semantics await their runtime support"},
-    {"name": "dedupe", "owner": "native-kernel", "status": "partial", "coverage": "dual-engine dedupe contract", "gap": "finite eager sequence only; transducer arity awaits a protocol-level reducing-function contract"},
+    {"name": "concat", "owner": "source-core", "status": "implemented", "coverage": "dual-engine core and native lazy sequence tests", "gap": "string sequencing awaits a dedicated character value type"},
+    {"name": "interleave", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests", "gap": "string sequencing awaits a dedicated character value type"},
+    {"name": "interpose", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests", "gap": "string sequencing awaits a dedicated character value type"},
+    {"name": "dedupe", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests", "gap": "transducer arity awaits a protocol-level reducing-function contract"},
     {"name": "seq", "owner": "sequence-runtime", "status": "implemented", "coverage": "core parity, dual-engine, REPL, native lazy sequence", "gap": "string sequencing awaits a dedicated character value type"},
     {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "find", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "map-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
+    {"name": "keep", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, native lazy sequence"},
     {"name": "keep-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"}
   ]
 }

@@ -110,6 +110,31 @@
            (take 4 (filter odd? (range))))
 
 (let [calls (atom 0)
+      xs (keep (fn [x] (do (swap! calls inc) (if (odd? x) x nil))) [1 2 3])]
+  (assert-eq "keep is deferred" 0 @calls)
+  (assert-eq "keep realizes through its first retained value" 1 (first xs))
+  (assert-eq "keep does not precompute its tail" 1 @calls)
+  (assert-eq "keep advances only to the next retained value" 3 (first (rest xs)))
+  (assert-eq "keep skips values incrementally" 3 @calls))
+(assert-eq "keep consumes an infinite source by prefix" [1 3 5 7]
+           (take 4 (keep (fn [x] (if (odd? x) x nil)) (range))))
+(assert-eq "keep retains false" [false]
+           (keep (fn [x] (if (= x 1) false nil)) [0 1 2]))
+
+(let [calls (atom 0)
+      xs (keep-indexed (fn [i x]
+                         (do (swap! calls inc)
+                             (if (even? i) x nil)))
+                       [10 20 30])]
+  (assert-eq "keep-indexed is deferred" 0 @calls)
+  (assert-eq "keep-indexed realizes its first retained value" 10 (first xs))
+  (assert-eq "keep-indexed does not precompute its tail" 1 @calls)
+  (assert-eq "keep-indexed advances indexes incrementally" 30 (first (rest xs)))
+  (assert-eq "keep-indexed skips values incrementally" 3 @calls))
+(assert-eq "keep-indexed consumes an infinite source by prefix" [0 2 4 6]
+           (take 4 (keep-indexed (fn [i x] (if (even? i) x nil)) (range))))
+
+(let [calls (atom 0)
       xs (take 2 (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))]
   (assert-eq "take is deferred" 0 @calls)
   (assert-eq "take realizes one source item" 1 (first xs))

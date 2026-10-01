@@ -38,6 +38,8 @@
   {"name": "seq-predicate", "expr": "(seq? (seq [1]))"},
   {"name": "seq-map-entry", "expr": "(into [] (seq {:a 1}))"},
   {"name": "map-indexed", "expr": "(into [] (map-indexed (fn [i x] (+ i x)) [10 10 10]))"},
+  {"name": "keep", "expr": "(into [] (keep (fn [x] (if (odd? x) x nil)) [1 2 3 4]))"},
+  {"name": "keep-retains-false", "expr": "(into [] (keep (fn [x] (if (= x 2) false nil)) [1 2 3]))"},
   {"name": "keep-indexed", "expr": "(into [] (keep-indexed (fn [i x] (if (even? i) x nil)) [10 20 30 40]))"},
   {"name": "keep-indexed-retains-false", "expr": "(into [] (keep-indexed (fn [i x] (if (= i 1) false nil)) [1 2 3]))"},
   {"name": "composed-map-filter", "expr": "(into [] (filter odd? (map #(* % %) [1 2 3 4])))"},
