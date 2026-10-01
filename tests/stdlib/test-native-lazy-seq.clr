@@ -135,6 +135,16 @@
            (take 4 (keep-indexed (fn [i x] (if (even? i) x nil)) (range))))
 
 (let [calls (atom 0)
+      xs (map-indexed (fn [i x] (do (swap! calls inc) (+ i x))) [10 20 30])]
+  (assert-eq "map-indexed is deferred" 0 @calls)
+  (assert-eq "map-indexed realizes its first item" 10 (first xs))
+  (assert-eq "map-indexed does not precompute its tail" 1 @calls)
+  (assert-eq "map-indexed advances incrementally" 21 (first (rest xs)))
+  (assert-eq "map-indexed realizes only reached items" 2 @calls))
+(assert-eq "map-indexed consumes an infinite source by prefix" [0 2 4 6]
+           (take 4 (map-indexed (fn [i x] (+ i x)) (range))))
+
+(let [calls (atom 0)
       xs (mapcat (fn [x] (do (swap! calls inc) [x x])) [1 2 3])]
   (assert-eq "mapcat is deferred" 0 @calls)
   (assert-eq "mapcat realizes its first mapped collection" 1 (first xs))

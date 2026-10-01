@@ -283,8 +283,15 @@
    (keep-lazy f coll)))
 
 ;; map-indexed - Apply f to each [index item] pair.
-;; The one-argument form is a transducer; the two-argument form eagerly
-;; realizes into a vector, consistent with Clorus's current core transforms.
+(defn map-indexed-lazy [f index coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (__clorus_seq_cons (f index (first coll))
+                         (map-indexed-lazy f (inc index) (rest coll))))))
+
+;; The one-argument form is a transducer; the two-argument form is a lazy
+;; sequence transform.
 (defn map-indexed
   ([f]
    (fn [rf]
@@ -296,14 +303,7 @@
             (do (swap! counter inc)
                 (rf result (f i input)))))))))
   ([f coll]
-   (loop [i 0
-          remaining coll
-          acc []]
-     (if (empty? remaining)
-       acc
-       (recur (inc i)
-              (rest remaining)
-              (__clorus_conj acc (f i (first remaining))))))))
+   (map-indexed-lazy f 0 coll)))
 
 ;; keep-indexed - Apply f to each [index item] pair and retain non-nil values.
 ;; False is a valid retained value, matching Clojure's keep semantics.

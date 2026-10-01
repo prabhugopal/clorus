@@ -36,7 +36,7 @@
     {"name": "seq", "owner": "sequence-runtime", "status": "implemented", "coverage": "core parity, dual-engine, REPL, native lazy sequence", "gap": "string sequencing awaits a dedicated character value type"},
     {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "find", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
-    {"name": "map-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
+    {"name": "map-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, native lazy sequence"},
     {"name": "keep", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, native lazy sequence"},
     {"name": "keep-indexed", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
     {"name": "mapcat", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer, native lazy sequence"}

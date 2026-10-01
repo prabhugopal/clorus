@@ -7,7 +7,7 @@
 
 (defn -main [& _args]
   (do
-    (assert-eq "map-indexed eager"
+    (assert-eq "map-indexed collection"
                (map-indexed (fn [i x] (+ i x)) [10 10 10])
                [10 11 12])
     (assert-eq "map-indexed transducer"
