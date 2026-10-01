@@ -340,6 +340,7 @@ impl<'ctx> CodeGen<'ctx> {
             "re-replace-first",
             "gensym",
             "string?",
+            "char?",
             "starts-with?",
             "ends-with?",
             "includes?",
@@ -367,6 +368,7 @@ impl<'ctx> CodeGen<'ctx> {
             "fn?",
             // Type predicates (internal runtime-backed helpers for stdlib wrappers)
             "__clorus_is_string",
+            "__clorus_is_char",
             "__clorus_is_number",
             "__clorus_is_vector",
             "__clorus_is_list",
@@ -1315,6 +1317,8 @@ impl<'ctx> CodeGen<'ctx> {
                 let c_str = self.builder.build_global_string_ptr(s, "str").unwrap();
                 Ok(self.box_string(c_str.as_pointer_value()))
             }
+
+            Expr::Char(ch) => self.box_char(*ch),
 
             Expr::Keyword(k) => {
                 // Keywords use interning for fast equality

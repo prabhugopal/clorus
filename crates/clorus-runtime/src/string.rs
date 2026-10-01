@@ -19,6 +19,20 @@ use std::os::raw::c_char;
 /// dynamic-var support rather than another global setting.
 const GENERAL_SEQUENCE_PRINT_LIMIT: usize = 64;
 
+/// Return a reader-compatible spelling for a character value.
+pub fn char_to_reader_literal(ch: char) -> String {
+    match ch {
+        '\n' => "\\newline".to_string(),
+        '\r' => "\\return".to_string(),
+        '\t' => "\\tab".to_string(),
+        ' ' => "\\space".to_string(),
+        '\u{0008}' => "\\backspace".to_string(),
+        '\u{000C}' => "\\formfeed".to_string(),
+        c if c.is_control() => format!("\\u{:04x}", c as u32),
+        c => format!("\\{}", c),
+    }
+}
+
 /// Render a sequence without walking beyond the display boundary.
 ///
 /// Each printed element may force one lazy cell.  The tail after the final
@@ -107,6 +121,7 @@ pub(crate) unsafe fn value_to_rust_string(val: *mut Value) -> String {
             // Value* strings store Rust String pointers, not C strings
             (*val).as_string().to_string()
         }
+        ValueTag::Char => (*val).as_char().to_string(),
         ValueTag::Long => {
             format!("{}", (*val).as_long())
         }
@@ -295,14 +310,14 @@ pub extern "C" fn clorus_subs2(s: *mut Value, start: i64) -> *mut Value {
             None => return rust_string_to_value(String::new()),
         };
 
-        let start_idx = start.max(0) as usize;
+        let chars: Vec<char> = string.chars().collect();
+        let start_idx = (start.max(0) as usize).min(chars.len());
 
-        if start_idx >= string.len() {
+        if start_idx == chars.len() {
             return rust_string_to_value(String::new());
         }
 
-        // Substring from start to end
-        let result = string[start_idx..].to_string();
+        let result: String = chars[start_idx..].iter().collect();
         rust_string_to_value(result)
     }
 }
@@ -319,18 +334,19 @@ pub extern "C" fn clorus_subs3(s: *mut Value, start: i64, end: i64) -> *mut Valu
             None => return rust_string_to_value(String::new()),
         };
 
+        let chars: Vec<char> = string.chars().collect();
         let start_idx = start.max(0) as usize;
         let end_idx = end.max(0) as usize;
 
-        // Clamp to string bounds
-        let start_idx = start_idx.min(string.len());
-        let end_idx = end_idx.min(string.len());
+        // Clamp Unicode-scalar indexes to the string bounds.
+        let start_idx = start_idx.min(chars.len());
+        let end_idx = end_idx.min(chars.len());
 
         if start_idx >= end_idx {
             return rust_string_to_value(String::new());
         }
 
-        let result = string[start_idx..end_idx].to_string();
+        let result: String = chars[start_idx..end_idx].iter().collect();
         rust_string_to_value(result)
     }
 }
@@ -871,7 +887,7 @@ pub extern "C" fn clorus_includes(s: *mut Value, substr: *mut Value) -> i32 {
 
 /// Get character at index
 ///
-/// (char-at "hello" 1) => "e"
+/// (char-at "hello" 1) => \e
 /// (char-at "hello" 10) => nil (out of bounds)
 #[no_mangle]
 pub extern "C" fn clorus_char_at(s: *mut Value, index: i64) -> *mut Value {
@@ -881,14 +897,13 @@ pub extern "C" fn clorus_char_at(s: *mut Value, index: i64) -> *mut Value {
             None => return Value::nil(),
         };
 
-        if index < 0 || index as usize >= string.len() {
+        if index < 0 {
             return Value::nil();
         }
 
-        // Get character at byte index
-        // Note: This is byte-based indexing, not Unicode scalar index
+        // Index by Unicode scalar, consistent with count/nth/seq on strings.
         match string.chars().nth(index as usize) {
-            Some(ch) => rust_string_to_value(ch.to_string()),
+            Some(ch) => Value::char(ch),
             None => Value::nil(),
         }
     }
@@ -912,7 +927,7 @@ pub extern "C" fn clorus_index_of(s: *mut Value, substr: *mut Value) -> *mut Val
         };
 
         match string.find(&substring) {
-            Some(idx) => Value::long(idx as i64),
+            Some(byte_index) => Value::long(string[..byte_index].chars().count() as i64),
             None => Value::nil(),
         }
     }
@@ -923,11 +938,8 @@ pub extern "C" fn clorus_index_of(s: *mut Value, substr: *mut Value) -> *mut Val
 /// (last-index-of "hello world hello" "hello") => 12
 /// (last-index-of "hello" "x") => nil
 ///
-/// Note: like index-of, the returned index is a byte offset (Rust's
-/// str::rfind), not a Unicode character count -- consistent with
-/// index-of, but not with char-at, which indexes by character. There is
-/// no dedicated Char type yet, so string indexing isn't fully unified
-/// across these functions for non-ASCII input.
+/// Indexes are Unicode scalar positions, consistent with `count`, `nth`,
+/// `char-at`, and string sequencing.
 #[no_mangle]
 pub extern "C" fn clorus_last_index_of(s: *mut Value, substr: *mut Value) -> *mut Value {
     unsafe {
@@ -942,7 +954,7 @@ pub extern "C" fn clorus_last_index_of(s: *mut Value, substr: *mut Value) -> *mu
         };
 
         match string.rfind(&substring) {
-            Some(idx) => Value::long(idx as i64),
+            Some(byte_index) => Value::long(string[..byte_index].chars().count() as i64),
             None => Value::nil(),
         }
     }
@@ -1179,6 +1191,7 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
                                .replace('\t', "\\t")
                                .replace('\r', "\\r"))
         }
+        ValueTag::Char => char_to_reader_literal((*val).as_char()),
         ValueTag::Long => {
             format!("{}", (*val).as_long())
         }

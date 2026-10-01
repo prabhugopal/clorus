@@ -70,6 +70,12 @@ impl Parser {
                 Ok(Expr::String(string))
             }
 
+            Token::Char(ch, _) => {
+                let character = *ch;
+                self.advance();
+                Ok(Expr::Char(character))
+            }
+
             Token::Regex(s, _) => {
                 let pattern = s.clone();
                 self.advance();
@@ -2688,6 +2694,7 @@ impl Parser {
             Expr::Long(_)
             | Expr::Double(_)
             | Expr::String(_)
+            | Expr::Char(_)
             | Expr::Keyword(_)
             | Expr::Bool(_)
             | Expr::Nil

@@ -12,6 +12,9 @@ pub enum Expr {
     /// Strings: "hello world"
     String(String),
 
+    /// Characters: \a, \newline, \u03bb
+    Char(char),
+
     /// Symbols: +, defn, my-var (used for variable references and operators)
     Symbol(String),
 
@@ -416,6 +419,7 @@ impl Expr {
             Expr::Long(_)
                 | Expr::Double(_)
                 | Expr::String(_)
+                | Expr::Char(_)
                 | Expr::Symbol(_)
                 | Expr::Keyword(_)
                 | Expr::Bool(_)

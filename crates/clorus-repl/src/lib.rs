@@ -108,6 +108,7 @@ fn display_value(value_ptr: *mut u8) -> String {
                     "<null string>".to_string()
                 }
             }
+            ValueTag::Char => clorus_runtime::string::char_to_reader_literal((*value).as_char()),
             ValueTag::Bool => {
                 let bool_val = clorus_value_as_bool(value);
                 if bool_val { "true" } else { "false" }.to_string()

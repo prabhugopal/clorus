@@ -353,6 +353,7 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Long(_)
             | Expr::Double(_)
             | Expr::String(_)
+            | Expr::Char(_)
             | Expr::Keyword(_)
             | Expr::Bool(_)
             | Expr::Nil

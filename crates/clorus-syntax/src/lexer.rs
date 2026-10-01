@@ -45,6 +45,7 @@ pub enum Token {
     Long(i64, Span),
     Double(f64, Span),
     String(String, Span),
+    Char(char, Span),
     Regex(String, Span),      // #"pattern"
     Symbol(String, Span),
     Keyword(String, Span),
@@ -63,7 +64,7 @@ impl Token {
             | Token::HashSetStart(s) | Token::ReaderDiscard(s) | Token::VarQuote(s) | Token::Meta(s) | Token::Quote(s)
             | Token::SyntaxQuote(s) | Token::Unquote(s) | Token::UnquoteSplicing(s)
             | Token::Deref(s) | Token::Nil(s) | Token::Eof(s) => *s,
-            Token::Long(_, s) | Token::Double(_, s) | Token::String(_, s)
+            Token::Long(_, s) | Token::Double(_, s) | Token::String(_, s) | Token::Char(_, s)
             | Token::Regex(_, s) | Token::Symbol(_, s) | Token::Keyword(_, s) | Token::Bool(_, s) => *s,
         }
     }
@@ -181,6 +182,54 @@ impl Lexer {
         }
 
         Err("Unterminated string".to_string())
+    }
+
+    /// Read a Clojure character literal.  The reader consumes one scalar for
+    /// ordinary literals and accepts the named whitespace forms plus \uXXXX.
+    fn read_char_literal(&mut self) -> Result<(char, Span), String> {
+        let start_pos = self.position;
+        let start_line = self.line;
+        let start_col = self.column;
+        self.advance(); // skip the leading backslash
+
+        let first = self.current_char().ok_or_else(|| "Unterminated character literal".to_string())?;
+        let mut spelling = String::new();
+        spelling.push(first);
+        self.advance();
+
+        // A name or unicode escape has more than one character. Ordinary
+        // literals intentionally consume exactly one Unicode scalar, so
+        // `\\ab` is read as `\\a` followed by symbol `b`, matching Clojure.
+        if first == 'u' || matches!(first, 'n' | 'r' | 's' | 't' | 'b' | 'f' | 'o') {
+            while let Some(ch) = self.current_char() {
+                if ch.is_whitespace() || matches!(ch, '(' | ')' | '[' | ']' | '{' | '}' | '"' | ';' | ',') {
+                    break;
+                }
+                spelling.push(ch);
+                self.advance();
+            }
+        }
+
+        let ch = match spelling.as_str() {
+            "newline" => '\n',
+            "return" => '\r',
+            "space" => ' ',
+            "tab" => '\t',
+            "backspace" => '\u{0008}',
+            "formfeed" => '\u{000C}',
+            "o" => return Err("Octal character literals are not supported; use \\uXXXX".to_string()),
+            value if value.starts_with('u') => {
+                let hex = &value[1..];
+                if hex.len() != 4 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(format!("Invalid Unicode character literal: \\{}", value));
+                }
+                let code = u32::from_str_radix(hex, 16).unwrap();
+                char::from_u32(code).ok_or_else(|| format!("Invalid Unicode scalar value: \\{}", value))?
+            }
+            value if value.chars().count() == 1 => value.chars().next().unwrap(),
+            value => return Err(format!("Unknown character literal: \\{}", value)),
+        };
+        Ok((ch, self.make_span(start_pos, start_line, start_col)))
     }
 
     fn read_regex_literal(&mut self) -> Result<(String, Span), String> {
@@ -486,6 +535,11 @@ impl Lexer {
                 Ok(Token::String(s, span))
             }
 
+            Some('\\') => {
+                let (ch, span) = self.read_char_literal()?;
+                Ok(Token::Char(ch, span))
+            }
+
             Some(':') => {
                 let start_pos = self.position;
                 let start_line = self.line;
@@ -593,6 +647,22 @@ mod tests {
         let tokens = lexer.tokenize().unwrap();
         assert!(matches!(&tokens[0], Token::String(s, _) if s == "hello"));
         assert!(matches!(&tokens[1], Token::String(s, _) if s == "world\n"));
+    }
+
+    #[test]
+    fn test_character_literals() {
+        let mut lexer = Lexer::new(r#"\a \space \newline \u03BB"#);
+        let tokens = lexer.tokenize().unwrap();
+        assert!(matches!(tokens[0], Token::Char('a', _)));
+        assert!(matches!(tokens[1], Token::Char(' ', _)));
+        assert!(matches!(tokens[2], Token::Char('\n', _)));
+        assert!(matches!(tokens[3], Token::Char('λ', _)));
+    }
+
+    #[test]
+    fn test_invalid_character_literal_is_rejected() {
+        assert!(Lexer::new(r#"\unknown"#).tokenize().is_err());
+        assert!(Lexer::new(r#"\uD800"#).tokenize().is_err());
     }
 
     #[test]

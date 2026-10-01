@@ -49,6 +49,11 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
                 (*val).as_string().hash(&mut hasher);
                 hasher.finish()
             }
+            ValueTag::Char => {
+                let mut hasher = DefaultHasher::new();
+                (*val).as_char().hash(&mut hasher);
+                hasher.finish()
+            }
             ValueTag::Keyword => {
                 let mut hasher = DefaultHasher::new();
                 (*val).as_keyword().hash(&mut hasher);

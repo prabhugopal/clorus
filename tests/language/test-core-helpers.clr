@@ -21,10 +21,9 @@
       (assert-eq "vals-count" (count vs) 2)
       (assert-eq "vals-sum" (+ (nth vs 0) (nth vs 1)) 3))
 
-    (assert-eq "char-true" (char? "x") true)
-    (assert-eq "char-false-long" (char? "xy") false)
+    (assert-eq "char-true" (char? \x) true)
+    (assert-eq "char-false-string" (char? "x") false)
     (assert-eq "char-false-num" (char? 1) false)
 
     (println "core helpers tests passed")
     0))
-

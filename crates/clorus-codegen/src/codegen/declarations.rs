@@ -80,6 +80,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // ===== Value Creation Functions =====
         self.declare_i64_to_value_fn("clorus_value_long");
+        self.declare_i64_to_value_fn("clorus_value_char");
         self.declare_f64_to_value_fn("clorus_value_double");
         self.declare_value_to_i64_fn("clorus_value_as_long");
         self.declare_value_to_f64_fn("clorus_value_as_double");
@@ -288,6 +289,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_fn("clorus_re_replace", 3);
         self.declare_value_fn("clorus_re_replace_first", 3);
         self.declare_value_to_bool_fn("clorus_is_string");
+        self.declare_value_to_bool_fn("clorus_is_char");
         self.declare_value_to_bool_fn("clorus_is_number");
         self.declare_value_to_bool_fn("clorus_is_vector");
         self.declare_value_to_bool_fn("clorus_is_list");
@@ -301,6 +303,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.declare_value_to_bool_fn("clorus_is_coll"); // coll? predicate
         self.declare_value_to_bool_fn("clorus_is_fn"); // fn? predicate
         self.declare_value_to_i32_fn("clorus_is_string_i32");
+        self.declare_value_to_i32_fn("clorus_is_char_i32");
         self.declare_value_to_i32_fn("clorus_is_number_i32");
         self.declare_value_to_i32_fn("clorus_is_vector_i32");
         self.declare_value_to_i32_fn("clorus_is_list_i32");
@@ -540,6 +543,23 @@ impl<'ctx> CodeGen<'ctx> {
             .left()
             .expect("clorus_value_string should return pointer, got void")
             .into_pointer_value()
+    }
+
+    /// Helper: box a Unicode scalar character into Value*.
+    pub(super) fn box_char(&self, ch: char) -> Result<PointerValue<'ctx>, String> {
+        let char_fn = self
+            .module
+            .get_function("clorus_value_char")
+            .ok_or("clorus_value_char not declared")?;
+        let codepoint = self.context.i64_type().const_int(ch as u64, false);
+        Ok(self
+            .builder
+            .build_call(char_fn, &[codepoint.into()], "box_char")
+            .map_err(|e| e.to_string())?
+            .try_as_basic_value()
+            .left()
+            .ok_or("clorus_value_char returned void")?
+            .into_pointer_value())
     }
 
     /// Helper: Extract C string from Value*

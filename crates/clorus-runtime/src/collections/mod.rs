@@ -18,6 +18,21 @@ pub use map_ops::*;
 pub use concat::*;
 pub use set_ops::*;
 
+/// Materialize a string as a list of `Char` values. Strings are immutable and
+/// do not carry a sequence cursor, so a real list is the smallest existing
+/// sequence representation that keeps the public `seq` contract uniform.
+unsafe fn string_as_char_list(string_value: *mut Value) -> *mut Value {
+    let mut result = crate::list::clorus_list_empty();
+    for ch in (*string_value).as_string().chars().rev() {
+        let char_value = Value::char(ch);
+        let next = crate::list::clorus_list_cons(result, char_value);
+        crate::value::clorus_release(result);
+        crate::value::clorus_release(char_value);
+        result = next;
+    }
+    result
+}
+
 /// Materialize a HashMap's entries as a Vector of [k v] 2-element vectors,
 /// in the map's iteration order, and a HashSet's elements as a Vector, in
 /// the set's iteration order.
@@ -92,6 +107,16 @@ pub extern "C" fn clorus_get(coll: *mut Value, key: *mut Value) -> *mut Value {
                 };
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 PersistentVector::nth(vec_ptr, index)
+            }
+            ValueTag::String => {
+                let index = match (*key).header().tag() {
+                    ValueTag::Long if (*key).as_long() >= 0 => (*key).as_long() as usize,
+                    ValueTag::Double if (*key).as_double().is_finite()
+                        && (*key).as_double() >= 0.0
+                        && (*key).as_double().fract() == 0.0 => (*key).as_double() as usize,
+                    _ => return Value::nil(),
+                };
+                (*coll).as_string().chars().nth(index).map(Value::char).unwrap_or_else(Value::nil)
             }
             ValueTag::HashSet => {
                 // (get set k) => k itself if present (equality is what
@@ -203,6 +228,12 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
                 // For lists, walk to nth position (logic below)
                 clorus_list_nth(coll, index)
             }
+            ValueTag::String => (*coll)
+                .as_string()
+                .chars()
+                .nth(index as usize)
+                .map(Value::char)
+                .unwrap_or_else(Value::nil),
             ValueTag::HashMap | ValueTag::HashSet => {
                 let seq_vec = coll_as_seqable_vector(coll).unwrap();
                 let result = clorus_nth(seq_vec, index);
@@ -217,8 +248,8 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
 /// Return a real sequence for a non-empty collection.
 ///
 /// Finite collections materialize to `ValueTag::List`; native `SeqNode`
-/// values keep their possibly-lazy tails intact. Strings are intentionally
-/// excluded until Clorus has a dedicated character value type.
+/// values keep their possibly-lazy tails intact. Strings materialize to a
+/// finite list of `Char` values, just like Clojure's string `seq` contract.
 #[no_mangle]
 pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
     if coll.is_null() {
@@ -249,6 +280,7 @@ pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
                 crate::value::clorus_release(seq_vec);
                 result
             }
+            ValueTag::String => string_as_char_list(coll),
             ValueTag::LazySeq => unreachable!("lazy sequence handled before collection dispatch"),
             ValueTag::SeqNode => unreachable!("sequence node handled before collection dispatch"),
             _ => Value::nil(),
@@ -322,6 +354,7 @@ pub extern "C" fn clorus_first(coll: *mut Value) -> *mut Value {
                 // Use list helper which retains before returning
                 crate::list::clorus_list_first(coll)
             }
+            ValueTag::String => (*coll).as_string().chars().next().map(Value::char).unwrap_or_else(Value::nil),
             ValueTag::HashMap | ValueTag::HashSet => {
                 let seq_vec = coll_as_seqable_vector(coll).unwrap();
                 let result = clorus_first(seq_vec);
@@ -385,6 +418,12 @@ pub extern "C" fn clorus_rest(coll: *mut Value) -> *mut Value {
             }
             ValueTag::List => {
                 crate::list::clorus_list_rest(coll)
+            }
+            ValueTag::String => {
+                let seq = string_as_char_list(coll);
+                let result = crate::list::clorus_list_rest(seq);
+                crate::value::clorus_release(seq);
+                result
             }
             ValueTag::HashMap | ValueTag::HashSet => {
                 let seq_vec = coll_as_seqable_vector(coll).unwrap();
@@ -459,6 +498,7 @@ pub extern "C" fn clorus_last(coll: *mut Value) -> *mut Value {
                 crate::value::clorus_release(seq_vec);
                 result
             }
+            ValueTag::String => (*coll).as_string().chars().last().map(Value::char).unwrap_or_else(Value::nil),
             _ => Value::nil(),
         }
     }
@@ -544,9 +584,7 @@ pub extern "C" fn clorus_count(coll: *mut Value) -> i64 {
                 (*set_ptr).count() as i64
             }
             ValueTag::String => {
-                // Get string length
-                let s = (*coll).as_string();
-                s.len() as i64
+                (*coll).as_string().chars().count() as i64
             }
             _ => 0,
         }
@@ -941,6 +979,31 @@ mod tests {
             crate::value::clorus_release(vec);
             crate::value::clorus_release(vec1);
             crate::value::clorus_release(vec2);
+        }
+    }
+
+    #[test]
+    fn test_string_sequence_uses_unicode_scalar_characters() {
+        unsafe {
+            let string = Value::string("aλ");
+            assert_eq!(clorus_count(string), 2);
+
+            let first = clorus_first(string);
+            assert_eq!((*first).tag(), ValueTag::Char);
+            assert_eq!((*first).as_char(), 'a');
+            crate::value::clorus_release(first);
+
+            let second = clorus_nth(string, 1);
+            assert_eq!((*second).as_char(), 'λ');
+            crate::value::clorus_release(second);
+
+            let seq = clorus_seq(string);
+            assert_eq!((*seq).tag(), ValueTag::List);
+            let seq_second = clorus_nth(seq, 1);
+            assert_eq!((*seq_second).as_char(), 'λ');
+            crate::value::clorus_release(seq_second);
+            crate::value::clorus_release(seq);
+            crate::value::clorus_release(string);
         }
     }
 

@@ -1390,8 +1390,7 @@
 
 ;; char? - Check if value is a character
 (defn char? [x]
-  ;; Until a dedicated Char runtime type is added, treat 1-char strings as chars.
-  (and (string? x) (= (count x) 1)))
+  (__clorus_is_char x))
 
 ;; ============================================================================
 ;; Miscellaneous

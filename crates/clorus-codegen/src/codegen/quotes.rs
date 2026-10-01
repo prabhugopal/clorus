@@ -32,6 +32,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .expect("Failed to build global string for quoted string");
                 Ok(self.box_string(c_str.as_pointer_value()))
             }
+            Expr::Char(ch) => self.box_char(*ch),
             Expr::Keyword(k) => {
                 let c_str = self
                     .builder

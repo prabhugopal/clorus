@@ -148,6 +148,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         if let Some(runtime_predicate) = match func {
             "string?" | "__clorus_is_string" => Some("clorus_is_string_i32"),
+            "char?" | "__clorus_is_char" => Some("clorus_is_char_i32"),
             "number?" | "__clorus_is_number" => Some("clorus_is_number_i32"),
             "vector?" | "__clorus_is_vector" => Some("clorus_is_vector_i32"),
             "list?" | "__clorus_is_list" => Some("clorus_is_list_i32"),
@@ -4017,9 +4018,8 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "char-at" => {
-                // char-at takes 2 args: string, index -- returns a 1-char
-                // string (there is no dedicated Char type yet), or nil if
-                // out of range.
+                // char-at takes 2 args: string, Unicode-scalar index --
+                // returns a Char value or nil if out of range.
                 if args.len() != 2 {
                     return Err("char-at requires 2 arguments: string, index".to_string());
                 }

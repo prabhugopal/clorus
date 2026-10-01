@@ -1,0 +1,28 @@
+(ns tests.stdlib.test-core-char-sequences)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "reader parses ordinary characters" \a \a)
+    (assert-eq "reader parses named characters" \newline \u000A)
+    (assert-eq "reader parses Unicode characters" \u03BB \λ)
+    (assert-eq "char? accepts only Char values" (char? \a) true)
+    (assert-eq "char? does not treat one-character strings as chars" (char? "a") false)
+    (assert-eq "str appends character values" (str \a \space \λ) "a λ")
+    (assert-eq "string count uses Unicode scalars" (count "aλ") 2)
+    (assert-eq "first string returns a Char" (first "aλ") \a)
+    (assert-eq "nth string returns a Char" (nth "aλ" 1) \λ)
+    (assert-eq "get string returns a Char" (get "aλ" 1) \λ)
+    (assert-eq "last string returns a Char" (last "aλ") \λ)
+    (assert-eq "seq string yields Char values" (seq "aλ") '(\a \λ))
+    (assert-eq "rest string yields Char values" (rest "aλ") '(\λ))
+    (assert-eq "char-at returns a Char" (char-at "aλ" 1) \λ)
+    (assert-eq "subs uses Unicode scalar indexes" (subs "aλb" 1 2) "λ")
+    (assert-eq "index-of uses Unicode scalar indexes" (index-of "aλb" "b") 2)
+    (assert-eq "last-index-of uses Unicode scalar indexes" (last-index-of "λaλ" "λ") 2)
+    (assert-eq "lazy sequence functions consume strings" (concat "ab" "λ") '(\a \b \λ))
+    "PASS"))

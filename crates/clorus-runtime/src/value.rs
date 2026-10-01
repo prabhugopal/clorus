@@ -68,6 +68,7 @@ fn metadata_type_name(val: *mut Value) -> &'static str {
             ValueTag::Double => "double",
             ValueTag::Bool => "boolean",
             ValueTag::String => "string",
+            ValueTag::Char => "char",
             ValueTag::Keyword => "keyword",
             ValueTag::Symbol => "symbol",
             ValueTag::List => "list",
@@ -254,6 +255,9 @@ pub enum ValueTag {
     Socket = 20,         // TCP listener or stream handle (see crate::net)
     LazySeq = 21,        // Cached zero-arity thunk (see crate::lazy_seq)
     SeqNode = 22,        // Immutable head plus a list/lazy/general sequence tail
+    /// Unicode scalar character. Kept at the end so existing ABI tag values
+    /// remain stable for generated code and bridge libraries.
+    Char = 23,
 }
 
 /// Header for all heap-allocated values
@@ -310,6 +314,8 @@ pub union ValueData {
     double: f64,
     /// Inline boolean (0.0 = false, 1.0 = true)
     boolean: f64,
+    /// Inline Unicode scalar value for Char.
+    character: u32,
     /// Pointer to heap-allocated data
     ptr: *mut u8,
 }
@@ -387,6 +393,17 @@ impl Value {
         ptr
     }
 
+    /// Create a Unicode scalar character value.
+    pub fn char(ch: char) -> *mut Self {
+        let val = Box::new(Value {
+            header: Header::new(ValueTag::Char),
+            data: ValueData { character: ch as u32 },
+        });
+        let ptr = Box::into_raw(val);
+        record_alloc(ptr, ValueTag::Char);
+        ptr
+    }
+
     /// Create a keyword value
     /// Note: Keywords should be interned via keyword::intern_keyword for efficiency
     pub fn keyword(s: &str) -> *mut Self {
@@ -441,6 +458,11 @@ impl Value {
     /// Get the boolean value (unsafe - caller must ensure tag is Bool)
     pub unsafe fn as_bool(&self) -> bool {
         self.data.boolean != 0.0
+    }
+
+    /// Get the character value (unsafe - caller must ensure tag is Char).
+    pub unsafe fn as_char(&self) -> char {
+        char::from_u32(self.data.character).expect("Char Value contains a valid Unicode scalar")
     }
 
     /// Get the string value (unsafe - caller must ensure tag is String)
@@ -559,6 +581,7 @@ impl fmt::Debug for Value {
                 ValueTag::Bool => write!(f, "Bool({})", self.as_bool()),
                 ValueTag::Nil => write!(f, "Nil"),
                 ValueTag::String => write!(f, "String(\"{}\")", self.as_string()),
+                ValueTag::Char => write!(f, "Char({:?})", self.as_char()),
                 ValueTag::Keyword => write!(f, "Keyword(:{})", self.as_keyword()),
                 ValueTag::Exception => write!(f, "Exception({:p})", self.as_exception_payload()),
                 _ => write!(
@@ -994,6 +1017,15 @@ pub extern "C" fn clorus_value_nil() -> *mut Value {
     Value::nil()
 }
 
+/// Create a character value from a Unicode scalar code point for LLVM codegen.
+#[no_mangle]
+pub extern "C" fn clorus_value_char(codepoint: i64) -> *mut Value {
+    match u32::try_from(codepoint).ok().and_then(char::from_u32) {
+        Some(ch) => Value::char(ch),
+        None => Value::nil(),
+    }
+}
+
 /// Create a bool value (for LLVM codegen)
 #[no_mangle]
 pub extern "C" fn clorus_value_bool(b: f64) -> *mut Value {
@@ -1150,7 +1182,7 @@ unsafe fn deallocate_value(val: *mut Value) {
     value_meta_clear(val);
 
     match (*val).header.tag() {
-        ValueTag::Long | ValueTag::Double | ValueTag::Bool | ValueTag::Nil => {
+        ValueTag::Long | ValueTag::Double | ValueTag::Bool | ValueTag::Nil | ValueTag::Char => {
             // Just free the Value itself
             drop(Box::from_raw(val));
         }
@@ -1371,6 +1403,12 @@ pub extern "C" fn clorus_is_number(val: *mut Value) -> bool {
     }
 }
 
+/// Check if value is a character.
+#[no_mangle]
+pub extern "C" fn clorus_is_char(val: *mut Value) -> bool {
+    !val.is_null() && unsafe { (*val).header().tag() == ValueTag::Char }
+}
+
 /// Check if value is a vector
 #[no_mangle]
 pub extern "C" fn clorus_is_vector(val: *mut Value) -> bool {
@@ -1548,6 +1586,8 @@ fn bool_to_i32(b: bool) -> i32 {
 #[no_mangle]
 pub extern "C" fn clorus_is_number_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_number(val)) }
 #[no_mangle]
+pub extern "C" fn clorus_is_char_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_char(val)) }
+#[no_mangle]
 pub extern "C" fn clorus_is_vector_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_vector(val)) }
 #[no_mangle]
 pub extern "C" fn clorus_is_list_i32(val: *mut Value) -> i32 { bool_to_i32(clorus_is_list(val)) }
@@ -1672,6 +1712,8 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                 let right_str = (*right).as_string();
                 left_str == right_str
             }
+
+            ValueTag::Char => (*left).as_char() == (*right).as_char(),
 
             ValueTag::Symbol => {
                 let left_sym = (*left).as_symbol();
@@ -1834,6 +1876,17 @@ mod tests {
         }
         // Clean up
         unsafe { drop(Box::from_raw(val)); }
+    }
+
+    #[test]
+    fn test_character_value() {
+        let val = Value::char('λ');
+        unsafe {
+            assert_eq!((*val).header.tag(), ValueTag::Char);
+            assert_eq!((*val).as_char(), 'λ');
+            assert!(clorus_is_char(val));
+        }
+        clorus_release(val);
     }
 
     #[test]

@@ -167,6 +167,7 @@ impl InterfaceTokenParser {
             Token::Symbol(_, _) => "Symbol",
             Token::Keyword(_, _) => "Keyword",
             Token::String(_, _) => "String",
+            Token::Char(_, _) => "Char",
             Token::Long(_, _) => "Long",
             Token::Double(_, _) => "Double",
             Token::Bool(_, _) => "Bool",

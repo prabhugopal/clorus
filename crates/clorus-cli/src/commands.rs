@@ -2202,6 +2202,9 @@ fn run_jit_internal(debug: bool, explicit_entry: Option<String>, extra_args: Vec
                         println!("=> <null string>");
                     }
                 }
+                ValueTag::Char => {
+                    println!("=> {}", clorus_runtime::string::char_to_reader_literal((*value).as_char()));
+                }
                 ValueTag::Bool => {
                     let b = clorus_value_as_bool(value);
                     println!("=> {}", if b { "true" } else { "false" });
