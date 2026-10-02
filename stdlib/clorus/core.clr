@@ -771,6 +771,38 @@
 (defn vector [& args]
   (vec args))
 
+;; take-last needs a finite input because the tail is only known after the
+;; collection has been consumed.  Realize once into a vector, then keep the
+;; existing lazy `drop` boundary for the returned sequence.  Negative and zero
+;; counts agree with Clojure: they select no values.
+(defn take-last [n coll]
+  (let [n (ensure-number "take-last" n)
+        values (vec (if (nil? coll)
+                      []
+                      (ensure-coll "take-last" coll)))
+        excess (- (count values) n)]
+    (if (or (<= n 0) (empty? values))
+      nil
+      (if (<= excess 0)
+        (seq values)
+        (drop excess values)))))
+
+;; drop-last shares the same one-time realization requirement as `take-last`.
+;; Returning through `take` preserves normal sequence/lazy-sequence behavior
+;; rather than exposing the temporary vector used to determine the tail.
+(defn drop-last
+  ([coll]
+   (drop-last 1 coll))
+  ([n coll]
+   (let [n (ensure-number "drop-last" n)
+         values (vec (if (nil? coll)
+                       []
+                       (ensure-coll "drop-last" coll)))
+         kept (- (count values) n)]
+     (if (or (empty? values) (<= kept 0))
+       nil
+       (take kept values)))))
+
 ;; hash-set - Construct a set from its arguments.
 (defn hash-set [& args]
   (set args))

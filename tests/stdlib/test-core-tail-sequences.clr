@@ -1,0 +1,34 @@
+(ns tests.stdlib.test-core-tail-sequences)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "take-last keeps the finite tail"
+               (take-last 2 [1 2 3 4])
+               '(3 4))
+    (assert-eq "take-last keeps an undersized collection"
+               (take-last 8 [1 2])
+               '(1 2))
+    (assert-eq "take-last accepts an empty nil input"
+               (seq (take-last 2 nil))
+               nil)
+    (assert-eq "take-last non-positive count is empty"
+               (seq (take-last 0 [1 2]))
+               nil)
+    (assert-eq "drop-last defaults to one value"
+               (drop-last [1 2 3])
+               '(1 2))
+    (assert-eq "drop-last drops a requested tail"
+               (drop-last 2 [1 2 3 4])
+               '(1 2))
+    (assert-eq "drop-last negative count preserves the collection"
+               (drop-last -1 [1 2])
+               '(1 2))
+    (assert-eq "drop-last oversized count is empty"
+               (seq (drop-last 8 [1 2]))
+               nil)
+    "PASS"))
