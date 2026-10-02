@@ -716,6 +716,32 @@
        (throw "take-nth expects positive n")
        (take-nth-lazy n coll)))))
 
+;; Collection replacement is deliberately lazy. It coexists with the native
+;; three-argument string replacement overload; codegen dispatches this public
+;; two-argument form to the source-core function below.
+(defn replace-lazy [smap coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [item (first coll)]
+        (__clorus_seq_cons (if (contains? smap item)
+                             (get smap item)
+                             item)
+                           (replace-lazy smap (rest coll)))))))
+
+(defn replace [smap coll]
+  (let [smap (if (nil? smap)
+               {}
+               (if (map? smap)
+                 smap
+                 (throw "replace expects a map")))
+        coll (if (nil? coll)
+               nil
+               (if (or (coll? coll) (seq? coll))
+                 coll
+                 (throw "replace expects a collection")))]
+    (replace-lazy smap coll)))
+
 ;; compare - generic ordering helper
 ;; Returns negative/zero/positive like clojure.core/compare.
 (defn compare [a b]

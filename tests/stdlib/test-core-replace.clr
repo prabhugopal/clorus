@@ -1,0 +1,22 @@
+(ns tests.stdlib.test-core-replace)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "collection replace preserves misses and supports nil replacements"
+               (replace {1 :one 2 nil} [1 2 3])
+               '(:one nil 3))
+    (assert-eq "collection replace is lazy over unbounded input"
+               (take 4 (replace {0 :zero 2 :two} (range)))
+               '(:zero 1 :two 3))
+    (assert-eq "collection replace accepts nil mapping and collection"
+               (seq (replace nil nil))
+               nil)
+    (assert-eq "three-argument string replace remains available"
+               (replace "a-b-a" "a" "x")
+               "x-b-x")
+    "PASS"))

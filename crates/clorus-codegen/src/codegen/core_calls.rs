@@ -3537,10 +3537,49 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "replace" => {
-                // replace takes 3 args: string, match, replacement
+                // `replace` has two deliberately distinct public forms:
+                // collection replacement `(replace smap coll)` is defined in
+                // source core, while the legacy three-argument string form
+                // stays on the native fast path. Resolve the source function
+                // directly here because this name is also a compiler intrinsic.
+                if args.len() == 2 {
+                    let source_name = if self.functions.contains_key("replace") {
+                        "replace"
+                    } else {
+                        "clorus_clorus_core_replace"
+                    };
+                    let source_fn = self
+                        .functions
+                        .get(source_name)
+                        .copied()
+                        .ok_or("source-core replace function not declared")?;
+                    let smap = self.compile_expr(&args[0])?;
+                    let coll = self.compile_expr(&args[1])?;
+                    let null_env = self
+                        .context
+                        .i8_type()
+                        .ptr_type(inkwell::AddressSpace::default())
+                        .const_null();
+                    let result = self
+                        .builder
+                        .build_call(
+                            source_fn,
+                            &[smap.into(), coll.into(), null_env.into()],
+                            "replace_collection_call",
+                        )
+                        .unwrap();
+                    return Ok(result
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value());
+                }
+
+                // String replacement takes 3 arguments: string, match,
+                // replacement.
                 if args.len() != 3 {
                     return Err(
-                        "replace requires 3 arguments: string, match, replacement".to_string()
+                        "replace requires either 2 arguments (replacement map and collection) or 3 arguments (string, match, replacement)".to_string()
                     );
                 }
 
