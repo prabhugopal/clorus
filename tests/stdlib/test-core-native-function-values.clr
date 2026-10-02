@@ -25,6 +25,9 @@
     (assert-eq "a source multi-arity function keeps every variant as a value"
                (invoke2 take-nth 2 [0 1 2 3])
                '(0 2))
+    (assert-eq "a source multi-arity function exposes its non-final variant"
+               (transduce (invoke1 take-nth 2) conj [] [0 1 2 3 4])
+               [0 2 4])
     (assert-eq "sort-by accepts native first as its key function"
                (sort-by first [[2 :b] [1 :a]])
                [[1 :a] [2 :b]])
