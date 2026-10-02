@@ -632,6 +632,44 @@
 ;; Collection Utilities
 ;; ============================================================================
 
+;; Native collection primitives have direct compiler lowerings for ordinary
+;; calls.  These bindings give the same operations a proper Var/function value
+;; when used in higher-order code, e.g. `(sort-by first rows)` or
+;; `((fn [f] (f m k)) get)`.  Their bodies still lower to the native fast path;
+;; this is an API bridge, not a second implementation.
+(defn first [coll]
+  (first coll))
+
+(defn rest [coll]
+  (rest coll))
+
+(defn seq [coll]
+  (seq coll))
+
+(defn last [coll]
+  (last coll))
+
+(defn empty [coll]
+  (empty coll))
+
+(defn count [coll]
+  (count coll))
+
+(defn get
+  ([coll key]
+   (get coll key))
+  ([coll key not-found]
+   (get coll key not-found)))
+
+(defn nth
+  ([coll index]
+   (nth coll index))
+  ([coll index not-found]
+   (nth coll index not-found)))
+
+(defn contains? [coll key]
+  (contains? coll key))
+
 ;; Validation helpers used by stdlib collection/math functions.
 (defn ensure-number [fname n]
   (if (number? n)

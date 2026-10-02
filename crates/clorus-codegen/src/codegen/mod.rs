@@ -938,6 +938,31 @@ impl<'ctx> CodeGen<'ctx> {
                     };
 
                     if let Some((resolved_name, function)) = function {
+                        // A `defn` owns a Var-backed global function value.
+                        // Loading that value is essential for multi-arity
+                        // definitions: the bare entry in `self.functions`
+                        // intentionally points at one implementation variant
+                        // for static calls, whereas the global contains the
+                        // complete dispatcher.  Wrapping that last variant
+                        // made a value such as `get` or `take-nth` accept only
+                        // one of its legal arities when passed to higher-order
+                        // code.  Prefer the global whenever it is available;
+                        // direct list calls still take the static fast path.
+                        if let Some(global) = self.globals.get(&resolved_name).copied() {
+                            let value_ptr_type =
+                                self.context.i8_type().ptr_type(AddressSpace::default());
+                            let value = self
+                                .builder
+                                .build_load(
+                                    value_ptr_type,
+                                    global.as_pointer_value(),
+                                    &format!("{}_function_var", resolved_name),
+                                )
+                                .unwrap()
+                                .into_pointer_value();
+                            return self.maybe_deref_var_value(value, "symbol_function_global");
+                        }
+
                         // Function reference - wrap in function value
                         // Compiler-generated functions use a call-frame adapter
                         // when passed as values. Native runtime functions retain

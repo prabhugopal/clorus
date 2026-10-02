@@ -1,0 +1,34 @@
+(ns tests.stdlib.test-core-native-function-values)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn invoke1 [f x]
+  (f x))
+
+(defn invoke2 [f x y]
+  (f x y))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "first is a first-class function" (invoke1 first [9 8]) 9)
+    (assert-eq "rest is a first-class function" (invoke1 rest [9 8]) '(8))
+    (assert-eq "seq is a first-class function" (invoke1 seq [9 8]) '(9 8))
+    (assert-eq "last is a first-class function" (invoke1 last [9 8]) 8)
+    (assert-eq "empty is a first-class function" (invoke1 empty [9 8]) [])
+    (assert-eq "count is a first-class function" (invoke1 count [9 8]) 2)
+    (assert-eq "get is a first-class function" (invoke2 get {:a 9} :a) 9)
+    (assert-eq "nth is a first-class function" (invoke2 nth [9 8] 1) 8)
+    (assert-eq "contains? is a first-class function" (invoke2 contains? {:a 9} :a) true)
+    (assert-eq "a source multi-arity function keeps every variant as a value"
+               (invoke2 take-nth 2 [0 1 2 3])
+               '(0 2))
+    (assert-eq "sort-by accepts native first as its key function"
+               (sort-by first [[2 :b] [1 :a]])
+               [[1 :a] [2 :b]])
+    (assert-eq "map accepts native first as its transform"
+               (map first [[9 8] [7 6]])
+               '(9 7))
+    "PASS"))
