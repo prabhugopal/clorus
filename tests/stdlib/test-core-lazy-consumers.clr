@@ -1,0 +1,40 @@
+(ns tests.stdlib.test-core-lazy-consumers)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (let [calls (atom 0)]
+      (assert-eq "dorun returns nil"
+                 (dorun (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))
+                 nil)
+      (assert-eq "dorun realizes every finite lazy value" @calls 3))
+    (let [calls (atom 0)
+          xs (map (fn [x] (do (swap! calls inc) x)) [1 2 3])
+          realized (doall xs)]
+      (assert-eq "doall realizes all finite lazy values" @calls 3)
+      (assert-eq "doall returns the realized sequence" realized '(1 2 3)))
+    (let [calls (atom 0)
+          xs (map (fn [x] (do (swap! calls inc) x)) (range))]
+      (doall 2 xs)
+      (assert-eq "bounded doall realizes only its bound" @calls 2))
+    (let [calls (atom 0)
+          xs (map (fn [x] (do (swap! calls inc) x)) (range))]
+      (doall 0 xs)
+      (assert-eq "zero-bound doall does not force a lazy value" @calls 0))
+    (assert-eq "take-nth finite input"
+               (take-nth 2 [0 1 2 3 4 5])
+               '(0 2 4))
+    (assert-eq "take-nth accepts nil as an empty input"
+               (seq (take-nth 2 nil))
+               nil)
+    (assert-eq "take-nth remains lazy over an unbounded range"
+               (take 4 (take-nth 3 (range)))
+               '(0 3 6 9))
+    (assert-eq "take-nth transducer"
+               (transduce (take-nth 2) conj [] [0 1 2 3 4])
+               [0 2 4])
+    "PASS"))

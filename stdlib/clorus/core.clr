@@ -652,6 +652,70 @@
     coll
     (throw (str fname " expects collection"))))
 
+;; Consume a sequence for effects without retaining its realized values.
+;; Each iteration crosses the normal `seq` forcing boundary, so this works for
+;; persistent collections and native LazySeq producers alike.
+(defn dorun
+  ([coll]
+   (loop [remaining (seq coll)]
+     (if remaining
+       (recur (seq (rest remaining)))
+       nil)))
+  ([n coll]
+   (let [n (ensure-number "dorun" n)]
+     (if (<= n 0)
+       nil
+       (loop [remaining-n n
+              remaining (seq coll)]
+         (if (nil? remaining)
+           nil
+           (if (= remaining-n 1)
+             nil
+             (recur (dec remaining-n) (seq (rest remaining))))))))))
+
+;; Realize a collection while preserving its original representation. The
+;; optional bound realizes at most n elements, including zero, which matters
+;; for callers inspecting an unbounded LazySeq without advancing it.
+(defn doall
+  ([coll]
+   (do (dorun coll)
+       coll))
+  ([n coll]
+   (do (dorun n coll)
+       coll)))
+
+;; take-nth emits each nth element lazily, and its one-argument form is a
+;; transducer. Keep the state machine in source core so both execution modes
+;; share the same lazy/sequence semantics.
+(defn take-nth-lazy [n coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (__clorus_seq_cons (first coll)
+                         (take-nth-lazy n (drop n coll))))))
+
+(defn take-nth
+  ([n]
+   (let [n (ensure-number "take-nth" n)]
+     (if (<= n 0)
+       (throw "take-nth expects positive n")
+       (fn [rf]
+         (let [remaining (atom 0)]
+           (fn
+             ([result] (rf result))
+             ([result input]
+              (if (= @remaining 0)
+                (do (reset! remaining (dec n))
+                    (rf result input))
+                (do (swap! remaining dec)
+                    result)))))))))
+  ([n coll]
+   (let [n (ensure-number "take-nth" n)
+         coll (if (nil? coll) nil (ensure-coll "take-nth" coll))]
+     (if (<= n 0)
+       (throw "take-nth expects positive n")
+       (take-nth-lazy n coll)))))
+
 ;; compare - generic ordering helper
 ;; Returns negative/zero/positive like clojure.core/compare.
 (defn compare [a b]
