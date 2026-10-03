@@ -1,0 +1,25 @@
+(ns tests.language.test-when-first)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "when-first binds the first element"
+               (when-first [x [4 5]] (* x 2))
+               8)
+    (assert-eq "when-first returns nil for an empty collection"
+               (when-first [x []] (* x 2))
+               nil)
+    (assert-eq "when-first evaluates its collection exactly once"
+               (let [calls (atom 0)]
+                 (when-first [x (do (swap! calls inc) [7])]
+                   (+ x @calls))
+                 @calls)
+               1)
+    (assert-eq "when-first keeps false as a valid first element"
+               (when-first [x [false]] (if x :truthy :false-value))
+               :false-value)
+    "PASS"))

@@ -172,6 +172,10 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_when_some_once(args, registry)
         }
 
+        Expr::Call { func, args } if func == "when-first" => {
+            expand_when_first_once(args, registry)
+        }
+
         // If-not macro
         Expr::Call { func, args } if func == "if-not" => {
             expand_if_not_once(args, registry)
@@ -289,6 +293,10 @@ fn expand_if_some_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
 
 fn expand_when_some_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     expand_when_some(args, registry)
+}
+
+fn expand_when_first_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_when_first(args, registry)
 }
 
 fn expand_if_not_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
@@ -544,6 +552,11 @@ pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) ->
 
         Expr::Call { func, args } if func == "when-some" => {
             expand_when_some(args, registry)
+        }
+
+        // Bind the first element only when the source has a non-empty seq.
+        Expr::Call { func, args } if func == "when-first" => {
+            expand_when_first(args, registry)
         }
 
         // If-not macro: (if-not test then else) => (if test else then)
@@ -2316,6 +2329,64 @@ fn expand_when_some(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
                 }),
                 then_branch: Box::new(Expr::Nil),
                 else_branch: Box::new(body),
+            }),
+        },
+        registry,
+    )
+}
+
+/// Expand `(when-first [x coll] body...)` while evaluating `coll` once.
+/// The generated seq binding distinguishes an empty input from an input whose
+/// first element is false or nil, which is the key Clojure contract here.
+fn expand_when_first(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.len() < 2 {
+        return Expr::Nil;
+    }
+
+    let bindings = match &args[0] {
+        Expr::Vector(bindings) if bindings.len() == 2 => bindings,
+        _ => return Expr::Nil,
+    };
+    let name = match &bindings[0] {
+        Expr::Symbol(name) => name.clone(),
+        _ => return Expr::Nil,
+    };
+    let seq_name = registry.gensym(Some("when_first_seq"));
+    let body = match args.len() {
+        1 => Expr::Nil,
+        2 => expand_macros_with_registry(&args[1], registry),
+        _ => Expr::Do {
+            exprs: args[1..]
+                .iter()
+                .map(|expr| expand_macros_with_registry(expr, registry))
+                .collect(),
+        },
+    };
+
+    let bound_body = Expr::Let {
+        bindings: vec![(
+            Pattern::Symbol(name),
+            Box::new(Expr::Call {
+                func: "first".to_string(),
+                args: vec![Expr::Symbol(seq_name.clone())],
+            }),
+        )],
+        body: Box::new(body),
+    };
+
+    expand_macros_with_registry(
+        &Expr::Let {
+            bindings: vec![(
+                Pattern::Symbol(seq_name.clone()),
+                Box::new(Expr::Call {
+                    func: "seq".to_string(),
+                    args: vec![bindings[1].clone()],
+                }),
+            )],
+            body: Box::new(Expr::If {
+                condition: Box::new(Expr::Symbol(seq_name)),
+                then_branch: Box::new(bound_body),
+                else_branch: Box::new(Expr::Nil),
             }),
         },
         registry,
