@@ -1,0 +1,31 @@
+(ns tests.language.test-conditional-threading)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "cond-> applies only truthy branches"
+               (cond-> {:a 1}
+                 true (assoc :b 2)
+                 false (assoc :c 3)
+                 true (update :a inc))
+               {:a 2 :b 2})
+    (assert-eq "cond->> threads at the final argument position"
+               (cond->> [1 2 3]
+                 true (map inc)
+                 true (filter even?))
+               '(2 4))
+    (assert-eq "as-> rebinds the named intermediate value"
+               (as-> 1 value
+                 (+ value 2)
+                 (* value 3))
+               9)
+    (assert-eq "as-> accepts a keyword lookup form"
+               (as-> {:a 7} value
+                 (:a value)
+                 (inc value))
+               8)
+    "PASS"))

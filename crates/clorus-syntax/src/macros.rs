@@ -122,6 +122,18 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_thread_last_once(args, registry)
         }
 
+        Expr::Call { func, args } if func == "cond->" => {
+            expand_cond_thread_first_once(args, registry)
+        }
+
+        Expr::Call { func, args } if func == "cond->>" => {
+            expand_cond_thread_last_once(args, registry)
+        }
+
+        Expr::Call { func, args } if func == "as->" => {
+            expand_as_thread_once(args, registry)
+        }
+
         // Cond macro
         Expr::Call { func, args } if func == "cond" => {
             expand_cond_once(args, registry)
@@ -281,6 +293,18 @@ fn expand_some_thread_first_once(args: &[Expr], _registry: &mut MacroRegistry) -
 
 fn expand_some_thread_last_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_some_thread_last_impl(args, false)
+}
+
+fn expand_cond_thread_first_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_cond_thread(args, false, registry)
+}
+
+fn expand_cond_thread_last_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_cond_thread(args, true, registry)
+}
+
+fn expand_as_thread_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_as_thread(args, registry)
 }
 
 fn expand_doto_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
@@ -448,6 +472,22 @@ pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) ->
         // Thread-last macro: (->> x (f a) (g b)) => (g b (f a x))
         Expr::Call { func, args } if func == "->>" => {
             expand_thread_last(args, registry)
+        }
+
+        // Conditional thread-first: apply each form only when its preceding
+        // test is truthy, preserving the current value otherwise.
+        Expr::Call { func, args } if func == "cond->" => {
+            expand_cond_thread(args, false, registry)
+        }
+
+        // Conditional thread-last counterpart.
+        Expr::Call { func, args } if func == "cond->>" => {
+            expand_cond_thread(args, true, registry)
+        }
+
+        // Bind the intermediate value to an explicit name at every step.
+        Expr::Call { func, args } if func == "as->" => {
+            expand_as_thread(args, registry)
         }
 
         // Cond macro: (cond test1 expr1 test2 expr2 :else expr3) => nested ifs
@@ -2332,6 +2372,62 @@ fn expand_some_thread_last(args: &[Expr], registry: &mut MacroRegistry) -> Expr 
         };
     }
 
+    result
+}
+
+/// Expand `(cond-> value test form ...)` and `(cond->> value test form ...)`.
+/// A fresh binding holds each intermediate result, so every test is evaluated
+/// once in source order and a false test leaves the current result untouched.
+fn expand_cond_thread(args: &[Expr], thread_last: bool, registry: &mut MacroRegistry) -> Expr {
+    if args.is_empty() || (args.len() - 1) % 2 != 0 {
+        return Expr::Nil;
+    }
+
+    let mut result = expand_macros_with_registry(&args[0], registry);
+    let mut index = 1;
+    while index < args.len() {
+        let value_sym = registry.gensym(Some("cond_thread"));
+        let condition = expand_macros_with_registry(&args[index], registry);
+        let threaded = if thread_last {
+            thread_as_last_arg(Expr::Symbol(value_sym.clone()), &args[index + 1], registry)
+        } else {
+            thread_as_first_arg(Expr::Symbol(value_sym.clone()), &args[index + 1], registry)
+        };
+
+        result = Expr::Let {
+            bindings: vec![(Pattern::Symbol(value_sym.clone()), Box::new(result))],
+            body: Box::new(Expr::If {
+                condition: Box::new(condition),
+                then_branch: Box::new(expand_macros_with_registry(&threaded, registry)),
+                else_branch: Box::new(Expr::Symbol(value_sym)),
+            }),
+        };
+        index += 2;
+    }
+
+    result
+}
+
+/// Expand `(as-> value name form ...)` by rebinding `name` to every
+/// intermediate value. The lexical nesting mirrors Clojure's explicit-name
+/// threading and does not require a runtime helper or compiler special case.
+fn expand_as_thread(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.len() < 2 {
+        return Expr::Nil;
+    }
+
+    let name = match &args[1] {
+        Expr::Symbol(name) => name.clone(),
+        _ => return Expr::Nil,
+    };
+
+    let mut result = expand_macros_with_registry(&args[0], registry);
+    for form in &args[2..] {
+        result = Expr::Let {
+            bindings: vec![(Pattern::Symbol(name.clone()), Box::new(result))],
+            body: Box::new(expand_macros_with_registry(form, registry)),
+        };
+    }
     result
 }
 
