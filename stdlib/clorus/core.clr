@@ -1032,43 +1032,66 @@
             {}
             coll)))
 
-;; partition - Partition collection into chunks of size n
-;; Example: (partition 2 [1 2 3 4 5 6]) ; => [[1 2] [3 4] [5 6]]
-(defn partition-lazy [n coll]
+;; partition - Partition collection into chunks of size n.
+;; The step-aware helper is the one lazy state machine used by both the simple
+;; and overlapping/gapped forms.  It only realizes the current bounded chunk.
+(defn partition-step-lazy [n step coll]
   (lazy-seq
     (if (empty? coll)
       nil
       (let [chunk (vec (take n coll))]
-        ;; `partition` omits an incomplete final chunk, but realizing this
-        ;; one bounded chunk is all it needs to decide that contract.
+        ;; `partition` omits an incomplete final chunk.
         (if (= (count chunk) n)
           (__clorus_seq_cons chunk
-                             (partition-lazy n (drop n coll)))
+                             (partition-step-lazy n step (drop step coll)))
           nil)))))
 
-(defn partition [n coll]
-  (let [n (ensure-number "partition" n)
-        coll (ensure-coll "partition" coll)]
-    (if (<= n 0)
-      (throw "partition expects positive n")
-      (partition-lazy n coll))))
+(defn partition-pad-lazy [n step pad coll]
+  (lazy-seq
+    (if (empty? coll)
+      nil
+      (let [chunk (vec (take n (concat coll pad)))]
+        (__clorus_seq_cons chunk
+                           (partition-pad-lazy n step pad (drop step coll)))))))
 
-;; partition-all - Like partition but includes incomplete final chunk
-;; Example: (partition-all 2 [1 2 3 4 5]) ; => [[1 2] [3 4] [5]]
-(defn partition-all-lazy [n coll]
+(defn partition
+  ([n coll]
+   (partition n n coll))
+  ([n step coll]
+   (let [n (ensure-number "partition" n)
+         step (ensure-number "partition" step)
+         coll (ensure-coll "partition" coll)]
+     (if (or (<= n 0) (<= step 0))
+       (throw "partition expects positive n and step")
+       (partition-step-lazy n step coll))))
+  ([n step pad coll]
+   (let [n (ensure-number "partition" n)
+         step (ensure-number "partition" step)
+         pad (if (nil? pad) [] (ensure-coll "partition" pad))
+         coll (ensure-coll "partition" coll)]
+     (if (or (<= n 0) (<= step 0))
+       (throw "partition expects positive n and step")
+       (partition-pad-lazy n step pad coll)))))
+
+;; partition-all - Like partition but includes incomplete final chunks.
+(defn partition-all-step-lazy [n step coll]
   (lazy-seq
     (if (empty? coll)
       nil
       (let [chunk (vec (take n coll))]
         (__clorus_seq_cons chunk
-                           (partition-all-lazy n (drop n coll)))))))
+                           (partition-all-step-lazy n step (drop step coll)))))))
 
-(defn partition-all [n coll]
-  (let [n (ensure-number "partition-all" n)
-        coll (ensure-coll "partition-all" coll)]
-    (if (<= n 0)
-      (throw "partition-all expects positive n")
-      (partition-all-lazy n coll))))
+(defn partition-all
+  ([n coll]
+   (partition-all n n coll))
+  ([n step coll]
+   (let [n (ensure-number "partition-all" n)
+         step (ensure-number "partition-all" step)
+         coll (ensure-coll "partition-all" coll)]
+     (if (or (<= n 0) (<= step 0))
+       (throw "partition-all expects positive n and step")
+       (partition-all-step-lazy n step coll)))))
 
 ;; partition-by - Partition collection by consecutive runs of (f item)
 ;; Example: (partition-by odd? [1 3 2 4 5]) ; => [[1 3] [2 4] [5]]

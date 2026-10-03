@@ -41,6 +41,8 @@
     {"name": "dorun", "owner": "source-core", "status": "implemented", "coverage": "dual-engine lazy consumer tests"},
     {"name": "doall", "owner": "source-core", "status": "implemented", "coverage": "dual-engine lazy consumer tests"},
     {"name": "replace", "owner": "source-core", "status": "implemented", "coverage": "dual-engine collection and string replacement tests, REPL"},
+    {"name": "partition", "owner": "source-core", "status": "implemented", "coverage": "dual-engine stepped, padded, and lazy infinite-source tests"},
+    {"name": "partition-all", "owner": "source-core", "status": "implemented", "coverage": "dual-engine stepped and lazy infinite-source tests"},
     {"name": "partition-by", "owner": "source-core", "status": "implemented", "coverage": "core parity, transducer tests"},
     {"name": "reduce", "owner": "source-core", "status": "implemented", "coverage": "core parity, early-termination, dual-engine first-class function tests"},
     {"name": "apply", "owner": "source-core", "status": "implemented", "coverage": "dual-engine first-class multi-arity function tests"},
