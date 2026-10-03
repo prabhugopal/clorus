@@ -1,0 +1,37 @@
+(ns tests.stdlib.test-core-associative-transforms)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "not= is false for one value" (not= :x) false)
+    (assert-eq "not= is false for equal values" (not= [1 2] [1 2]) false)
+    (assert-eq "not= accepts more than two values" (not= 1 1 2 1) true)
+    (assert-eq "not= is false when every value is equal" (not= :x :x :x) false)
+    (assert-eq "update-keys transforms every map key"
+               (update-keys {:a 1 :b 2}
+                            (fn [k] (if (= k :a) :x :y)))
+               {:x 1 :y 2})
+    (assert-eq "update-vals transforms every map value"
+               (update-vals {:a 1 :b 2} (fn [v] (* v 10)))
+               {:a 10 :b 20})
+    (assert-eq "update transforms preserve empty maps"
+               [(update-keys {} identity) (update-vals {} identity)]
+               [{} {}])
+    (assert-eq "update-keys validates its map input"
+               (throws? (fn [] (update-keys [1 2] identity)))
+               true)
+    (assert-eq "update-vals validates its function input"
+               (throws? (fn [] (update-vals {:a 1} 7)))
+               true)
+    "PASS"))

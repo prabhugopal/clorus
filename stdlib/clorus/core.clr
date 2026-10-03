@@ -63,6 +63,13 @@
 (defn not [x]
   (if x false true))
 
+;; not= is the variadic complement of equality.  Delegating to the existing
+;; equality function keeps numeric and collection equality on one path.
+(defn not=
+  ([x] false)
+  ([x y] (not (= x y)))
+  ([x y & more] (not (apply = x y more))))
+
 ;; reverse - Reverse collection
 ;; Realizes coll into a vector (if it isn't already one), then builds the
 ;; result by reading that vector back-to-front. Deliberately doesn't rely on
@@ -1585,6 +1592,19 @@
       (__clorus_is_map coll) (reduce-kv-map f init coll)
       (__clorus_is_vector coll) (reduce-kv-vector f init coll)
       :else (throw "reduce-kv expects a map or vector"))))
+
+;; update-keys/update-vals transform a map without mutating it.  If a key
+;; transform collides, the result follows normal assoc semantics (one value
+;; wins according to the map's iteration order), matching Clojure's contract.
+(defn update-keys [m f]
+  (let [m (ensure-map "update-keys" m)
+        f (ensure-fn "update-keys" f)]
+    (reduce-kv (fn [result k v] (assoc result (f k) v)) {} m)))
+
+(defn update-vals [m f]
+  (let [m (ensure-map "update-vals" m)
+        f (ensure-fn "update-vals" f)]
+    (reduce-kv (fn [result k v] (assoc result k (f v))) {} m)))
 
 ;; find - Return [key value] when k is present in an associative collection.
 ;; Presence is checked separately from `get` so stored nil and false values
