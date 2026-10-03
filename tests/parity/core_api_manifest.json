@@ -40,6 +40,7 @@
     {"name": "take-nth", "owner": "source-core", "status": "implemented", "coverage": "dual-engine lazy consumer and transducer tests"},
     {"name": "dorun", "owner": "source-core", "status": "implemented", "coverage": "dual-engine lazy consumer tests"},
     {"name": "doall", "owner": "source-core", "status": "implemented", "coverage": "dual-engine lazy consumer tests"},
+    {"name": "run!", "owner": "source-core", "status": "implemented", "coverage": "dual-engine effectful lazy-consumer tests"},
     {"name": "replace", "owner": "source-core", "status": "implemented", "coverage": "dual-engine collection and string replacement tests, REPL"},
     {"name": "partition", "owner": "source-core", "status": "implemented", "coverage": "dual-engine stepped, padded, and lazy infinite-source tests"},
     {"name": "partition-all", "owner": "source-core", "status": "implemented", "coverage": "dual-engine stepped and lazy infinite-source tests"},

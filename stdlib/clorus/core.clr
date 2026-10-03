@@ -762,6 +762,19 @@
              nil
              (recur (dec remaining-n) (seq (rest remaining))))))))))
 
+;; run! - Consume a finite collection for effects and return nil. It uses the
+;; normal reducer/sequence contract, so lazy inputs are forced one item at a
+;; time without retaining a mapped result collection.
+(defn run! [f coll]
+  (let [f (ensure-fn "run!" f)
+        coll (if (nil? coll) [] (ensure-coll "run!" coll))]
+    (do
+      (reduce (fn [_ item]
+                (do (f item) nil))
+              nil
+              coll)
+      nil)))
+
 ;; Realize a collection while preserving its original representation. The
 ;; optional bound realizes at most n elements, including zero, which matters
 ;; for callers inspecting an unbounded LazySeq without advancing it.

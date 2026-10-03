@@ -1,0 +1,37 @@
+(ns tests.stdlib.test-core-run-bang)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "run! applies its function in source order"
+               (let [seen (atom [])]
+                 (run! (fn [x] (swap! seen conj (* x 2))) [1 2 3])
+                 @seen)
+               [2 4 6])
+    (assert-eq "run! returns nil"
+               (run! identity [1 2 3])
+               nil)
+    (assert-eq "run! accepts nil as an empty input"
+               (run! identity nil)
+               nil)
+    (assert-eq "run! consumes lazy inputs without retaining results"
+               (let [seen (atom [])]
+                 (run! (fn [x] (swap! seen conj x))
+                       (take 3 (range)))
+                 @seen)
+               [0 1 2])
+    (assert-eq "run! validates its function"
+               (throws? (fn [] (run! 7 [1])))
+               true)
+    "PASS"))
