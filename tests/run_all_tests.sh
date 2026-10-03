@@ -356,6 +356,8 @@ run_repl_regressions() {
 (keep-indexed (fn [i x] (if (even? i) x nil)) [10 20 30 40])
 (into [] (map inc [1 2 3]))
 (transduce (take 2) conj [] [1 2 3])
+(let [take-nth-fn take-nth] (take-nth-fn 2 [0 1 2 3]))
+(let [transduce-fn transduce] (transduce-fn (map identity) conj [] [1 2]))
 :q
 EOF
         )
@@ -382,7 +384,9 @@ EOF
             && grep -Fq "(1 2 3)" "$repl_output_file" \
             && grep -Fq "(10 11 12)" "$repl_output_file" \
             && grep -Fq "(10 30)" "$repl_output_file" \
-            && ! grep -qE "Undefined function: (map|set|vec|some|find|seq|map-indexed|keep-indexed|into|transduce)" "$repl_output_file"; then
+            && grep -Fq "(0 2)" "$repl_output_file" \
+            && grep -Fq "[1 2]" "$repl_output_file" \
+            && ! grep -qE "(Undefined function: (map|set|vec|some|find|seq|map-indexed|keep-indexed|into|transduce|take-nth)|Attempted to call null as function)" "$repl_output_file"; then
             echo -e "${GREEN}✓ PASS${NC}"
             ((PASSED+=1))
         else

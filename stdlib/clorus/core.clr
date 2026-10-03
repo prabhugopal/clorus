@@ -788,8 +788,11 @@
 ;; conj - Add element to collection (at end for vectors)
 ;; Simple implementation that works with vectors
 ;; Example: (conj [1 2 3] 4) ; => [1 2 3 4]
-(defn conj [coll x]
-  (__clorus_conj coll x))
+(defn conj
+  ([coll]
+   coll)
+  ([coll x]
+   (__clorus_conj coll x)))
 
 ;; set - Return a hash set containing the distinct elements of coll.
 ;; This deliberately builds through public collection operations rather than a

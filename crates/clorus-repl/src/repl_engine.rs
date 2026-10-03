@@ -212,7 +212,9 @@ impl<'ctx> ReplEngine<'ctx> {
                 Expr::Require { .. } | Expr::Use { .. } | Expr::Declare { .. } => {
                     // Skip directives; no runtime evaluation needed here.
                 }
-                Expr::Def { name, .. } | Expr::Defn { name, .. } => {
+                Expr::Def { name, .. }
+                | Expr::Defn { name, .. }
+                | Expr::DefnMulti { name, .. } => {
                     self.register_symbol(&current_ns, name);
                     symbols_registered += 1;
                     self.executed_init_exprs.push((current_ns.clone(), expr.clone()));
@@ -260,7 +262,7 @@ impl<'ctx> ReplEngine<'ctx> {
 
             let symbol_name = match &expanded_expr {
                 Expr::Def { name, .. } => Some(name.clone()),
-                Expr::Defn { name, .. } => Some(name.clone()),
+                Expr::Defn { name, .. } | Expr::DefnMulti { name, .. } => Some(name.clone()),
                 _ => None,
             };
 
@@ -580,7 +582,9 @@ impl<'ctx> ReplEngine<'ctx> {
                 _ => {
                     self.executed_init_exprs.push((current_ns.clone(), expr.clone()));
 
-                    if let Expr::Def { name, .. } | Expr::Defn { name, .. } = &expanded {
+                    if let Expr::Def { name, .. }
+                    | Expr::Defn { name, .. }
+                    | Expr::DefnMulti { name, .. } = &expanded {
                         self.register_symbol(&current_ns, name);
                     }
                 }
@@ -620,7 +624,7 @@ impl<'ctx> ReplEngine<'ctx> {
         // Determine the kind of expression for output formatting (use first expression)
         let eval_kind = match &exprs[0] {
             Expr::Def { name, .. } => EvalKind::Def(name.clone()),
-            Expr::Defn { name, .. } => EvalKind::Defn(name.clone()),
+            Expr::Defn { name, .. } | Expr::DefnMulti { name, .. } => EvalKind::Defn(name.clone()),
             Expr::Defmacro { name, .. } => EvalKind::Defmacro(name.clone()),
             Expr::Ns { .. } => EvalKind::Namespace,
             Expr::Require { .. } | Expr::Use { .. } => EvalKind::Import,
@@ -813,8 +817,10 @@ impl<'ctx> ReplEngine<'ctx> {
             // (e.g. protocol registration) that live in Rust globals and should not
             // be replayed on every interactive eval.
             if !skip_init_execution {
-                let is_def_or_defn =
-                    matches!(expanded, Expr::Def { .. } | Expr::Defn { .. });
+                let is_def_or_defn = matches!(
+                    expanded,
+                    Expr::Def { .. } | Expr::Defn { .. } | Expr::DefnMulti { .. }
+                );
                 if is_def_or_defn {
                     def_fn_names.push(fn_name);
                 }
@@ -917,12 +923,18 @@ impl<'ctx> ReplEngine<'ctx> {
                     continue;
                 }
 
-                let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
+                let is_def_or_defn = matches!(
+                    expanded_expr,
+                    clorus_syntax::Expr::Def { .. }
+                        | clorus_syntax::Expr::Defn { .. }
+                        | clorus_syntax::Expr::DefnMulti { .. }
+                );
 
                 // Extract symbol name for registration
                 let symbol_name = match &expanded_expr {
                     clorus_syntax::Expr::Def { name, .. } => Some(name.clone()),
-                    clorus_syntax::Expr::Defn { name, .. } => Some(name.clone()),
+                    clorus_syntax::Expr::Defn { name, .. }
+                    | clorus_syntax::Expr::DefnMulti { name, .. } => Some(name.clone()),
                     _ => None,
                 };
 
@@ -968,7 +980,12 @@ impl<'ctx> ReplEngine<'ctx> {
             let expanded_expr = expand_macros_with_registry(expr, &mut macro_registry);
 
             // Check if this is a def or defn expression
-            let is_def_or_defn = matches!(expanded_expr, clorus_syntax::Expr::Def { .. } | clorus_syntax::Expr::Defn { .. });
+            let is_def_or_defn = matches!(
+                expanded_expr,
+                clorus_syntax::Expr::Def { .. }
+                    | clorus_syntax::Expr::Defn { .. }
+                    | clorus_syntax::Expr::DefnMulti { .. }
+            );
 
             // Compile historical expressions
             let fn_name = format!("history_{}", i);

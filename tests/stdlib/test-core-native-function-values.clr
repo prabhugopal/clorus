@@ -22,6 +22,9 @@
     (assert-eq "get is a first-class function" (invoke2 get {:a 9} :a) 9)
     (assert-eq "nth is a first-class function" (invoke2 nth [9 8] 1) 8)
     (assert-eq "contains? is a first-class function" (invoke2 contains? {:a 9} :a) true)
+    (assert-eq "conj supports the reducer completion arity"
+               (invoke1 conj [9 8])
+               [9 8])
     (assert-eq "a source multi-arity function keeps every variant as a value"
                (invoke2 take-nth 2 [0 1 2 3])
                '(0 2))
