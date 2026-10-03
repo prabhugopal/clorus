@@ -1467,6 +1467,38 @@
     m
     (throw (str fname " expects map or nil"))))
 
+;; reduce-kv - Reduce an associative collection with (f result key value).
+;; Maps yield their entries while vectors yield their zero-based indexes.  The
+;; implementation remains in the language layer so reduced values have the
+;; same early-termination contract in JIT and AOT builds.
+(defn reduce-kv-map [f init entries]
+  (loop [acc init
+         remaining entries]
+    (if (empty? remaining)
+      acc
+      (let [entry (first remaining)
+            next-value (f acc (first entry) (second entry))]
+        (if (reduced? next-value)
+          (unreduced next-value)
+          (recur next-value (rest remaining)))))))
+
+(defn reduce-kv-vector [f init values]
+  (loop [acc init
+         index 0]
+    (if (>= index (count values))
+      acc
+      (let [next-value (f acc index (nth values index))]
+        (if (reduced? next-value)
+          (unreduced next-value)
+          (recur next-value (inc index)))))))
+
+(defn reduce-kv [f init coll]
+  (let [f (ensure-fn "reduce-kv" f)]
+    (cond
+      (__clorus_is_map coll) (reduce-kv-map f init coll)
+      (__clorus_is_vector coll) (reduce-kv-vector f init coll)
+      :else (throw "reduce-kv expects a map or vector"))))
+
 ;; find - Return [key value] when k is present in an associative collection.
 ;; Presence is checked separately from `get` so stored nil and false values
 ;; remain distinguishable from an absent key.

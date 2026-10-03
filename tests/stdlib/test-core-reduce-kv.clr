@@ -1,0 +1,38 @@
+(ns tests.stdlib.test-core-reduce-kv)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn throws? [f]
+  (try
+    (do
+      (f)
+      false)
+    (catch e true)))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "reduce-kv receives map keys and values"
+               (reduce-kv (fn [acc k v] (assoc acc k (* v 2)))
+                          {}
+                          {:a 1 :b 2})
+               {:a 2 :b 4})
+    (assert-eq "reduce-kv receives vector indexes and values"
+               (reduce-kv (fn [acc index value] (+ acc index value))
+                          0
+                          [10 20 30])
+               63)
+    (assert-eq "reduce-kv honors reduced values"
+               (reduce-kv (fn [acc index value]
+                            (if (= index 1)
+                              (reduced (+ acc value))
+                              (+ acc value)))
+                          0
+                          [10 20 30])
+               30)
+    (assert-eq "reduce-kv rejects non-associative values"
+               (throws? (fn [] (reduce-kv (fn [a _k _v] a) 0 '(1 2))))
+               true)
+    "PASS"))
