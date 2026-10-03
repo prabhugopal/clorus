@@ -8,7 +8,14 @@ from pathlib import Path
 
 
 MANIFEST = Path(__file__).with_name("core_api_manifest.json")
-VALID_OWNERS = {"native-kernel", "source-core", "source-transducers", "sequence-runtime"}
+VALID_OWNERS = {
+    "native-kernel",
+    "source-core",
+    "source-transducers",
+    "sequence-runtime",
+    "reader-runtime",
+    "codegen",
+}
 VALID_STATUSES = {"implemented", "partial", "planned"}
 
 
