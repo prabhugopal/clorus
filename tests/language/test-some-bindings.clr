@@ -1,0 +1,29 @@
+(ns tests.language.test-some-bindings)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "if-some binds false rather than taking else"
+               (if-some [value false] (if value :truthy :false-value) :missing)
+               :false-value)
+    (assert-eq "if-some takes else only for nil"
+               (if-some [value nil] :present :missing)
+               :missing)
+    (assert-eq "when-some returns a false binding's body value"
+               (when-some [value false] (if value :truthy :false-value))
+               :false-value)
+    (assert-eq "when-some returns nil for nil"
+               (when-some [value nil] :present)
+               nil)
+    (assert-eq "when-some sequences its body"
+               (let [events (atom [])]
+                 (when-some [value 7]
+                   (swap! events conj :entered)
+                   (+ value 1))
+                 @events)
+               [:entered])
+    "PASS"))

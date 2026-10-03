@@ -164,6 +164,14 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_when_let_once(args, registry)
         }
 
+        Expr::Call { func, args } if func == "if-some" => {
+            expand_if_some_once(args, registry)
+        }
+
+        Expr::Call { func, args } if func == "when-some" => {
+            expand_when_some_once(args, registry)
+        }
+
         // If-not macro
         Expr::Call { func, args } if func == "if-not" => {
             expand_if_not_once(args, registry)
@@ -273,6 +281,14 @@ fn expand_if_let_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
 
 fn expand_when_let_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_when_let_impl(args, false)
+}
+
+fn expand_if_some_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_if_some(args, registry)
+}
+
+fn expand_when_some_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_when_some(args, registry)
 }
 
 fn expand_if_not_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
@@ -518,6 +534,16 @@ pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) ->
         // When-let macro: (when-let [x expr] body) => (let [x expr] (when x body))
         Expr::Call { func, args } if func == "when-let" => {
             expand_when_let(args, registry)
+        }
+
+        // Nil-aware conditional bindings. Unlike if-let/when-let, false is a
+        // present value and therefore executes the bound branch.
+        Expr::Call { func, args } if func == "if-some" => {
+            expand_if_some(args, registry)
+        }
+
+        Expr::Call { func, args } if func == "when-some" => {
+            expand_when_some(args, registry)
         }
 
         // If-not macro: (if-not test then else) => (if test else then)
@@ -2217,6 +2243,83 @@ fn expand_when_let(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     };
 
     expand_macros_with_registry(&let_expr, registry)
+}
+
+/// Expand `(if-some [x value] then else)`.  The bound branch runs for every
+/// non-nil value, including false, matching Clojure's nil-aware binding form.
+fn expand_if_some(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.len() < 2 {
+        return Expr::Nil;
+    }
+
+    let bindings = match &args[0] {
+        Expr::Vector(bindings) if bindings.len() == 2 => bindings,
+        _ => return Expr::Nil,
+    };
+    let name = match &bindings[0] {
+        Expr::Symbol(name) => name.clone(),
+        _ => return Expr::Nil,
+    };
+    let else_expr = args.get(2).cloned().unwrap_or(Expr::Nil);
+
+    let if_expr = Expr::If {
+        condition: Box::new(Expr::Call {
+            func: "nil?".to_string(),
+            args: vec![Expr::Symbol(name.clone())],
+        }),
+        then_branch: Box::new(expand_macros_with_registry(&else_expr, registry)),
+        else_branch: Box::new(expand_macros_with_registry(&args[1], registry)),
+    };
+
+    expand_macros_with_registry(
+        &Expr::Let {
+            bindings: vec![(Pattern::Symbol(name), Box::new(bindings[1].clone()))],
+            body: Box::new(if_expr),
+        },
+        registry,
+    )
+}
+
+/// Expand `(when-some [x value] body...)` with the same nil-only test as
+/// if-some. Multiple body expressions retain normal do sequencing.
+fn expand_when_some(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.is_empty() {
+        return Expr::Nil;
+    }
+
+    let bindings = match &args[0] {
+        Expr::Vector(bindings) if bindings.len() == 2 => bindings,
+        _ => return Expr::Nil,
+    };
+    let name = match &bindings[0] {
+        Expr::Symbol(name) => name.clone(),
+        _ => return Expr::Nil,
+    };
+    let body = match args.len() {
+        1 => Expr::Nil,
+        2 => expand_macros_with_registry(&args[1], registry),
+        _ => Expr::Do {
+            exprs: args[1..]
+                .iter()
+                .map(|expr| expand_macros_with_registry(expr, registry))
+                .collect(),
+        },
+    };
+
+    expand_macros_with_registry(
+        &Expr::Let {
+            bindings: vec![(Pattern::Symbol(name.clone()), Box::new(bindings[1].clone()))],
+            body: Box::new(Expr::If {
+                condition: Box::new(Expr::Call {
+                    func: "nil?".to_string(),
+                    args: vec![Expr::Symbol(name)],
+                }),
+                then_branch: Box::new(Expr::Nil),
+                else_branch: Box::new(body),
+            }),
+        },
+        registry,
+    )
 }
 
 /// Expand if-not macro: (if-not test then else) => (if test else then)
