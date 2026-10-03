@@ -11,6 +11,12 @@
 (defn invoke2 [f x y]
   (f x y))
 
+(defn invoke3 [f x y z]
+  (f x y z))
+
+(defn invoke4 [f w x y z]
+  (f w x y z))
+
 (defn -main [& _args]
   (do
     (assert-eq "first is a first-class function" (invoke1 first [9 8]) 9)
@@ -25,6 +31,33 @@
     (assert-eq "conj supports the reducer completion arity"
                (invoke1 conj [9 8])
                [9 8])
+    (assert-eq "conj remains variadic as a function value"
+               (apply conj [1] [2 3])
+               [1 2 3])
+    (assert-eq "reduce is a first-class multi-arity function"
+               (invoke2 reduce + [1 2 3 4])
+               10)
+    (assert-eq "apply is a first-class multi-arity function"
+               (invoke4 apply + 1 2 [3 4])
+               10)
+    (assert-eq "apply preserves an arbitrary fixed prefix as a function value"
+               (let [a apply] (a + 1 2 3 [4 5]))
+               15)
+    (assert-eq "list is a first-class variadic function"
+               (invoke3 list 1 2 3)
+               '(1 2 3))
+    (assert-eq "assoc is a first-class variadic function"
+               (apply assoc {} :a 1 [:b 2])
+               {:a 1 :b 2})
+    (assert-eq "dissoc is a first-class variadic function"
+               (apply dissoc {:a 1 :b 2} [:a :b])
+               {})
+    (assert-eq "disj is a first-class variadic function"
+               (apply disj #{1 2 3} [1 3])
+               #{2})
+    (assert-eq "merge is a first-class variadic function"
+               (apply merge {:a 1} [{:b 2} {:a 3}])
+               {:a 3 :b 2})
     (assert-eq "a source multi-arity function keeps every variant as a value"
                (invoke2 take-nth 2 [0 1 2 3])
                '(0 2))

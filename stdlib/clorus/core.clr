@@ -836,7 +836,94 @@
   ([coll]
    coll)
   ([coll x]
-   (__clorus_conj coll x)))
+   (__clorus_conj coll x))
+  ([coll x & xs]
+   (loop [result (__clorus_conj coll x)
+          remaining xs]
+     (if (empty? remaining)
+       result
+       (recur (__clorus_conj result (first remaining))
+              (rest remaining))))))
+
+;; Native collection primitives remain direct compiler lowerings at ordinary
+;; call sites.  These adapters provide the same operations as proper function
+;; values for higher-order code.  Their direct calls still lower to the native
+;; kernel; only calls through a value use these portable dispatch loops.
+(defn reduce
+  ([f coll]
+   (reduce f coll))
+  ([f init coll]
+   (reduce f init coll)))
+
+(defn apply-with-final-args [f prefix args]
+  (if (empty? (rest args))
+    (apply f prefix (first args))
+    (apply-with-final-args f
+                           (conj prefix (first args))
+                           (rest args))))
+
+(defn apply
+  ([f args]
+   (apply f args))
+  ([f x args]
+   (apply f x args))
+  ([f x y args]
+   (apply f x y args))
+  ([f x y z args]
+   (apply f x y z args))
+  ([f x y z & args]
+   ;; Keep the final collection separate, exactly as core `apply` does, while
+   ;; combining every preceding value into a single fixed-argument sequence.
+   (apply-with-final-args f [x y z] args)))
+
+(defn list [& items]
+  (reverse (reduce (fn [result item] (cons item result)) '() items)))
+
+(defn assoc
+  ([coll]
+   coll)
+  ([coll key value]
+   (assoc coll key value))
+  ([coll key value & kvs]
+   (if (odd? (count kvs))
+     (throw "assoc requires a collection followed by key/value pairs")
+     (loop [result (assoc coll key value)
+            remaining kvs]
+       (if (empty? remaining)
+         result
+         (recur (assoc result
+                       (first remaining)
+                       (first (rest remaining)))
+                (rest (rest remaining))))))))
+
+(defn dissoc [coll & keys]
+  (loop [result coll
+         remaining keys]
+    (if (empty? remaining)
+      result
+      (recur (dissoc result (first remaining))
+             (rest remaining)))))
+
+(defn disj [coll & values]
+  (loop [result coll
+         remaining values]
+    (if (empty? remaining)
+      result
+      (recur (disj result (first remaining))
+             (rest remaining)))))
+
+(defn merge [& maps]
+  (loop [result {}
+         remaining maps]
+    (if (empty? remaining)
+      result
+      (let [m (first remaining)]
+        (if (nil? m)
+          (recur result (rest remaining))
+          (if (__clorus_is_map m)
+            (recur (reduce (fn [acc entry] (conj acc entry)) result m)
+                   (rest remaining))
+            (throw "merge expects maps or nil")))))))
 
 ;; set - Return a hash set containing the distinct elements of coll.
 ;; This deliberately builds through public collection operations rather than a
