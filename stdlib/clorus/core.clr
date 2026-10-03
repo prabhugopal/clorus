@@ -295,6 +295,35 @@
                                (filter-lazy pred (rest remaining)))
             (recur (rest remaining))))))))
 
+;; Helpers for Clojure's multi-collection map family.  Keep these in core
+;; rather than lowering multi-input calls specially in the compiler: that
+;; gives the interpreter/JIT/AOT the same shortest-input and lazy semantics.
+(defn map-many-any-empty? [colls]
+  (if (empty? colls)
+    false
+    (if (empty? (first colls))
+      true
+      (map-many-any-empty? (rest colls)))))
+
+(defn map-many-heads [colls]
+  (if (empty? colls)
+    []
+    (concat [(first (first colls))]
+            (map-many-heads (rest colls)))))
+
+(defn map-many-tails [colls]
+  (if (empty? colls)
+    []
+    (concat [(rest (first colls))]
+            (map-many-tails (rest colls)))))
+
+(defn map-many-lazy [f colls]
+  (lazy-seq
+    (if (map-many-any-empty? colls)
+      nil
+      (__clorus_seq_cons (apply f (map-many-heads colls))
+                         (map-many-lazy f (map-many-tails colls))))))
+
 ;; map - Apply function to each element of collection lazily.
 ;; Example: (map inc [1 2 3]) ; => (2 3 4)
 (defn map
@@ -304,12 +333,23 @@
        ([result] (rf result))
        ([result input] (rf result (f input))))))
   ([f coll]
-   (map-lazy f coll)))
+   (map-lazy f coll))
+  ([f coll1 coll2]
+   (map-many-lazy f [coll1 coll2]))
+  ([f coll1 coll2 & colls]
+   (map-many-lazy f (concat [coll1 coll2] colls))))
 
 ;; mapv - Apply function to each element and realize into a vector
 ;; Example: (mapv inc [1 2 3]) ; => [2 3 4]
-(defn mapv [f coll]
-  (reduce (fn [acc x] (conj acc (f x))) [] coll))
+(defn mapv
+  ([f coll]
+   (reduce (fn [acc x] (conj acc (f x))) [] coll))
+  ([f coll1 coll2]
+   (reduce (fn [acc x] (conj acc x)) [] (map f coll1 coll2)))
+  ([f coll1 coll2 & colls]
+   (reduce (fn [acc x] (conj acc x))
+           []
+           (apply map f coll1 coll2 colls))))
 
 ;; filter - Keep only elements that satisfy predicate lazily.
 ;; Example: (filter odd? [1 2 3 4]) ; => (1 3)
@@ -433,7 +473,11 @@
                 result
                 (f input))))))
   ([f coll]
-   (mapcat-lazy f coll)))
+   (mapcat-lazy f coll))
+  ([f coll1 coll2]
+   (mapcat-lazy identity (map f coll1 coll2)))
+  ([f coll1 coll2 & colls]
+   (mapcat-lazy identity (apply map f coll1 coll2 colls))))
 
 ;; reductions - Lazy running reductions. The accumulator is emitted before
 ;; advancing input, and a reduced accumulator is emitted once before stopping.
