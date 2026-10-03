@@ -1980,6 +1980,11 @@ fn thread_as_first_arg(value: Expr, form: &Expr, registry: &mut MacroRegistry) -
             args: vec![value],
         },
 
+        // Keywords are invocable lookup functions in Clojure. Preserve the
+        // keyword as the list head so normal keyword-call lowering handles
+        // `(:key value)` after threading.
+        Expr::Keyword(keyword) => Expr::List(vec![Expr::Keyword(keyword.clone()), value]),
+
         // Other forms - shouldn't happen
         _ => value,
     }
@@ -2022,6 +2027,10 @@ fn thread_as_last_arg(value: Expr, form: &Expr, registry: &mut MacroRegistry) ->
             func: name.clone(),
             args: vec![value],
         },
+
+        // A keyword takes its lookup target as its only argument regardless
+        // of thread direction, so `->>` uses the same keyword-call form.
+        Expr::Keyword(keyword) => Expr::List(vec![Expr::Keyword(keyword.clone()), value]),
 
         // Other forms
         _ => value,

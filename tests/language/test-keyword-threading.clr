@@ -1,0 +1,25 @@
+(ns tests.language.test-keyword-threading)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "thread-first invokes a keyword lookup"
+               (-> {:a 1} :a inc)
+               2)
+    (assert-eq "thread-last invokes a keyword lookup"
+               (->> {:a 1} :a inc)
+               2)
+    (assert-eq "some-thread-first short-circuits after a nil keyword lookup"
+               (some-> {:a nil} :a inc)
+               nil)
+    (assert-eq "some-thread-last short-circuits after a nil keyword lookup"
+               (some->> {:a nil} :a inc)
+               nil)
+    (assert-eq "some-thread-first invokes later forms after a keyword lookup"
+               (some-> {:a 1} :a inc)
+               2)
+    "PASS"))
