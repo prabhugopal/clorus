@@ -14,4 +14,12 @@
         producer (go (>!! ch 42))]
     (assert-eq "rendezvous value" (<!! ch) 42)
     (assert-eq "producer result" (<!! producer) true)
+    (let [effects (chan 1)
+          task (go
+                 (>!! effects :first)
+                 (>!! effects :second)
+                 :complete)]
+      (assert-eq "first go body form" (<!! effects) :first)
+      (assert-eq "second go body form" (<!! effects) :second)
+      (assert-eq "go body result" (<!! task) :complete))
     (println "channel rendezvous test passed")))

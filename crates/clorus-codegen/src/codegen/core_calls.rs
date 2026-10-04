@@ -2685,13 +2685,20 @@ impl<'ctx> CodeGen<'ctx> {
             }
 
             "go" => {
-                // go takes 1 arg: body expression to execute asynchronously
-                if args.len() != 1 {
-                    return Err("go requires 1 argument: body expression".to_string());
-                }
+                // Like Clojure's go, accept a body of zero or more forms.  Keep
+                // the body as one AST node so all execution modes lower the
+                // same expression tree; the future parking-state-machine path
+                // will replace only the execution strategy, not this syntax.
+                let body = match args {
+                    [] => Expr::Nil,
+                    [expr] => expr.clone(),
+                    exprs => Expr::Do {
+                        exprs: exprs.to_vec(),
+                    },
+                };
 
                 // Find free variables in the body (variables accessed but not defined locally)
-                let free_vars = self.find_free_variables(&args[0]);
+                let free_vars = self.find_free_variables(&body);
 
                 // Generate unique function name for go block
                 let go_fn_name = self.next_generated_name("go_block");
@@ -2749,7 +2756,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
 
                 // Compile the body expression
-                let body_result = self.compile_expr(&args[0])?;
+                let body_result = self.compile_expr(&body)?;
 
                 // Return the result
                 self.builder.build_return(Some(&body_result)).unwrap();
