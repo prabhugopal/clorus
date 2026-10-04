@@ -3188,10 +3188,9 @@ fn expand_doseq(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     }
 
     let mut effect_body = args[1..].to_vec();
-    // The generated sequence is consumed only for its forcing behavior. Use
-    // a non-nil sentinel because a nil value is also the current sequence
-    // exhaustion marker in the runtime's lazy boundary.
-    effect_body.push(Expr::Bool(true));
+    // The generated sequence is consumed only for its forcing behavior; its
+    // values are deliberately nil, matching Clojure's doseq contract.
+    effect_body.push(Expr::Nil);
     let generator = Expr::Call {
         func: "for".to_string(),
         args: vec![

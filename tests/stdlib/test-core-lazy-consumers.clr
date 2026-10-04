@@ -12,6 +12,12 @@
                  (dorun (map (fn [x] (do (swap! calls inc) x)) [1 2 3]))
                  nil)
       (assert-eq "dorun realizes every finite lazy value" @calls 3))
+    (let [calls (atom 0)]
+      (assert-eq "dorun realizes lazy nil elements"
+                 (dorun (for [x [1 2 3]]
+                          (do (swap! calls inc) nil)))
+                 nil)
+      (assert-eq "dorun does not confuse a nil element with exhaustion" @calls 3))
     (let [calls (atom 0)
           xs (map (fn [x] (do (swap! calls inc) x)) [1 2 3])
           realized (doall xs)]

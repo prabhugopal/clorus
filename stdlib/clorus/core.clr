@@ -747,9 +747,9 @@
 (defn dorun
   ([coll]
    (loop [remaining (seq coll)]
-     (if remaining
-       (recur (seq (rest remaining)))
-       nil)))
+     (if (nil? remaining)
+       nil
+       (recur (seq (rest remaining))))))
   ([n coll]
    (let [n (ensure-number "dorun" n)]
      (if (<= n 0)
