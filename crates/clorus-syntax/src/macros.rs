@@ -144,6 +144,11 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_case_once(args, registry)
         }
 
+        // Predicate dispatch macro
+        Expr::Call { func, args } if func == "condp" => {
+            expand_condp_once(args, registry)
+        }
+
         // When macro
         Expr::Call { func, args } if func == "when" => {
             expand_when_once(args, registry)
@@ -276,6 +281,10 @@ fn expand_case_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_case_impl(args, false)
 }
 
+fn expand_condp_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
+    expand_condp_impl(args, false)
+}
+
 fn expand_when_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_when_impl(args, false)
 }
@@ -377,6 +386,11 @@ fn expand_cond_impl(args: &[Expr], _recurse: bool) -> Expr {
 fn expand_case_impl(args: &[Expr], _recurse: bool) -> Expr {
     let mut registry = MacroRegistry::new();
     expand_case(args, &mut registry)
+}
+
+fn expand_condp_impl(args: &[Expr], _recurse: bool) -> Expr {
+    let mut registry = MacroRegistry::new();
+    expand_condp(args, &mut registry)
 }
 
 fn expand_when_impl(args: &[Expr], _recurse: bool) -> Expr {
@@ -531,6 +545,12 @@ pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) ->
         // Case macro: (case x 1 "one" 2 "two" "default") => let + cond with equality checks
         Expr::Call { func, args } if func == "case" => {
             expand_case(args, registry)
+        }
+
+        // Predicate dispatch: evaluate the predicate and value once, then
+        // test clauses in source order.
+        Expr::Call { func, args } if func == "condp" => {
+            expand_condp(args, registry)
         }
 
         // When macro: (when test expr1 expr2) => (if test (do expr1 expr2) nil)
@@ -2032,6 +2052,131 @@ fn expand_case(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
 
     // Expand the let (which will expand the nested cond)
     expand_macros_with_registry(&let_expr, registry)
+}
+
+/// Expand predicate dispatch:
+///
+/// ```text
+/// (condp pred value
+///   test-1 result-1
+///   test-2 :>> result-fn
+///   default)
+/// ```
+///
+/// `pred` and `value` are evaluated exactly once.  Each ordinary clause is
+/// tested as `(pred test value)` and returns its result expression when the
+/// predicate result is truthy.  A `:>>` clause receives that predicate result,
+/// matching Clojure's useful extractor form.  An odd final form is the
+/// fallback value; without one, no match evaluates to nil.
+fn expand_condp(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.len() < 2 {
+        return Expr::Nil;
+    }
+
+    let predicate_name = registry.gensym(Some("condp_pred"));
+    let value_name = registry.gensym(Some("condp_value"));
+    let clauses = &args[2..];
+
+    let body = expand_condp_clauses(
+        clauses,
+        0,
+        &predicate_name,
+        &value_name,
+        registry,
+    );
+
+    let expanded = Expr::Let {
+        bindings: vec![
+            (
+                Pattern::Symbol(predicate_name),
+                Box::new(args[0].clone()),
+            ),
+            (
+                Pattern::Symbol(value_name),
+                Box::new(args[1].clone()),
+            ),
+        ],
+        body: Box::new(body),
+    };
+
+    expand_macros_with_registry(&expanded, registry)
+}
+
+fn expand_condp_clauses(
+    clauses: &[Expr],
+    index: usize,
+    predicate_name: &str,
+    value_name: &str,
+    registry: &mut MacroRegistry,
+) -> Expr {
+    if index >= clauses.len() {
+        return Expr::Nil;
+    }
+
+    // An odd final form is the default expression, not a test/result pair.
+    if clauses.len() - index == 1 {
+        return clauses[index].clone();
+    }
+
+    let test = clauses[index].clone();
+    let mut next_index = index + 2;
+    let (then_branch, is_extractor) = if is_condp_extractor_marker(&clauses[index + 1]) {
+        if index + 2 >= clauses.len() {
+            // A dangling :>> is malformed. Keep macro expansion total and
+            // avoid executing a partial dispatch expression.
+            return Expr::Nil;
+        }
+        next_index = index + 3;
+        (clauses[index + 2].clone(), true)
+    } else {
+        (clauses[index + 1].clone(), false)
+    };
+
+    let match_name = registry.gensym(Some("condp_match"));
+    let predicate_result = Expr::Call {
+        func: "apply".to_string(),
+        args: vec![
+            Expr::Symbol(predicate_name.to_string()),
+            test,
+            Expr::Vector(vec![Expr::Symbol(value_name.to_string())]),
+        ],
+    };
+
+    let selected_result = if is_extractor {
+        Expr::Call {
+            func: "apply".to_string(),
+            args: vec![
+                then_branch,
+                Expr::Vector(vec![Expr::Symbol(match_name.clone())]),
+            ],
+        }
+    } else {
+        then_branch
+    };
+
+    let fallback = expand_condp_clauses(
+        clauses,
+        next_index,
+        predicate_name,
+        value_name,
+        registry,
+    );
+
+    Expr::Let {
+        bindings: vec![(
+            Pattern::Symbol(match_name.clone()),
+            Box::new(predicate_result),
+        )],
+        body: Box::new(Expr::If {
+            condition: Box::new(Expr::Symbol(match_name)),
+            then_branch: Box::new(selected_result),
+            else_branch: Box::new(fallback),
+        }),
+    }
+}
+
+fn is_condp_extractor_marker(expr: &Expr) -> bool {
+    matches!(expr, Expr::Keyword(keyword) if keyword == ">>" || keyword == ":>>")
 }
 
 /// Thread value as first argument: (f a b) with value x => (f x a b)
@@ -3987,5 +4132,23 @@ mod tests {
 
         let expanded = expand_macros(&exprs[0]);
         assert!(matches!(expanded, Expr::Letfn { .. }));
+    }
+
+    #[test]
+    fn test_condp_macro_binds_predicate_and_value_once() {
+        use crate::parser::parse_str;
+
+        let exprs = parse_str("(condp = value 1 :one :none)").unwrap();
+        let expanded = expand_macros(&exprs[0]);
+
+        match expanded {
+            Expr::Let { bindings, body } => {
+                assert_eq!(bindings.len(), 2);
+                assert!(matches!(bindings[0].0, Pattern::Symbol(_)));
+                assert!(matches!(bindings[1].0, Pattern::Symbol(_)));
+                assert!(matches!(*body, Expr::Let { .. }));
+            }
+            other => panic!("Expected condp to expand to a hygienic let, got: {:?}", other),
+        }
     }
 }

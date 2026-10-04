@@ -1,0 +1,43 @@
+(ns tests.language.test-condp)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (let [evaluations (atom 0)]
+      (assert-eq "condp evaluates its value once"
+                 (condp =
+                   (do (swap! evaluations inc) 2)
+                   1 :one
+                   2 :two
+                   :none)
+                 :two)
+      (assert-eq "condp does not re-evaluate its value"
+                 @evaluations
+                 1))
+
+    (assert-eq "condp accepts a function value as its predicate"
+               (condp (fn [test value] (= (count value) test))
+                 [1 2 3]
+                 2 :two
+                 3 :three
+                 :none)
+               :three)
+
+    (assert-eq "condp uses the final odd form as a default"
+               (condp = 4 1 :one 2 :two :none)
+               :none)
+
+    (assert-eq "condp :>> receives the predicate result"
+               (condp (fn [test value]
+                        (if (= test value) (+ value 10) nil))
+                 2
+                 1 :no-match
+                 2 :>> (fn [match] (* match 2))
+                 :none)
+               24)
+
+    "PASS"))
