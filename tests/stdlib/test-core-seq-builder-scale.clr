@@ -1,0 +1,32 @@
+(ns tests.stdlib.test-core-seq-builder-scale)
+
+;; Keep all lazy sequence builders on the same non-copying traversal path.
+;; The 100k VectorSeq test protects the underlying vector-tail invariant; this
+;; smaller, broad test makes regressions in individual builders practical to
+;; run on both JIT and AOT paths in the regular suite.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(defn -main []
+  (let [n 10000
+        xs (range n)
+        prefix (take n xs)
+        reversed (reverse xs)
+        repeated (repeat n :value)
+        chunks (partition-all 128 xs)
+        joined (concat xs xs)]
+    (assert-eq "take count at scale" (count prefix) n)
+    (assert-eq "take final item at scale" (last prefix) (dec n))
+    (assert-eq "reverse count at scale" (count reversed) n)
+    (assert-eq "reverse first item at scale" (first reversed) (dec n))
+    (assert-eq "reverse final item at scale" (last reversed) 0)
+    (assert-eq "repeat count at scale" (count repeated) n)
+    (assert-eq "repeat final item at scale" (last repeated) :value)
+    (assert-eq "partition-all chunk count at scale" (count chunks) 79)
+    (assert-eq "partition-all final chunk size at scale" (count (last chunks)) 16)
+    (assert-eq "concat count at scale" (count joined) (* n 2))
+    (assert-eq "concat final item at scale" (last joined) (dec n))
+    0))

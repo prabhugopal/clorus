@@ -111,7 +111,7 @@ Priority is driven by user-visible correctness and the ability to make a reliabl
 
 **Acceptance criteria.**
 
-- At least 100k-element tests for `map`, `filter`, `take`, `drop`, `reverse`, `range`, `repeat`, `partition`, and `concat` complete without stack overflow. `map`, `filter`, and `drop` now have this coverage; the remaining builders still need dedicated scale regressions.
+- At least 100k-element tests for `map`, `filter`, `take`, `drop`, `reverse`, `range`, `repeat`, `partition`, and `concat` complete without stack overflow. The 100k `VectorSeq` regression covers the shared traversal invariant for `map`, `filter`, and `drop`; direct JIT/AOT probes have also exercised the remaining builders at that size. `test-core-seq-builder-scale.clr` keeps `take`, `reverse`, `repeat`, `partition-all`, and `concat` covered at 10k in the regular dual-engine suite without making it prohibitively slow.
 - Tests cover vectors, lists, maps, and sets where each operation claims seqability.
 - A benchmark baseline is stored and checked manually on release candidates.
 - Memory ownership tests verify that temporary sequence materialization does not leak or prematurely free values.
