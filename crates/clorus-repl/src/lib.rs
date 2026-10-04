@@ -338,6 +338,7 @@ fn run_repl_impl(config: ReplConfig) -> Result<(), String> {
         println!("Type expressions to evaluate them.");
         println!("Commands: :examples :help :quit");
         println!("Tip: Use TAB for autocomplete, ↑↓ for history");
+        println!("Note: development/short sessions only; each form replays session history.");
 
         // Show main-thread mode indicator
         if config.main_thread {
@@ -970,6 +971,9 @@ fn print_help() {
     println!("  Ctrl-E          End of line");
     println!("  Ctrl-C          Cancel current line");
     println!("  Ctrl-D          Exit REPL");
+    println!();
+    println!("Session limit:");
+    println!("  This development REPL replays history for each form; restart long sessions.");
     println!();
     println!("Operators:");
     println!("  +  Addition");
