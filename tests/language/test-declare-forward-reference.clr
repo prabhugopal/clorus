@@ -1,0 +1,39 @@
+(ns tests.language.test-declare-forward-reference)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(declare even-depth? odd-depth? add-one)
+
+(defn even-depth? [n]
+  (if (= n 0)
+    true
+    (odd-depth? (dec n))))
+
+(defn odd-depth? [n]
+  (if (= n 0)
+    false
+    (even-depth? (dec n))))
+
+;; Forward calls from a closure exercise the same lowering shape used by
+;; source-level lazy helpers.
+(defn map-add-one [xs]
+  (map (fn [x] (add-one x)) xs))
+
+(defn add-one [x]
+  (+ x 1))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "declared forward reference calls its later definition"
+               (even-depth? 10)
+               true)
+    (assert-eq "declared mutual recursion retains parity"
+               (odd-depth? 11)
+               true)
+    (assert-eq "declared calls work from closures"
+               (map-add-one [1 2 3])
+               [2 3 4])
+    "PASS"))

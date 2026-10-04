@@ -1,0 +1,25 @@
+(ns tests.stdlib.test-core-tree-seq)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (assert-eq "tree-seq walks depth first in pre-order"
+               (vec (tree-seq vector? seq [1 [2 3] [4 [5]]]))
+               [[1 [2 3] [4 [5]]] 1 [2 3] 2 3 [4 [5]] 4 [5] 5])
+
+    (let [children-calls (atom 0)
+          nodes (tree-seq vector?
+                          (fn [node]
+                            (do (swap! children-calls inc) (seq node)))
+                          [0 [1]])]
+      (assert-eq "tree-seq is deferred before traversal" @children-calls 0)
+      (assert-eq "tree-seq yields its root first" (first nodes) [0 [1]])
+      (assert-eq "tree-seq defers root children until the tail" @children-calls 0)
+      (assert-eq "tree-seq advances into the first child" (first (rest nodes)) 0)
+      (assert-eq "tree-seq evaluates children once reached" @children-calls 1))
+
+    "PASS"))

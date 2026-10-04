@@ -486,6 +486,19 @@
   ([f coll1 coll2 & colls]
    (mapcat-lazy identity (apply map f coll1 coll2 colls))))
 
+;; tree-seq produces a lazy, depth-first pre-order walk of root. `branch?`
+;; decides whether to call `children` for a node. The nested lazy boundary
+;; defers child discovery until traversal reaches the node's tail.
+(defn tree-seq [branch? children root]
+  (lazy-seq
+    (__clorus_seq_cons root
+                       (if (branch? root)
+                         (lazy-seq
+                           (mapcat (fn [child]
+                                     (tree-seq branch? children child))
+                                   (children root)))
+                         nil))))
+
 ;; reductions - Lazy running reductions. The accumulator is emitted before
 ;; advancing input, and a reduced accumulator is emitted once before stopping.
 (defn reductions-tail-lazy [f acc coll]

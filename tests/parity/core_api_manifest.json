@@ -73,6 +73,7 @@
     {"name": "distinct", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests"},
     {"name": "dedupe", "owner": "source-core", "status": "implemented", "coverage": "core parity, native lazy sequence, and transducer completion tests"},
     {"name": "flatten", "owner": "source-core", "status": "implemented", "coverage": "core parity and native lazy sequence tests"},
+    {"name": "tree-seq", "owner": "source-core", "status": "implemented", "coverage": "dual-engine depth-first and lazy traversal tests"},
     {"name": "seq", "owner": "sequence-runtime", "status": "implemented", "coverage": "core parity, dual-engine, REPL, native lazy sequence, character sequence tests"},
     {"name": "sequential?", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, native lazy sequence"},
     {"name": "some", "owner": "source-core", "status": "implemented", "coverage": "core parity, dual-engine, REPL"},
