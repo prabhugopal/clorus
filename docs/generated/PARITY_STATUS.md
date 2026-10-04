@@ -96,7 +96,7 @@
 
 - Full `core.async`-style API and parking semantics
 - Stronger STM / `dosync` retry semantics
-- Character and ratio literals
+- Ratio literals and rational numeric promotion
 - Remaining namespace and macro long-tail edge cases
 - Production-grade concurrency hardening
 

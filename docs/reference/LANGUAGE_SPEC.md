@@ -62,7 +62,6 @@
 - **Symbols**: For identifiers (mostly internal)
 
 **Missing:**
-- ❌ Characters - individual chars (`\a` currently hangs the compiler instead of erroring — see `docs/PRODUCTION_PLAN.md` P0-4)
 - ❌ Rationals - fractions
 - ❌ BigInt/BigDecimal - arbitrary precision
 
@@ -234,7 +233,7 @@ Mutable references with atomic updates:
 (reset! counter 0)
 ```
 
-### Refs (STM) ✅ Complete
+### Refs (STM) 🟡 Partial
 Software Transactional Memory:
 ```clojure
 (def account (ref 100))
@@ -243,7 +242,10 @@ Software Transactional Memory:
 @account  ; => 150
 ```
 
-### Agents ✅ Complete
+The baseline supports refs, `dosync`, `alter`, and `commute`, but retry
+backoff and production-grade contention hardening remain open.
+
+### Agents 🟡 Partial
 Asynchronous state updates:
 ```clojure
 (def logger (agent []))
@@ -252,14 +254,17 @@ Asynchronous state updates:
 @logger  ; => ["event"]
 ```
 
-### Channels (CSP) ✅ Complete
-Go-style channels:
+### Channels (CSP) 🟡 Partial
+Blocking channel baseline:
 ```clojure
 (def ch (chan 10))
 (>!! ch "value")
 (println (<!!, ch))  ; => "value"
 (close! ch)
 ```
+
+`go` executes on a fixed worker pool, rather than as a parking state machine;
+do not treat this as `core.async` parity.
 
 **Detailed docs:** `docs/implementation/LOOP_AND_ATOMS_COMPLETE.md`, `docs/generated/PARITY_STATUS.md`
 
@@ -334,9 +339,8 @@ Hierarchy support (`derive`/`isa?`) and `:default` dispatch also exist — see `
 (gensym "temp")       ; => temp_1234
 ```
 
-**Missing:**
-- ❌ `macroexpand` - Debug expansion
-- ❌ `macroexpand-1` - Single-step expansion
+`macroexpand` and `macroexpand-1` are implemented for inspecting supported
+macro expansions; deeper hygiene behavior remains a parity work item.
 
 **Detailed docs:** `docs/generated/PARITY_STATUS.md`
 
@@ -453,8 +457,8 @@ All predicates implemented:
 (channel? (chan 1))  ; => true
 ```
 
-**Missing:**
-- ❌ `fn?` - Functions not runtime values yet
+`fn?` recognizes runtime function values, including closures and multi-arity
+functions.
 
 ### Destructuring ✅ 75% Complete
 
@@ -543,19 +547,12 @@ clorus repl
 ## Not Implemented
 
 ### Data Types
-- ❌ Integers (i64)
-- ❌ Characters
 - ❌ Rationals
 - ❌ BigInt/BigDecimal
 
 ### Advanced Features
-- ❌ Transducers
-- ❌ `deftype`
-- ❌ Metadata (`^`)
-- ❌ Dynamic vars
 - ❌ `eval`
-- ❌ Regular expressions
-- ❌ core.async (have basic channels)
+- ❌ `core.async` parking semantics (blocking channels and a fixed-pool `go` baseline exist)
 - ❌ clojure.spec
 
 ### Stdlib Gaps
