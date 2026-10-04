@@ -1,0 +1,17 @@
+(ns tests.language.test-channel-rendezvous)
+
+;; An unbuffered channel must not queue a value independently of a taker.
+;; This exercises the compiler-generated go closure plus the native channel
+;; handoff, rather than only calling the runtime directly.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (let [ch (chan 0)
+        producer (go (>!! ch 42))]
+    (assert-eq "rendezvous value" (<!! ch) 42)
+    (assert-eq "producer result" (<!! producer) true)
+    (println "channel rendezvous test passed")))

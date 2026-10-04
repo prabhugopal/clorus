@@ -19,16 +19,24 @@ use std::time::Duration;
 /// Channel ID type
 pub type ChannelId = u64;
 
+/// Mutable channel state guarded by one lock so a close, a buffered value, and
+/// the rendezvous waiter count are observed atomically by putters and takers.
+/// Keeping those facts under separate locks makes it possible to lose the
+/// handoff that an unbuffered channel depends on.
+struct ChannelState {
+    buffer: VecDeque<*mut Value>,
+    closed: bool,
+    /// Number of blocking takes waiting for a value on a rendezvous channel.
+    waiting_takers: usize,
+}
+
 /// A CSP-style channel
 pub struct ClorusChannel {
-    /// Buffer for pending values
-    buffer: Arc<Mutex<VecDeque<*mut Value>>>,
+    /// Buffer, close state, and rendezvous waiter count.
+    state: Arc<Mutex<ChannelState>>,
 
     /// Maximum capacity (None = unbounded)
     capacity: Option<usize>,
-
-    /// Closed flag
-    closed: Arc<Mutex<bool>>,
 
     /// Condition variable for "not full" (signals putters)
     not_full: Arc<Condvar>,
@@ -79,9 +87,12 @@ impl ClorusChannel {
         let id = CHANNEL_COUNTER.fetch_add(1, Ordering::SeqCst);
 
         ClorusChannel {
-            buffer: Arc::new(Mutex::new(VecDeque::new())),
+            state: Arc::new(Mutex::new(ChannelState {
+                buffer: VecDeque::new(),
+                closed: false,
+                waiting_takers: 0,
+            })),
             capacity,
-            closed: Arc::new(Mutex::new(false)),
             not_full: Arc::new(Condvar::new()),
             not_empty: Arc::new(Condvar::new()),
             id,
@@ -92,26 +103,17 @@ impl ClorusChannel {
     ///
     /// Returns true if successful, false if channel closed
     pub fn put(&self, value: *mut Value) -> bool {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
 
-        // Check if closed
-        if *self.closed.lock().unwrap() {
-            return false;
+        while !self.can_accept_value(&state) {
+            if state.closed {
+                return false;
+            }
+            state = self.not_full.wait(state).unwrap();
         }
 
-        // Wait while buffer is full
-        while self.is_full(&buffer) {
-            // Check closed again before waiting
-            if *self.closed.lock().unwrap() {
-                return false;
-            }
-
-            buffer = self.not_full.wait(buffer).unwrap();
-
-            // Check if closed while waiting
-            if *self.closed.lock().unwrap() {
-                return false;
-            }
+        if state.closed {
+            return false;
         }
 
         // Retain the value for storage in channel
@@ -120,7 +122,7 @@ impl ClorusChannel {
         }
 
         // Put value in buffer
-        buffer.push_back(value);
+        state.buffer.push_back(value);
 
         // Notify waiting takers
         self.not_empty.notify_one();
@@ -133,18 +135,12 @@ impl ClorusChannel {
     ///
     /// Returns true if successful, false if timeout or closed
     pub fn put_timeout(&self, value: *mut Value, timeout_ms: u64) -> bool {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         let timeout = Duration::from_millis(timeout_ms);
 
-        // Check if closed
-        if *self.closed.lock().unwrap() {
-            return false;
-        }
-
-        // Wait while buffer is full (with timeout)
         let start = std::time::Instant::now();
-        while self.is_full(&buffer) {
-            if *self.closed.lock().unwrap() {
+        while !self.can_accept_value(&state) {
+            if state.closed {
                 return false;
             }
 
@@ -154,16 +150,16 @@ impl ClorusChannel {
             }
 
             let remaining = timeout - elapsed;
-            let result = self.not_full.wait_timeout(buffer, remaining).unwrap();
-            buffer = result.0;
+            let result = self.not_full.wait_timeout(state, remaining).unwrap();
+            state = result.0;
 
             if result.1.timed_out() {
                 return false;
             }
+        }
 
-            if *self.closed.lock().unwrap() {
-                return false;
-            }
+        if state.closed {
+            return false;
         }
 
         // Retain the value
@@ -171,7 +167,7 @@ impl ClorusChannel {
             (*value).header().retain();
         }
 
-        buffer.push_back(value);
+        state.buffer.push_back(value);
         self.not_empty.notify_one();
         notify_alts_waiters();
 
@@ -182,81 +178,89 @@ impl ClorusChannel {
     ///
     /// Returns the value, or nil if channel closed and empty
     pub fn take(&self) -> *mut Value {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        let mut registered_rendezvous_take = false;
 
-        // Wait while buffer is empty
-        while buffer.is_empty() {
-            let is_closed = *self.closed.lock().unwrap();
+        loop {
+            if let Some(value) = state.buffer.pop_front() {
+                if registered_rendezvous_take {
+                    state.waiting_takers -= 1;
+                }
+                return self.transfer_taken_value(value);
+            }
 
-            if is_closed {
-                // Channel closed and empty - return nil
+            if state.closed {
+                if registered_rendezvous_take {
+                    state.waiting_takers -= 1;
+                }
                 return Value::nil();
             }
 
-            buffer = self.not_empty.wait(buffer).unwrap();
+            if self.capacity == Some(0) && !registered_rendezvous_take {
+                registered_rendezvous_take = true;
+                state.waiting_takers += 1;
+                self.not_full.notify_one();
+            }
+
+            state = self.not_empty.wait(state).unwrap();
         }
-
-        // Take value from buffer
-        let value = buffer.pop_front().unwrap();
-
-        // Transfer ownership to caller: retain for caller, release channel's ref
-        unsafe {
-            crate::value::clorus_retain(value);
-            crate::value::clorus_release(value);
-        }
-
-        // Notify waiting putters
-        self.not_full.notify_one();
-        notify_alts_waiters();
-
-        value
     }
 
     /// Take a value with timeout (milliseconds)
     ///
     /// Returns the value, or nil if timeout/closed
     pub fn take_timeout(&self, timeout_ms: u64) -> *mut Value {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         let timeout = Duration::from_millis(timeout_ms);
-
+        let mut registered_rendezvous_take = false;
         let start = std::time::Instant::now();
-        while buffer.is_empty() {
-            let is_closed = *self.closed.lock().unwrap();
+        loop {
+            if let Some(value) = state.buffer.pop_front() {
+                if registered_rendezvous_take {
+                    state.waiting_takers -= 1;
+                }
+                return self.transfer_taken_value(value);
+            }
 
-            if is_closed {
+            if state.closed {
+                if registered_rendezvous_take {
+                    state.waiting_takers -= 1;
+                }
                 return Value::nil();
             }
 
             let elapsed = start.elapsed();
             if elapsed >= timeout {
+                if registered_rendezvous_take {
+                    state.waiting_takers -= 1;
+                }
                 return Value::nil(); // Timeout
             }
 
+            if self.capacity == Some(0) && !registered_rendezvous_take {
+                registered_rendezvous_take = true;
+                state.waiting_takers += 1;
+                self.not_full.notify_one();
+            }
+
             let remaining = timeout - elapsed;
-            let result = self.not_empty.wait_timeout(buffer, remaining).unwrap();
-            buffer = result.0;
+            let result = self.not_empty.wait_timeout(state, remaining).unwrap();
+            state = result.0;
 
             if result.1.timed_out() {
+                if registered_rendezvous_take {
+                    state.waiting_takers -= 1;
+                }
                 return Value::nil();
             }
         }
-
-        let value = buffer.pop_front().unwrap();
-        unsafe {
-            crate::value::clorus_retain(value);
-            crate::value::clorus_release(value);
-        }
-        self.not_full.notify_one();
-        notify_alts_waiters();
-
-        value
     }
 
     /// Close the channel
     ///
     /// No more puts allowed, but remaining values can be taken
     pub fn close(&self) {
-        *self.closed.lock().unwrap() = true;
+        self.state.lock().unwrap().closed = true;
 
         // Wake all waiting threads
         self.not_full.notify_all();
@@ -266,16 +270,27 @@ impl ClorusChannel {
 
     /// Check if channel is closed
     pub fn is_closed(&self) -> bool {
-        *self.closed.lock().unwrap()
+        self.state.lock().unwrap().closed
     }
 
-    /// Check if buffer is full
-    fn is_full(&self, buffer: &VecDeque<*mut Value>) -> bool {
-        if let Some(cap) = self.capacity {
-            buffer.len() >= cap
-        } else {
-            false // Unbounded
+    /// Whether a put can complete now. An unbuffered channel accepts exactly
+    /// one value only after a blocking taker has registered its handoff.
+    fn can_accept_value(&self, state: &ChannelState) -> bool {
+        match self.capacity {
+            Some(0) => state.buffer.is_empty() && state.waiting_takers > 0,
+            Some(capacity) => state.buffer.len() < capacity,
+            None => true,
         }
+    }
+
+    fn transfer_taken_value(&self, value: *mut Value) -> *mut Value {
+        unsafe {
+            crate::value::clorus_retain(value);
+            crate::value::clorus_release(value);
+        }
+        self.not_full.notify_one();
+        notify_alts_waiters();
+        value
     }
 
     /// Get channel ID
@@ -287,17 +302,11 @@ impl ClorusChannel {
     ///
     /// Returns Some(value) if available, None if empty
     pub fn try_take(&self) -> Option<*mut Value> {
-        let mut buffer = self.buffer.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
 
-        if !buffer.is_empty() {
-            let value = buffer.pop_front().unwrap();
-            unsafe {
-                crate::value::clorus_retain(value);
-                crate::value::clorus_release(value);
-            }
-            self.not_full.notify_one();
-            Some(value)
-        } else if self.is_closed() {
+        if let Some(value) = state.buffer.pop_front() {
+            Some(self.transfer_taken_value(value))
+        } else if state.closed {
             // Closed and empty
             Some(Value::nil())
         } else {
@@ -309,8 +318,8 @@ impl ClorusChannel {
 impl Drop for ClorusChannel {
     fn drop(&mut self) {
         // Release all values in buffer
-        let buffer = self.buffer.lock().unwrap();
-        for value in buffer.iter() {
+        let state = self.state.lock().unwrap();
+        for value in state.buffer.iter() {
             unsafe {
                 crate::value::clorus_release(*value);
             }
@@ -464,6 +473,7 @@ pub extern "C" fn clorus_alts(channels_vec: *mut Value) -> *mut Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
     use std::thread;
 
     #[test]
@@ -548,6 +558,44 @@ mod tests {
 
             assert_eq!(sum, 45.0); // 0+1+2+...+9 = 45
 
+            crate::value::clorus_release(chan);
+        }
+    }
+
+    #[test]
+    fn test_rendezvous_channel_handoffs_only_to_waiting_taker() {
+        unsafe {
+            let chan = clorus_chan(0);
+            crate::value::clorus_retain(chan);
+            let chan_addr = chan as usize;
+            let (started_tx, started_rx) = mpsc::channel();
+            let (finished_tx, finished_rx) = mpsc::channel();
+
+            let producer = thread::spawn(move || {
+                let chan = chan_addr as *mut Value;
+                started_tx.send(()).unwrap();
+                let value = Value::long(42);
+                let result = clorus_chan_put(chan, value);
+                unsafe {
+                    assert!((*result).as_bool());
+                    crate::value::clorus_release(result);
+                    crate::value::clorus_release(value);
+                    crate::value::clorus_release(chan);
+                }
+                finished_tx.send(()).unwrap();
+            });
+
+            started_rx.recv().unwrap();
+            assert!(finished_rx
+                .recv_timeout(Duration::from_millis(25))
+                .is_err());
+
+            let value = clorus_chan_take(chan);
+            assert_eq!((*value).as_long(), 42);
+            crate::value::clorus_release(value);
+
+            finished_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            producer.join().unwrap();
             crate::value::clorus_release(chan);
         }
     }
