@@ -3062,15 +3062,18 @@ impl<'ctx> CodeGen<'ctx> {
                 // Save current loop context (for nested loops)
                 let saved_loop_context = self.loop_context.clone();
 
-                // Collect binding names from patterns
-                let binding_names: Vec<String> = bindings
-                    .iter()
-                    .flat_map(|(pattern, _)| Self::collect_pattern_names(pattern))
+                // A loop phi carries one *source binding value*, not one
+                // destructured local.  For example, `[x y]` is a single loop
+                // binding and `(recur [next-x next-y])` must provide one new
+                // value.  Keep internal names only for recurrence arity and
+                // destructure each phi after it is selected for an iteration.
+                let binding_names: Vec<String> = (0..bindings.len())
+                    .map(|index| format!("loop_binding_{}", index))
                     .collect();
 
                 // Compile initial values IN PRE-LOOP BLOCK
                 let mut init_values = Vec::new();
-                for (pattern, init_expr) in bindings {
+                for (_pattern, init_expr) in bindings {
                     let val = self.compile_expr(init_expr)?;
                     init_values.push(val);
                 }
@@ -3093,20 +3096,14 @@ impl<'ctx> CodeGen<'ctx> {
                     phi_nodes.push(phi);
                 }
 
-                // CREATE ALLOCAS and store phi values into them
-                // This allows the body to read variables normally via load instructions
-                let mut loop_allocas = Vec::new();
-                for (i, name) in binding_names.iter().enumerate() {
-                    let alloca = self.create_entry_block_alloca(name);
-                    let phi_val = phi_nodes[i].as_basic_value().into_pointer_value();
-                    self.builder.build_store(alloca, phi_val).unwrap();
-                    loop_allocas.push(alloca);
-                }
-
-                // Update variables map to point to these allocas
+                // Destructure each current binding value into the iteration's
+                // lexical locals. This uses the same pattern machinery as
+                // `let` and function parameters, so nested vector/map
+                // patterns retain their normal behavior on every recur.
                 let saved_variables = self.variables.clone();
-                for (i, name) in binding_names.iter().enumerate() {
-                    self.variables.insert(name.clone(), loop_allocas[i]);
+                for ((pattern, _), phi) in bindings.iter().zip(phi_nodes.iter()) {
+                    let phi_value = phi.as_basic_value().into_pointer_value();
+                    self.destructure_pattern(pattern, phi_value)?;
                 }
 
                 // Set new loop context WITH PHI NODES

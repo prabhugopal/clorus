@@ -1,0 +1,29 @@
+(ns tests.language.test-loop-destructuring)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; A vector pattern remains one recurrence slot: every recur supplies the
+    ;; next vector, which is destructured again at the loop head.
+    (assert-eq "loop destructures vector bindings on every iteration"
+               (loop [[current step] [0 2]]
+                 (if (= current 8)
+                   current
+                   (recur [(+ current step) step])))
+               8)
+
+    ;; Map destructuring follows the same rule and exercises dependent locals
+    ;; in the recurrence expression.
+    (assert-eq "loop destructures map bindings on every iteration"
+               (loop [{:keys [index total]} {:index 0 :total 0}]
+                 (if (= index 4)
+                   total
+                   (recur {:index (inc index)
+                           :total (+ total index)})))
+               6)
+
+    "PASS"))
