@@ -819,9 +819,51 @@ pub extern "C" fn clorus_drop(coll: *mut Value, n: i64) -> *mut Value {
 /// compiler use generic sequential access without changing either contract.
 #[no_mangle]
 pub extern "C" fn clorus_destructure_rest(coll: *mut Value, n: i64) -> *mut Value {
-    let remainder = clorus_drop(coll, n);
-    if remainder.is_null() || clorus_count(remainder) == 0 {
-        if !remainder.is_null() {
+    if coll.is_null() {
+        return Value::nil();
+    }
+
+    // `drop` is eager for finite collections and deliberately does not own a
+    // cursor for a native SeqNode. Step via `rest` instead: that preserves a
+    // lazy tail while only forcing the elements this pattern consumes.
+    let mut remainder = coll;
+    let mut owns_remainder = false;
+
+    if n <= 0 {
+        unsafe { (*remainder).header().retain() };
+        owns_remainder = true;
+    } else {
+        for _ in 0..n {
+            let next = clorus_rest(remainder);
+            if owns_remainder {
+                crate::value::clorus_release(remainder);
+            }
+            if crate::value::clorus_is_exception(next) {
+                return next;
+            }
+            remainder = next;
+            owns_remainder = true;
+        }
+    }
+
+    // `seq` is the existing, bounded emptiness boundary: it distinguishes an
+    // exhausted tail from one whose first element is nil without counting or
+    // materializing the whole sequence. The returned sequence is a probe only;
+    // callers retain the original tail representation.
+    let sequence = clorus_seq(remainder);
+    if crate::value::clorus_is_exception(sequence) {
+        if owns_remainder {
+            crate::value::clorus_release(remainder);
+        }
+        return sequence;
+    }
+    let is_empty = sequence.is_null() || unsafe { (*sequence).tag() == ValueTag::Nil };
+    if !sequence.is_null() {
+        crate::value::clorus_release(sequence);
+    }
+
+    if is_empty {
+        if owns_remainder {
             crate::value::clorus_release(remainder);
         }
         Value::nil()

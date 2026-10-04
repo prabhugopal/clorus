@@ -41,4 +41,11 @@
                  (+ first second (count tail)))
                5)
 
+    ;; Destructuring must not materialize or discard a native lazy tail.
+    (let [[head & tail] (range)]
+      (assert-eq "vector patterns retain a lazy head" head 0)
+      (assert-eq "vector patterns retain a lazy tail"
+                 (take 3 tail)
+                 [1 2 3]))
+
     "PASS"))
