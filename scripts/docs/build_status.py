@@ -78,12 +78,28 @@ FEATURES: tuple[Feature, ...] = (
     ),
     Feature(
         area="Reader & Syntax",
-        name="Characters and ratio literals",
+        name="Character literals and Char values",
+        status="implemented",
+        summary="Character reader literals, the runtime Char value, Unicode-safe sequence operations, and reader-compatible printing are implemented.",
+        code_refs=(
+            "crates/clorus-syntax/src/lexer.rs",
+            "crates/clorus-runtime/src/value.rs",
+            "crates/clorus-runtime/src/string.rs",
+            "crates/clorus-codegen/src/codegen/quotes.rs",
+        ),
+        test_refs=(
+            "tests/stdlib/test-core-char-sequences.clr",
+            "tests/language/test-core-helpers.clr",
+        ),
+    ),
+    Feature(
+        area="Reader & Syntax",
+        name="Ratio literals and rational arithmetic",
         status="missing",
-        summary="Character and ratio support is not evidenced in parser/runtime.",
+        summary="Ratio reader literals, a rational runtime value, and Clojure-compatible numeric promotion are not implemented.",
         code_refs=(),
         test_refs=(),
-        notes="These remain feature gaps for closer Clojure parity.",
+        notes="Ratios remain a deliberate Clojure-parity gap; numeric literals currently cover integer and floating-point forms.",
     ),
     Feature(
         area="Functions & Evaluation",

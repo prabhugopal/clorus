@@ -7,11 +7,11 @@
 
 | Suite | File Count |
 |---|---:|
-| `tests/language` | 81 |
-| `tests/stdlib` | 31 |
+| `tests/language` | 104 |
+| `tests/stdlib` | 62 |
 | `tests/integration` | 4 |
 | `tests/compiler` | 5 |
-| `tests/parity` harness files | 3 |
+| `tests/parity` harness files | 5 |
 
 ## Feature Status by Area
 
@@ -26,7 +26,7 @@
 | Macros & Metadata | 2 | 1 | 0 | 0 |
 | Namespaces | 1 | 1 | 0 | 0 |
 | Polymorphism | 2 | 0 | 0 | 0 |
-| Reader & Syntax | 2 | 0 | 1 | 0 |
+| Reader & Syntax | 3 | 0 | 1 | 0 |
 
 ## Policy
 

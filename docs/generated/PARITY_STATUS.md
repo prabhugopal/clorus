@@ -13,7 +13,7 @@
 
 ## Snapshot
 
-- `✅` Implemented: 15
+- `✅` Implemented: 16
 - `🟡` Partial: 5
 - `❌` Missing: 2
 - `⛔` Out of Scope: 1
@@ -89,7 +89,8 @@
 |---|---|---|---|---|---|
 | Reader macros and quoting forms | ✅ Implemented | Quote, syntax-quote, unquote, deref, var-quote, discard, and regex literal lowering are implemented. | `crates/clorus-syntax/src/parser.rs`<br>`crates/clorus-syntax/src/macros.rs` | `tests/language/test-reader-discard.clr`<br>`tests/language/test-reader-discard-edge.clr`<br>`tests/language/test-reader-macro-forms.clr`<br>`tests/language/test-reader-regex-literal.clr` | - |
 | Regex literal runtime APIs | ✅ Implemented | Reader lowering and stdlib/runtime regex helpers are present. | `crates/clorus-runtime/src/string.rs`<br>`stdlib/clorus/core.clr` | `tests/stdlib/test-core-regex.clr` | - |
-| Characters and ratio literals | ❌ Missing | Character and ratio support is not evidenced in parser/runtime. | - | - | These remain feature gaps for closer Clojure parity. |
+| Character literals and Char values | ✅ Implemented | Character reader literals, the runtime Char value, Unicode-safe sequence operations, and reader-compatible printing are implemented. | `crates/clorus-syntax/src/lexer.rs`<br>`crates/clorus-runtime/src/value.rs`<br>`crates/clorus-runtime/src/string.rs`<br>`crates/clorus-codegen/src/codegen/quotes.rs` | `tests/stdlib/test-core-char-sequences.clr`<br>`tests/language/test-core-helpers.clr` | - |
+| Ratio literals and rational arithmetic | ❌ Missing | Ratio reader literals, a rational runtime value, and Clojure-compatible numeric promotion are not implemented. | - | - | Ratios remain a deliberate Clojure-parity gap; numeric literals currently cover integer and floating-point forms. |
 
 ## Immediate Gaps
 

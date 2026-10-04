@@ -37,12 +37,31 @@
     },
     {
       "area": "Reader & Syntax",
+      "code_refs": [
+        "crates/clorus-syntax/src/lexer.rs",
+        "crates/clorus-runtime/src/value.rs",
+        "crates/clorus-runtime/src/string.rs",
+        "crates/clorus-codegen/src/codegen/quotes.rs"
+      ],
+      "code_refs_present": true,
+      "name": "Character literals and Char values",
+      "notes": "",
+      "status": "implemented",
+      "summary": "Character reader literals, the runtime Char value, Unicode-safe sequence operations, and reader-compatible printing are implemented.",
+      "test_refs": [
+        "tests/stdlib/test-core-char-sequences.clr",
+        "tests/language/test-core-helpers.clr"
+      ],
+      "test_refs_present": true
+    },
+    {
+      "area": "Reader & Syntax",
       "code_refs": [],
       "code_refs_present": true,
-      "name": "Characters and ratio literals",
-      "notes": "These remain feature gaps for closer Clojure parity.",
+      "name": "Ratio literals and rational arithmetic",
+      "notes": "Ratios remain a deliberate Clojure-parity gap; numeric literals currently cover integer and floating-point forms.",
       "status": "missing",
-      "summary": "Character and ratio support is not evidenced in parser/runtime.",
+      "summary": "Ratio reader literals, a rational runtime value, and Clojure-compatible numeric promotion are not implemented.",
       "test_refs": [],
       "test_refs_present": true
     },
@@ -427,12 +446,12 @@
         "implemented": 2
       },
       "Reader & Syntax": {
-        "implemented": 2,
+        "implemented": 3,
         "missing": 1
       }
     },
     "overall": {
-      "implemented": 15,
+      "implemented": 16,
       "missing": 2,
       "out_of_scope": 1,
       "partial": 5
@@ -440,9 +459,9 @@
     "test_inventory": {
       "compiler": 5,
       "integration": 4,
-      "language": 81,
-      "parity_harness": 3,
-      "stdlib": 31
+      "language": 104,
+      "parity_harness": 5,
+      "stdlib": 62
     }
   }
 }
