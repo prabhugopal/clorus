@@ -134,6 +134,52 @@ pub extern "C" fn clorus_get(coll: *mut Value, key: *mut Value) -> *mut Value {
     }
 }
 
+/// Get a value from a collection, returning `not_found` only for an absent
+/// lookup.  A map entry explicitly associated with nil is present and must
+/// therefore return nil rather than the supplied fallback, matching
+/// `clojure.core/get`'s three-argument contract.
+#[no_mangle]
+pub extern "C" fn clorus_get_or(
+    coll: *mut Value,
+    key: *mut Value,
+    not_found: *mut Value,
+) -> *mut Value {
+    unsafe {
+        let retained_not_found = || {
+            if not_found.is_null() {
+                Value::nil()
+            } else {
+                (*not_found).header().retain();
+                not_found
+            }
+        };
+
+        if coll.is_null() || key.is_null() {
+            return retained_not_found();
+        }
+
+        if (*coll).header().tag() == ValueTag::HashMap {
+            let map_ptr = (*coll).as_ptr() as *mut ClorusHashMap;
+            if map_ptr.is_null() || (*map_ptr).get_entry(key).is_none() {
+                return retained_not_found();
+            }
+            return crate::map::clorus_map_get(coll, key);
+        }
+
+        // Non-map collection access has no independent presence predicate in
+        // the public contract. Preserve its existing extension behavior (for
+        // vectors, sets, and strings) while still returning an owned value.
+        let result = clorus_get(coll, key);
+        if !result.is_null() && (*result).header().tag() != ValueTag::Nil {
+            return result;
+        }
+        if !result.is_null() {
+            crate::value::clorus_release(result);
+        }
+        retained_not_found()
+    }
+}
+
 /// Check whether a collection contains a key/index/value.
 ///
 /// Semantics:
@@ -1161,6 +1207,33 @@ mod tests {
             crate::value::clorus_release(key);
             crate::value::clorus_release(map);
             crate::value::clorus_release(map1);
+        }
+    }
+
+    #[test]
+    fn test_get_or_distinguishes_missing_from_present_nil_map_entry() {
+        unsafe {
+            let map = crate::map::clorus_map_empty();
+            let present_key = Value::long(1);
+            let absent_key = Value::long(2);
+            let nil_value = Value::nil();
+            let fallback = Value::long(99);
+            let populated = crate::map::clorus_map_assoc(map, present_key, nil_value);
+
+            let present = clorus_get_or(populated, present_key, fallback);
+            assert_eq!((*present).header().tag(), ValueTag::Nil);
+
+            let missing = clorus_get_or(populated, absent_key, fallback);
+            assert_eq!((*missing).as_long(), 99);
+
+            crate::value::clorus_release(present);
+            crate::value::clorus_release(missing);
+            crate::value::clorus_release(populated);
+            crate::value::clorus_release(map);
+            crate::value::clorus_release(present_key);
+            crate::value::clorus_release(absent_key);
+            crate::value::clorus_release(nil_value);
+            crate::value::clorus_release(fallback);
         }
     }
 }

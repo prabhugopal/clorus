@@ -493,100 +493,35 @@ impl<'ctx> CodeGen<'ctx> {
                     .get_function("clorus_get")
                     .ok_or("get not declared")?;
 
-                let result = self
-                    .builder
-                    .build_call(get_fn, &[coll_ptr.into(), key_ptr.into()], "get_call")
-                    .unwrap();
-
-                let result_ptr = result
-                    .try_as_basic_value()
-                    .left()
-                    .unwrap()
-                    .into_pointer_value();
-
-                // If we have a default value and result is nil, return default
                 if args.len() == 3 {
-                    // Check if result is nil
-                    let is_nil_fn = self
+                    let default_ptr = self.compile_expr(&args[2])?;
+                    let get_or_fn = self
                         .module
-                        .get_function("clorus_value_is_nil")
-                        .ok_or("clorus_value_is_nil not declared")?;
-                    let is_nil_result = self
+                        .get_function("clorus_get_or")
+                        .ok_or("clorus_get_or not declared")?;
+                    let result = self
                         .builder
-                        .build_call(is_nil_fn, &[result_ptr.into()], "is_nil_check")
+                        .build_call(
+                            get_or_fn,
+                            &[coll_ptr.into(), key_ptr.into(), default_ptr.into()],
+                            "get_or_call",
+                        )
                         .unwrap();
-                    let is_nil_i32 = is_nil_result
+                    Ok(result
                         .try_as_basic_value()
                         .left()
                         .unwrap()
-                        .into_int_value();
-
-                    // Convert i32 to i1 for branch condition
-                    let zero = self.context.i32_type().const_zero();
-                    let is_nil = self
-                        .builder
-                        .build_int_compare(IntPredicate::NE, is_nil_i32, zero, "is_nil_bool")
-                        .unwrap();
-
-                    // If nil, return default
-                    let current_fn = self
-                        .builder
-                        .get_insert_block()
-                        .unwrap()
-                        .get_parent()
-                        .unwrap();
-                    let then_block = self
-                        .context
-                        .append_basic_block(current_fn, "return_default");
-                    let else_block = self.context.append_basic_block(current_fn, "return_value");
-                    let merge_block = self.context.append_basic_block(current_fn, "merge");
-
-                    self.builder
-                        .build_conditional_branch(is_nil, then_block, else_block)
-                        .unwrap();
-
-                    // Then: return default. `clorus_get` always hands back an
-                    // owned/retained reference on the other branch (see
-                    // clorus_get's map/vector/set cases), so this branch must
-                    // match that contract too -- otherwise a non-literal
-                    // default (a parameter or other existing binding, e.g.
-                    // `(get m k default)` inside a function taking `default`
-                    // as an argument) is returned as a bare borrowed alias.
-                    // The caller then releases a reference it was never
-                    // given, which frees the value out from under whoever
-                    // actually owns it -- reproduced via coral-ui's
-                    // `theme/token`, whose 3-arg body falls through to
-                    // `(get @active-theme k default)`.
-                    self.builder.position_at_end(then_block);
-                    let default_ptr = self.compile_expr(&args[2])?;
-                    let retain_fn = self
-                        .module
-                        .get_function("clorus_retain")
-                        .ok_or("clorus_retain not declared")?;
-                    self.builder
-                        .build_call(retain_fn, &[default_ptr.into()], "retain_get_default")
-                        .unwrap();
-                    self.builder
-                        .build_unconditional_branch(merge_block)
-                        .unwrap();
-
-                    // Else: return result
-                    self.builder.position_at_end(else_block);
-                    self.builder
-                        .build_unconditional_branch(merge_block)
-                        .unwrap();
-
-                    // Merge
-                    self.builder.position_at_end(merge_block);
-                    let phi = self
-                        .builder
-                        .build_phi(result_ptr.get_type(), "get_result")
-                        .unwrap();
-                    phi.add_incoming(&[(&default_ptr, then_block), (&result_ptr, else_block)]);
-
-                    Ok(phi.as_basic_value().into_pointer_value())
+                        .into_pointer_value())
                 } else {
-                    Ok(result_ptr)
+                    let result = self
+                        .builder
+                        .build_call(get_fn, &[coll_ptr.into(), key_ptr.into()], "get_call")
+                        .unwrap();
+                    Ok(result
+                        .try_as_basic_value()
+                        .left()
+                        .unwrap()
+                        .into_pointer_value())
                 }
             }
 

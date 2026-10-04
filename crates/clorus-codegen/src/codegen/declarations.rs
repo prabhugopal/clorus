@@ -146,6 +146,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // ===== Collection Access Functions =====
         self.declare_value_fn("clorus_get", 2);
+        self.declare_value_fn("clorus_get_or", 3);
         self.declare_value_i64_fn("clorus_nth");
         self.declare_value_fn("clorus_first", 1);
         self.declare_value_fn("clorus_seq", 1);
