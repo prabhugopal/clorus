@@ -82,7 +82,7 @@ pub extern "C" fn clorus_hash(val: *mut Value) -> u64 {
                 let list_ptr = (*val).as_ptr() as *mut crate::list::PersistentList;
                 crate::list::list_hash(list_ptr)
             }
-            ValueTag::LazySeq | ValueTag::SeqNode => hash_sequential(val),
+            ValueTag::LazySeq | ValueTag::SeqNode | ValueTag::VectorSeq => hash_sequential(val),
             ValueTag::HashMap => {
                 let map_ptr = (*val).as_ptr() as *mut crate::map::ClorusHashMap;
                 let mut state = 0u64;

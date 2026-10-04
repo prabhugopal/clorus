@@ -90,7 +90,15 @@ Priority is driven by user-visible correctness and the ability to make a reliabl
 
 - `map`, `filter`, `take`, `drop`, `range`, and `repeat` are already `loop`/`recur`-based in `stdlib/clorus/core.clr` -- **no stack-overflow risk** from naive recursion, contrary to the original claim.
 - `reverse` was not a scale problem at all -- it was **flat-out broken for any input**, including tiny ones (`(reverse [1 2 3])` built nested garbage, `[3 [2 [1 []]]]`-shaped, instead of reversing). Root cause: `conj`'s arguments were backwards in the fold. **Fixed** (see Section 10).
-- A **real, still-unresolved** performance issue exists, but it's narrower and stranger than "naive recursion": `map`/`filter` loaded from the real `stdlib/clorus/core.clr` file show clearly super-linear (roughly quadratic) growth on large vectors, while the *exact same source code* defined locally in a test script (not loaded via the stdlib mechanism) is flat/fast at the same sizes. Isolated `conj`, `nth`, and function-call overhead individually to flat/fast; namespace substitution alone didn't reproduce it either. Root cause not yet found -- next step is bisecting the real `core.clr` file to find what triggers it.
+- The `map`/`filter` vector-scale cliff has been root-caused and fixed. The
+  problem was not stdlib loading: every `(rest vector)` eagerly copied a
+  shorter vector. A lazy transform takes one rest step per item, making a
+  10k-element map quadratic regardless of where its source was defined.
+  The runtime now uses a retained `VectorSeq` cursor (backing vector plus
+  offset), so `first`, `rest`, `nth`, `last`, `count`, equality, hashing, and
+  printing all use the same non-copying sequence representation. The
+  dual-engine `tests/stdlib/test-core-vector-sequence-scale.clr` regression
+  covers 100k-element `map`, `filter`, and `drop` workloads.
 
 **Why this blocks beta.** Collection transforms are central to Clojure-style application code. A beta cannot claim dependable command-line/service use if routine inputs cause stack overflows or severe performance cliffs.
 
@@ -103,7 +111,7 @@ Priority is driven by user-visible correctness and the ability to make a reliabl
 
 **Acceptance criteria.**
 
-- At least 100k-element tests for `map`, `filter`, `take`, `drop`, `reverse`, `range`, `repeat`, `partition`, and `concat` complete without stack overflow.
+- At least 100k-element tests for `map`, `filter`, `take`, `drop`, `reverse`, `range`, `repeat`, `partition`, and `concat` complete without stack overflow. `map`, `filter`, and `drop` now have this coverage; the remaining builders still need dedicated scale regressions.
 - Tests cover vectors, lists, maps, and sets where each operation claims seqability.
 - A benchmark baseline is stored and checked manually on release candidates.
 - Memory ownership tests verify that temporary sequence materialization does not leak or prematurely free values.

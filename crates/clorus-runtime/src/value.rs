@@ -87,6 +87,7 @@ fn metadata_type_name(val: *mut Value) -> &'static str {
             ValueTag::Socket => "socket",
             ValueTag::LazySeq => "lazy-seq",
             ValueTag::SeqNode => "seq",
+            ValueTag::VectorSeq => "seq",
         }
     }
 }
@@ -258,6 +259,8 @@ pub enum ValueTag {
     /// Unicode scalar character. Kept at the end so existing ABI tag values
     /// remain stable for generated code and bridge libraries.
     Char = 23,
+    /// A non-copying sequence cursor over an immutable vector.
+    VectorSeq = 24,
 }
 
 /// Header for all heap-allocated values
@@ -547,6 +550,15 @@ impl Value {
 
     pub(crate) unsafe fn as_seq_node(&self) -> *mut crate::seq_node::SeqNode {
         self.data.ptr as *mut crate::seq_node::SeqNode
+    }
+
+    pub(crate) unsafe fn from_vector_seq(vector: *mut Self, offset: u64) -> *mut Self {
+        let sequence = Box::into_raw(Box::new(crate::vector_seq::VectorSeq::new(vector, offset)));
+        Self::from_ptr(ValueTag::VectorSeq, sequence as *mut u8)
+    }
+
+    pub(crate) unsafe fn as_vector_seq(&self) -> *mut crate::vector_seq::VectorSeq {
+        self.data.ptr as *mut crate::vector_seq::VectorSeq
     }
 
     /// Create a var value from Var pointer
@@ -1362,6 +1374,11 @@ unsafe fn deallocate_value(val: *mut Value) {
             if !node.is_null() { drop(Box::from_raw(node)); }
             drop(Box::from_raw(val));
         }
+        ValueTag::VectorSeq => {
+            let sequence = (*val).as_vector_seq();
+            if !sequence.is_null() { drop(Box::from_raw(sequence)); }
+            drop(Box::from_raw(val));
+        }
     }
 }
 
@@ -1494,7 +1511,10 @@ pub extern "C" fn clorus_is_seq(val: *mut Value) -> bool {
         return false;
     }
     unsafe {
-        matches!((*val).header().tag(), ValueTag::List | ValueTag::LazySeq | ValueTag::SeqNode)
+        matches!(
+            (*val).header().tag(),
+            ValueTag::List | ValueTag::LazySeq | ValueTag::SeqNode | ValueTag::VectorSeq
+        )
     }
 }
 
@@ -1506,7 +1526,7 @@ pub extern "C" fn clorus_is_coll(val: *mut Value) -> bool {
     }
     unsafe {
         let tag = (*val).header().tag();
-        tag == ValueTag::Vector || tag == ValueTag::List || tag == ValueTag::SeqNode ||
+        tag == ValueTag::Vector || tag == ValueTag::List || tag == ValueTag::SeqNode || tag == ValueTag::VectorSeq ||
         tag == ValueTag::HashMap || tag == ValueTag::HashSet
     }
 }
@@ -1721,7 +1741,7 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
                 left_sym == right_sym
             }
 
-            ValueTag::Vector | ValueTag::List | ValueTag::SeqNode | ValueTag::LazySeq => {
+            ValueTag::Vector | ValueTag::List | ValueTag::SeqNode | ValueTag::LazySeq | ValueTag::VectorSeq => {
                 sequential_equals(left, right)
             }
             ValueTag::HashMap => {
@@ -1767,7 +1787,7 @@ pub extern "C" fn clorus_equals(left: *mut Value, right: *mut Value) -> bool {
 fn is_sequential_tag(tag: ValueTag) -> bool {
     matches!(
         tag,
-        ValueTag::Vector | ValueTag::List | ValueTag::SeqNode | ValueTag::LazySeq
+        ValueTag::Vector | ValueTag::List | ValueTag::SeqNode | ValueTag::LazySeq | ValueTag::VectorSeq
     )
 }
 

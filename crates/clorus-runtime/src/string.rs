@@ -184,7 +184,7 @@ pub(crate) unsafe fn value_to_rust_string(val: *mut Value) -> String {
             }
             format!("({})", parts.join(" "))
         }
-        ValueTag::LazySeq | ValueTag::SeqNode => {
+        ValueTag::LazySeq | ValueTag::SeqNode | ValueTag::VectorSeq => {
             bounded_sequence_to_string(val, value_to_rust_string)
         }
         ValueTag::HashMap => {
@@ -1346,7 +1346,7 @@ unsafe fn value_to_pr_string(val: *mut Value) -> String {
                 crate::net::SocketHandle::Stream(None) => "#<tcp-stream: closed>".to_string(),
             }
         }
-        ValueTag::LazySeq | ValueTag::SeqNode => {
+        ValueTag::LazySeq | ValueTag::SeqNode | ValueTag::VectorSeq => {
             bounded_sequence_to_string(val, value_to_pr_string)
         }
     }

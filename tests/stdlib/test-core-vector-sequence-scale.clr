@@ -1,0 +1,23 @@
+(ns tests.stdlib.test-core-vector-sequence-scale)
+
+;; A vector-backed lazy sequence must advance through `rest` without copying a
+;; shorter vector at every step. This catches the quadratic regression that
+;; made even 10k-element `map` workloads impractical.
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str label " expected=" expected " actual=" actual))))
+
+(defn -main []
+  (let [n 100000
+        xs (range n)
+        mapped (map inc xs)
+        evens (filter even? xs)
+        suffix (drop 90000 xs)]
+    (assert-eq "map count at scale" (count mapped) n)
+    (assert-eq "map final item at scale" (last mapped) n)
+    (assert-eq "filter count at scale" (count evens) 50000)
+    (assert-eq "drop count at scale" (count suffix) 10000)
+    (assert-eq "drop first item at scale" (first suffix) 90000)
+    0))

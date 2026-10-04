@@ -220,6 +220,7 @@ pub extern "C" fn clorus_nth(coll: *mut Value, index: i64) -> *mut Value {
                     result
                 }
             }
+            ValueTag::VectorSeq => (*(*coll).as_vector_seq()).nth(index as u64),
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 PersistentVector::nth(vec_ptr, index as u64)
@@ -264,6 +265,10 @@ pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
             (*coll).header().retain();
             return coll;
         }
+        if (*coll).header().tag() == ValueTag::VectorSeq {
+            (*coll).header().retain();
+            return coll;
+        }
         if clorus_count(coll) == 0 {
             return Value::nil();
         }
@@ -283,6 +288,7 @@ pub extern "C" fn clorus_seq(coll: *mut Value) -> *mut Value {
             ValueTag::String => string_as_char_list(coll),
             ValueTag::LazySeq => unreachable!("lazy sequence handled before collection dispatch"),
             ValueTag::SeqNode => unreachable!("sequence node handled before collection dispatch"),
+            ValueTag::VectorSeq => unreachable!("vector sequence handled before collection dispatch"),
             _ => Value::nil(),
         }
     }
@@ -341,6 +347,7 @@ pub extern "C" fn clorus_first(coll: *mut Value) -> *mut Value {
                 result
             }
             ValueTag::SeqNode => crate::seq_node::seq_node_head(coll),
+            ValueTag::VectorSeq => (*(*coll).as_vector_seq()).nth(0),
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 if (*vec_ptr).is_empty() {
@@ -395,6 +402,14 @@ pub extern "C" fn clorus_rest(coll: *mut Value) -> *mut Value {
                     tail
                 }
             }
+            ValueTag::VectorSeq => {
+                let sequence = (*coll).as_vector_seq();
+                if (*sequence).count() <= 1 {
+                    crate::list::clorus_list_empty()
+                } else {
+                    Value::from_vector_seq((*sequence).backing(), (*sequence).next_offset())
+                }
+            }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 let count = (*vec_ptr).count();
@@ -404,17 +419,9 @@ pub extern "C" fn clorus_rest(coll: *mut Value) -> *mut Value {
                     return crate::list::clorus_list_empty();
                 }
 
-                // Create a new vector with elements [1..]
-                let mut new_vec = PersistentVector::empty();
-                for i in 1..count {
-                    let elem = PersistentVector::nth(vec_ptr, i);
-                    new_vec = PersistentVector::conj(new_vec, elem);
-                    if !elem.is_null() {
-                        crate::value::clorus_release(elem);
-                    }
-                }
-
-                Value::from_ptr(ValueTag::Vector, new_vec as *mut u8)
+                // Keep a cursor into the immutable backing vector. Copying a
+                // shortened vector here makes every lazy `rest` step O(n).
+                Value::from_vector_seq(coll, 1)
             }
             ValueTag::List => {
                 crate::list::clorus_list_rest(coll)
@@ -456,6 +463,10 @@ pub extern "C" fn clorus_last(coll: *mut Value) -> *mut Value {
             }
             ValueTag::SeqNode => {
                 clorus_last_sequence(coll)
+            }
+            ValueTag::VectorSeq => {
+                let sequence = (*coll).as_vector_seq();
+                (*sequence).nth((*sequence).count().saturating_sub(1))
             }
             ValueTag::Vector => {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
@@ -572,6 +583,7 @@ pub extern "C" fn clorus_count(coll: *mut Value) -> i64 {
                 let vec_ptr = (*coll).as_ptr() as *mut PersistentVector;
                 (*vec_ptr).count() as i64
             }
+            ValueTag::VectorSeq => (*(*coll).as_vector_seq()).count() as i64,
             ValueTag::List => {
                 crate::list::clorus_list_count(coll) as i64
             }
@@ -636,6 +648,11 @@ unsafe fn clorus_count_sequence_value(coll: *mut Value) -> *mut Value {
                 crate::value::clorus_release(current);
                 return Value::long(count.saturating_add(suffix_count));
             }
+            ValueTag::VectorSeq => {
+                let suffix_count = clorus_count(current);
+                crate::value::clorus_release(current);
+                return Value::long(count.saturating_add(suffix_count));
+            }
             ValueTag::SeqNode => {
                 count = match count.checked_add(1) {
                     Some(next) => next,
@@ -690,6 +707,7 @@ pub extern "C" fn clorus_empty(coll: *mut Value) -> *mut Value {
         match (*coll).header().tag() {
             ValueTag::Vector => crate::vector::clorus_vector_empty(),
             ValueTag::List => crate::list::clorus_list_empty(),
+            ValueTag::VectorSeq => crate::list::clorus_list_empty(),
             ValueTag::HashMap => crate::map::clorus_map_empty(),
             ValueTag::HashSet => crate::set::clorus_set_empty(),
             ValueTag::String => Value::nil(),
@@ -1015,6 +1033,45 @@ mod tests {
             crate::value::clorus_release(vec);
             crate::value::clorus_release(vec1);
             crate::value::clorus_release(vec2);
+        }
+    }
+
+    #[test]
+    fn test_vector_rest_uses_a_non_copying_sequence_cursor() {
+        unsafe {
+            let vector = crate::vector::clorus_vector_empty();
+            let one = Value::double(1.0);
+            let vector1 = crate::vector::clorus_vector_conj(vector, one);
+            let two = Value::double(2.0);
+            let vector2 = crate::vector::clorus_vector_conj(vector1, two);
+            let three = Value::double(3.0);
+            let vector3 = crate::vector::clorus_vector_conj(vector2, three);
+            crate::value::clorus_release(one);
+            crate::value::clorus_release(two);
+            crate::value::clorus_release(three);
+
+            let rest1 = clorus_rest(vector3);
+            assert_eq!((*rest1).tag(), ValueTag::VectorSeq);
+            assert_eq!(clorus_count(rest1), 2);
+            let first = clorus_first(rest1);
+            assert_eq!((*first).as_double(), 2.0);
+            crate::value::clorus_release(first);
+
+            let rest2 = clorus_rest(rest1);
+            assert_eq!((*rest2).tag(), ValueTag::VectorSeq);
+            let last_item = clorus_nth(rest2, 0);
+            assert_eq!((*last_item).as_double(), 3.0);
+            crate::value::clorus_release(last_item);
+            let last = clorus_last(rest2);
+            assert_eq!((*last).as_double(), 3.0);
+            crate::value::clorus_release(last);
+
+            crate::value::clorus_release(rest2);
+            crate::value::clorus_release(rest1);
+            crate::value::clorus_release(vector);
+            crate::value::clorus_release(vector1);
+            crate::value::clorus_release(vector2);
+            crate::value::clorus_release(vector3);
         }
     }
 

@@ -31,6 +31,7 @@ pub mod hierarchy;  // derive/underive/isa? hierarchy relations
 pub mod net;  // TCP socket primitives
 pub(crate) mod lazy_seq;  // Native lazy sequence realization cell (not public surface yet)
 pub(crate) mod seq_node;  // General immutable sequence step for lazy tails
+pub(crate) mod vector_seq;  // O(1) sequence cursor over immutable vectors
 pub mod keep_alive;  // Retains every extern "C" fn for JIT hosts -- see build.rs
 
 // Re-export main types
