@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CASES_FILE = Path(__file__).resolve().parent / "core_cases.json"
 CLORUS_BIN = os.environ.get("CLORUS_BIN", str(ROOT / "target" / "debug" / "clorus"))
+
+
+def reference_clojure_command():
+    """Find a supported Clojure launcher without tying parity to one installer.
+
+    The official Clojure CLI exposes `clj`; distro and Homebrew packages often
+    expose only `clojure`.  The parity corpus is a pure-core file, so either
+    launcher is sufficient and keeps the CI setup portable across platforms.
+    """
+    for command in ("clj", "clojure"):
+        if shutil.which(command):
+            return command
+    return None
 
 
 def run_cmd(cmd, env=None):
@@ -26,6 +40,10 @@ def clj_eval_all(cases):
     Batching them keeps the smoke test fast enough to run routinely while the
     marker makes every reference value unambiguous, including nil and strings.
     """
+    launcher = reference_clojure_command()
+    if launcher is None:
+        return False, "Clojure launcher not found (expected `clj` or `clojure`)"
+
     with tempfile.NamedTemporaryFile("w", suffix=".clj", delete=False) as f:
         for index, case in enumerate(cases):
             f.write(
@@ -34,9 +52,10 @@ def clj_eval_all(cases):
             )
         path = f.name
     try:
-        code, out, err = run_cmd(["clj", "-M", path])
+        command = [launcher, "-M", path] if launcher == "clj" else [launcher, path]
+        code, out, err = run_cmd(command)
         if code != 0:
-            return False, f"clj failed: {err.strip() or out.strip()}"
+            return False, f"Clojure reference launcher failed: {err.strip() or out.strip()}"
 
         values = {}
         for line in out.splitlines():
