@@ -1,0 +1,37 @@
+(ns tests.language.test-letfn-lexical-capture)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn make-adder [offset]
+  (letfn [(add-offset [x] (+ x offset))]
+    add-offset))
+
+(defn -main [& _args]
+  (do
+    ;; A local function must receive enclosing bindings through its closure
+    ;; environment rather than emit an LLVM load from the enclosing function.
+    (assert-eq "letfn captures enclosing local"
+               (let [offset 10]
+                 (letfn [(add-offset [x] (+ x offset))]
+                   (add-offset 5)))
+               15)
+
+    ;; All members of a mutually recursive group share the same environment.
+    (assert-eq "mutual letfn shares lexical environment"
+               (let [base 42]
+                 (letfn [(even-depth [n]
+                           (if (= n 0) base (odd-depth (dec n))))
+                         (odd-depth [n]
+                           (if (= n 0) base (even-depth (dec n))))]
+                   (even-depth 5)))
+               42)
+
+    ;; The runtime copies captured values into FunctionData, so an escaped
+    ;; local function remains valid after its creating letfn has returned.
+    (assert-eq "escaped letfn keeps its environment"
+               ((make-adder 7) 8)
+               15)
+    "PASS"))

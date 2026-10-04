@@ -1,0 +1,45 @@
+(ns tests.language.test-for-comprehension)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    ;; The result remains a sequence: only the requested prefix of an
+    ;; unbounded source is evaluated.
+    (assert-eq "one binding remains lazy"
+               (take 4 (for [x (range)] (* x 2)))
+               [0 2 4 6])
+
+    (assert-eq "nested bindings produce cartesian order"
+               (for [x [1 2] y [:a :b]] [x y])
+               [[1 :a] [1 :b] [2 :a] [2 :b]])
+
+    ;; :let must introduce names for later modifiers and only run once per
+    ;; candidate. :when skips candidates while :while ends this generator.
+    (assert-eq "let when and while retain their order"
+               (for [x (range)
+                     :let [square (* x x)]
+                     :when (odd? x)
+                     :while (< x 6)]
+                 square)
+               [1 9 25])
+
+    (assert-eq "while can use a prior let binding"
+               (for [x [1 2 3 4]
+                     :let [doubled (* x 2)]
+                     :while (< doubled 7)]
+                 doubled)
+               [2 4 6])
+
+    (assert-eq "vector destructuring works in a generator"
+               (for [[x y] [[1 2] [3 4]]] (+ x y))
+               [3 7])
+
+    (assert-eq "map keys destructuring works in a generator"
+               (for [{:keys [x y]} [{:x 1 :y 2} {:x 3 :y 4}]] (+ x y))
+               [3 7])
+
+    "PASS"))

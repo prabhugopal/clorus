@@ -1807,6 +1807,39 @@ impl<'ctx> CodeGen<'ctx> {
                     )?);
                 }
 
+                // `letfn` functions are closures just like anonymous `fn`s:
+                // they may refer to bindings from the enclosing lexical
+                // scope. Use one shared, stable capture layout for every
+                // function in the group so mutual recursive calls can pass
+                // their received environment straight through unchanged.
+                let mut letfn_free_vars = Vec::new();
+                let mut letfn_free_seen = HashSet::new();
+                let letfn_names: HashSet<String> = bindings
+                    .iter()
+                    .map(|(name, _, _, _)| name.clone())
+                    .collect();
+                for (_name, params, rest_param, fn_body) in bindings {
+                    let mut bound = letfn_names.clone();
+                    for pattern in params {
+                        for name in Self::collect_pattern_names(pattern) {
+                            bound.insert(name);
+                        }
+                    }
+                    if let Some(rest_name) = rest_param {
+                        bound.insert(rest_name.clone());
+                    }
+                    self.collect_free_vars(
+                        fn_body,
+                        &mut letfn_free_vars,
+                        &mut letfn_free_seen,
+                        &bound,
+                    );
+                }
+                let letfn_env_size = self
+                    .context
+                    .i32_type()
+                    .const_int(letfn_free_vars.len() as u64, false);
+
                 // Step 2: Compile function bodies
                 for (i, (_name, function, params, rest_param)) in fn_values.iter().enumerate() {
                     let (_fn_name, _fn_params, _fn_rest, fn_body) = &bindings[i];
@@ -1816,9 +1849,49 @@ impl<'ctx> CodeGen<'ctx> {
                     let saved_block = self.builder.get_insert_block();
                     self.builder.position_at_end(entry_block);
 
-                    // Save current variables and restore with letfn functions visible
+                    // Compile in an isolated function scope. The previous
+                    // implementation copied `saved_vars` here, which let an
+                    // LLVM instruction from the enclosing function leak into
+                    // this function whenever a letfn body referenced an outer
+                    // local. Captures must instead be unpacked from `env`.
                     let saved_fn_vars = self.variables.clone();
-                    self.variables = saved_vars.clone();
+                    self.variables.clear();
+
+                    let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                    let env_param_index = params.len() + if rest_param.is_some() { 1 } else { 0 };
+                    let env_param = function
+                        .get_nth_param(env_param_index as u32)
+                        .unwrap()
+                        .into_pointer_value();
+
+                    for (capture_index, capture_name) in letfn_free_vars.iter().enumerate() {
+                        let offset = self
+                            .context
+                            .i64_type()
+                            .const_int(capture_index as u64, false);
+                        let capture_ptr = unsafe {
+                            self.builder
+                                .build_gep(
+                                    value_ptr_type,
+                                    env_param,
+                                    &[offset],
+                                    &format!("letfn_env_{}", capture_name),
+                                )
+                                .unwrap()
+                        };
+                        let capture_value = self
+                            .builder
+                            .build_load(
+                                value_ptr_type,
+                                capture_ptr,
+                                &format!("letfn_load_{}", capture_name),
+                            )
+                            .unwrap()
+                            .into_pointer_value();
+                        let capture_alloca = self.create_entry_block_alloca(capture_name);
+                        self.builder.build_store(capture_alloca, capture_value).unwrap();
+                        self.variables.insert(capture_name.clone(), capture_alloca);
+                    }
 
                     // Make all letfn functions visible to each other during compilation
                     // Create function Value* objects for each letfn function
@@ -1840,17 +1913,9 @@ impl<'ctx> CodeGen<'ctx> {
                         // Cast function pointer to *const u8
                         let fn_ptr = fn_call_frames[fn_index].as_global_value().as_pointer_value();
 
-                        // No captures for letfn functions (they reference each other but not outer scope)
-                        let null_env = self
-                            .context
-                            .i8_type()
-                            .ptr_type(AddressSpace::default())
-                            .ptr_type(AddressSpace::default())
-                            .const_null();
-                        let zero_env_size = self.context.i32_type().const_zero();
-
                         // Create function Value*
-                        // clorus_function_new(func_ptr, arity, env, env_size)
+                        // Every member shares the current function's capture
+                        // layout, including recursive/mutual calls.
                         let fn_value = self
                             .builder
                             .build_call(
@@ -1858,8 +1923,8 @@ impl<'ctx> CodeGen<'ctx> {
                                 &[
                                     fn_ptr.into(),
                                     arity_val.into(),
-                                    null_env.into(),
-                                    zero_env_size.into(),
+                                    env_param.into(),
+                                    letfn_env_size.into(),
                                 ],
                                 &format!("make_{}", letfn_name),
                             )
@@ -1923,6 +1988,61 @@ impl<'ctx> CodeGen<'ctx> {
                     .get_function("clorus_function_new_call_frame")
                     .ok_or("clorus_function_new_call_frame not declared")?;
 
+                // Materialize the shared capture environment once in the
+                // enclosing function. `clorus_function_new_call_frame` copies
+                // and retains these values into each FunctionData object, so
+                // the temporary LLVM alloca does not escape.
+                let value_ptr_type = self.context.i8_type().ptr_type(AddressSpace::default());
+                let outer_env_ptr = if letfn_free_vars.is_empty() {
+                    value_ptr_type
+                        .ptr_type(AddressSpace::default())
+                        .const_null()
+                } else {
+                    let env_array_type = value_ptr_type.array_type(letfn_free_vars.len() as u32);
+                    let env_array = self.builder.build_alloca(env_array_type, "letfn_env_array").unwrap();
+                    for (capture_index, capture_name) in letfn_free_vars.iter().enumerate() {
+                        let capture_value = if let Some(capture_ptr) = saved_vars.get(capture_name) {
+                            self.builder
+                                .build_load(value_ptr_type, *capture_ptr, capture_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else if let Some(capture_ptr) = self.parameter_context.get(capture_name) {
+                            self.builder
+                                .build_load(value_ptr_type, *capture_ptr, capture_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else if let Some(global) = self.globals.get(capture_name) {
+                            self.builder
+                                .build_load(value_ptr_type, global.as_pointer_value(), capture_name)
+                                .unwrap()
+                                .into_pointer_value()
+                        } else {
+                            return Err(format!("Captured letfn variable not found: {}", capture_name));
+                        };
+                        let env_slot = unsafe {
+                            self.builder
+                                .build_gep(
+                                    env_array_type,
+                                    env_array,
+                                    &[
+                                        self.context.i32_type().const_zero(),
+                                        self.context.i32_type().const_int(capture_index as u64, false),
+                                    ],
+                                    &format!("letfn_env_slot_{}", capture_name),
+                                )
+                                .unwrap()
+                        };
+                        self.builder.build_store(env_slot, capture_value).unwrap();
+                    }
+                    self.builder
+                        .build_pointer_cast(
+                            env_array,
+                            value_ptr_type.ptr_type(AddressSpace::default()),
+                            "letfn_env_ptr",
+                        )
+                        .unwrap()
+                };
+
                 for (fn_index, (name, _function, params, rest_param)) in fn_values.iter().enumerate() {
                     let runtime_arity = Self::runtime_arity(params.len(), rest_param.is_some());
                     let arity_val = self
@@ -1933,27 +2053,18 @@ impl<'ctx> CodeGen<'ctx> {
                     // Function pointer
                     let fn_ptr = fn_call_frames[fn_index].as_global_value().as_pointer_value();
 
-                    // No captures for letfn functions
-                    let null_env = self
-                        .context
-                        .i8_type()
-                        .ptr_type(AddressSpace::default())
-                        .ptr_type(AddressSpace::default())
-                        .const_null();
-                    let zero_env_size = self.context.i32_type().const_zero();
-
                     // Create function Value*
-                    // clorus_function_new(func_ptr, arity, env, env_size)
+                    // All letfn members receive the identical capture layout.
                     let fn_value = self
                         .builder
                         .build_call(
                             clorus_make_fn,
-                            &[
-                                fn_ptr.into(),
-                                arity_val.into(),
-                                null_env.into(),
-                                zero_env_size.into(),
-                            ],
+                                &[
+                                    fn_ptr.into(),
+                                    arity_val.into(),
+                                    outer_env_ptr.into(),
+                                    letfn_env_size.into(),
+                                ],
                             &format!("make_{}", name),
                         )
                         .unwrap()

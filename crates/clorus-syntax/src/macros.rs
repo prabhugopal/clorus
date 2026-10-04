@@ -221,6 +221,11 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_doseq_once(args, registry)
         }
 
+        // Lazy sequence comprehension.
+        Expr::Call { func, args } if func == "for" => {
+            expand_for_once(args, registry)
+        }
+
         // With-open macro - resource management
         Expr::Call { func, args } if func == "with-open" => {
             expand_with_open_once(args, registry)
@@ -345,6 +350,10 @@ fn expand_dotimes_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
 
 fn expand_doseq_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_doseq_impl(args, false)
+}
+
+fn expand_for_once(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    expand_for(args, registry)
 }
 
 // Implementation helpers (these need to be created or the existing functions refactored)
@@ -602,6 +611,11 @@ pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) ->
         // Doseq macro: (doseq [x coll] body...) => iterate over collection with side effects
         Expr::Call { func, args } if func == "doseq" => {
             expand_doseq(args, registry)
+        }
+
+        // For macro: lazy sequence comprehension with binding modifiers.
+        Expr::Call { func, args } if func == "for" => {
+            expand_for(args, registry)
         }
 
         // With-open macro: (with-open [x init] body...) => resource management with cleanup
@@ -2765,6 +2779,404 @@ fn expand_dotimes(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
 ///         (let [x (nth coll_sym i)]
 ///           body...)
 ///         (recur (inc i)))))
+#[derive(Debug, Clone)]
+struct ForBinding {
+    pattern: Pattern,
+    collection: Expr,
+    modifiers: Vec<ForModifier>,
+}
+
+#[derive(Debug, Clone)]
+enum ForModifier {
+    Let(Vec<(Pattern, Box<Expr>)>),
+    When(Expr),
+    While(Expr),
+}
+
+/// Convert an expression in a `for` binding vector into the same pattern
+/// representation used by `let` and `fn`. The parser deliberately leaves
+/// comprehension bindings as expressions until macro expansion, so this is
+/// the one boundary that makes destructuring uniform across all three forms.
+fn for_pattern(expr: &Expr) -> Result<Pattern, String> {
+    match expr {
+        Expr::Symbol(name) if name == "_" => Ok(Pattern::Ignore),
+        Expr::Symbol(name) => Ok(Pattern::Symbol(name.clone())),
+        Expr::Vector(items) => {
+            let mut elements = Vec::new();
+            let mut rest = None;
+            let mut as_binding = None;
+            let mut index = 0;
+
+            while index < items.len() {
+                match &items[index] {
+                    Expr::Symbol(marker) if marker == "&" => {
+                        if rest.is_some() || index + 2 != items.len() {
+                            return Err("for vector destructuring requires `& name` at the end".to_string());
+                        }
+                        match &items[index + 1] {
+                            Expr::Symbol(name) if name != "_" => rest = Some(name.clone()),
+                            _ => {
+                                return Err(
+                                    "for vector destructuring requires a symbol after `&`"
+                                        .to_string(),
+                                )
+                            }
+                        }
+                        index += 2;
+                    }
+                    Expr::Keyword(marker) if marker == "as" || marker == ":as" => {
+                        if as_binding.is_some() || index + 2 != items.len() {
+                            return Err("for vector destructuring requires `:as name` at the end".to_string());
+                        }
+                        match &items[index + 1] {
+                            Expr::Symbol(name) if name != "_" => as_binding = Some(name.clone()),
+                            _ => {
+                                return Err(
+                                    "for vector destructuring requires a symbol after `:as`"
+                                        .to_string(),
+                                )
+                            }
+                        }
+                        index += 2;
+                    }
+                    item => {
+                        elements.push(for_pattern(item)?);
+                        index += 1;
+                    }
+                }
+            }
+
+            Ok(Pattern::Vector {
+                elements,
+                rest,
+                as_binding,
+            })
+        }
+        Expr::Map(entries) => {
+            // Keep map destructuring aligned with the parser's current
+            // supported forms: {:keys [a b]} and {local :key ...}.
+            if entries.len() == 1 {
+                if let (Expr::Keyword(keyword), Expr::Vector(names)) = (&entries[0].0, &entries[0].1) {
+                    if keyword == "keys" || keyword == ":keys" {
+                        let mut bindings = Vec::with_capacity(names.len());
+                        for name in names {
+                            match name {
+                                Expr::Symbol(name) if name != "_" => bindings.push((
+                                    MapPatternKey::Symbol(name.clone()),
+                                    Pattern::Symbol(name.clone()),
+                                )),
+                                _ => {
+                                    return Err(
+                                        "for {:keys [...]} destructuring requires symbols"
+                                            .to_string(),
+                                    )
+                                }
+                            }
+                        }
+                        return Ok(Pattern::Map {
+                            bindings,
+                            defaults: None,
+                        });
+                    }
+                }
+            }
+
+            let mut bindings = Vec::with_capacity(entries.len());
+            for (binding, key) in entries {
+                let binding_name = match binding {
+                    Expr::Symbol(name) if name != "_" => name.clone(),
+                    _ => {
+                        return Err(
+                            "for map destructuring requires a local symbol before each key"
+                                .to_string(),
+                        )
+                    }
+                };
+                let key_name = match key {
+                    Expr::Keyword(name) => name.clone(),
+                    _ => {
+                        return Err(
+                            "for map destructuring currently requires keyword keys".to_string(),
+                        )
+                    }
+                };
+                bindings.push((MapPatternKey::Symbol(key_name), Pattern::Symbol(binding_name)));
+            }
+            Ok(Pattern::Map {
+                bindings,
+                defaults: None,
+            })
+        }
+        _ => Err("for bindings must be symbols or supported destructuring patterns".to_string()),
+    }
+}
+
+fn for_let_bindings(expr: &Expr) -> Result<Vec<(Pattern, Box<Expr>)>, String> {
+    let entries = match expr {
+        Expr::Vector(entries) if entries.len() % 2 == 0 => entries,
+        Expr::Vector(_) => return Err("for :let requires an even binding vector".to_string()),
+        _ => return Err("for :let requires a binding vector".to_string()),
+    };
+
+    let mut bindings = Vec::with_capacity(entries.len() / 2);
+    for pair in entries.chunks(2) {
+        bindings.push((for_pattern(&pair[0])?, Box::new(pair[1].clone())));
+    }
+    Ok(bindings)
+}
+
+fn parse_for_bindings(expr: &Expr) -> Result<Vec<ForBinding>, String> {
+    let entries = match expr {
+        Expr::Vector(entries) => entries,
+        _ => return Err("for requires a binding vector".to_string()),
+    };
+
+    let mut bindings = Vec::new();
+    let mut index = 0;
+    while index < entries.len() {
+        if matches!(entries[index], Expr::Keyword(_)) {
+            return Err("for modifier appears without a preceding binding".to_string());
+        }
+        if index + 1 >= entries.len() {
+            return Err("for binding is missing its collection expression".to_string());
+        }
+
+        let pattern = for_pattern(&entries[index])?;
+        let collection = entries[index + 1].clone();
+        index += 2;
+
+        let mut modifiers = Vec::new();
+        while index < entries.len() {
+            let keyword = match &entries[index] {
+                Expr::Keyword(keyword) => keyword.as_str(),
+                _ => break,
+            };
+            match keyword {
+                "let" | ":let" => {
+                    if index + 1 >= entries.len() {
+                        return Err("for :let is missing its binding vector".to_string());
+                    }
+                    modifiers.push(ForModifier::Let(for_let_bindings(&entries[index + 1])?));
+                    index += 2;
+                }
+                "when" | ":when" => {
+                    if index + 1 >= entries.len() {
+                        return Err("for :when is missing its predicate".to_string());
+                    }
+                    modifiers.push(ForModifier::When(entries[index + 1].clone()));
+                    index += 2;
+                }
+                "while" | ":while" => {
+                    if index + 1 >= entries.len() {
+                        return Err("for :while is missing its predicate".to_string());
+                    }
+                    modifiers.push(ForModifier::While(entries[index + 1].clone()));
+                    index += 2;
+                }
+                _ => return Err(format!("unsupported for modifier :{}", keyword)),
+            }
+        }
+
+        bindings.push(ForBinding {
+            pattern,
+            collection,
+            modifiers,
+        });
+    }
+
+    if bindings.is_empty() {
+        return Err("for requires at least one binding".to_string());
+    }
+    Ok(bindings)
+}
+
+fn for_continue(step_name: &str, sequence_name: &str) -> Expr {
+    Expr::Call {
+        func: step_name.to_string(),
+        args: vec![Expr::Call {
+            func: "rest".to_string(),
+            args: vec![Expr::Symbol(sequence_name.to_string())],
+        }],
+    }
+}
+
+fn for_emit_or_descend(
+    bindings: &[ForBinding],
+    index: usize,
+    body: &Expr,
+    step_name: &str,
+    sequence_name: &str,
+    registry: &mut MacroRegistry,
+) -> Expr {
+    let continuation = for_continue(step_name, sequence_name);
+    if index + 1 == bindings.len() {
+        Expr::Call {
+            func: "__clorus_seq_cons".to_string(),
+            args: vec![body.clone(), continuation],
+        }
+    } else {
+        Expr::Call {
+            func: "concat".to_string(),
+            args: vec![
+                build_for_binding(bindings, index + 1, body, registry),
+                continuation,
+            ],
+        }
+    }
+}
+
+fn for_apply_modifiers(
+    modifiers: &[ForModifier],
+    modifier_index: usize,
+    bindings: &[ForBinding],
+    binding_index: usize,
+    body: &Expr,
+    step_name: &str,
+    sequence_name: &str,
+    registry: &mut MacroRegistry,
+) -> Expr {
+    if modifier_index == modifiers.len() {
+        return for_emit_or_descend(
+            bindings,
+            binding_index,
+            body,
+            step_name,
+            sequence_name,
+            registry,
+        );
+    }
+
+    let remaining = for_apply_modifiers(
+        modifiers,
+        modifier_index + 1,
+        bindings,
+        binding_index,
+        body,
+        step_name,
+        sequence_name,
+        registry,
+    );
+
+    match &modifiers[modifier_index] {
+        ForModifier::Let(bindings) => Expr::Let {
+            bindings: bindings.clone(),
+            body: Box::new(remaining),
+        },
+        ForModifier::When(predicate) => Expr::If {
+            condition: Box::new(predicate.clone()),
+            then_branch: Box::new(remaining),
+            else_branch: Box::new(for_continue(step_name, sequence_name)),
+        },
+        ForModifier::While(predicate) => Expr::If {
+            condition: Box::new(predicate.clone()),
+            then_branch: Box::new(remaining),
+            else_branch: Box::new(Expr::Nil),
+        },
+    }
+}
+
+/// Build one generator in a `for` comprehension. The generated local `step`
+/// function owns the source tail and emits one result at a time. This is the
+/// essential difference from a `mapcat`-only expansion: `:while` can stop the
+/// current generator, while `:let` bindings are evaluated exactly once for
+/// each candidate item even when later modifiers refer to them.
+fn build_for_binding(
+    bindings: &[ForBinding],
+    index: usize,
+    body: &Expr,
+    registry: &mut MacroRegistry,
+) -> Expr {
+    let binding = &bindings[index];
+    let step_name = registry.gensym(Some("for_step"));
+    let sequence_name = registry.gensym(Some("for_seq"));
+    let source_name = registry.gensym(Some("for_source"));
+
+    let per_item = for_apply_modifiers(
+        &binding.modifiers,
+        0,
+        bindings,
+        index,
+        body,
+        &step_name,
+        &source_name,
+        registry,
+    );
+
+    let step_body = Expr::Call {
+        func: "lazy-seq".to_string(),
+        args: vec![Expr::Let {
+            bindings: vec![(
+                Pattern::Symbol(sequence_name.clone()),
+                Box::new(Expr::Call {
+                    func: "seq".to_string(),
+                    args: vec![Expr::Symbol(source_name.clone())],
+                }),
+            )],
+            body: Box::new(Expr::If {
+                condition: Box::new(Expr::Symbol(sequence_name.clone())),
+                then_branch: Box::new(Expr::Let {
+                    bindings: vec![(
+                        binding.pattern.clone(),
+                        Box::new(Expr::Call {
+                            func: "first".to_string(),
+                            args: vec![Expr::Symbol(sequence_name)],
+                        }),
+                    )],
+                    body: Box::new(per_item),
+                }),
+                else_branch: Box::new(Expr::Nil),
+            }),
+        }],
+    };
+
+    Expr::Letfn {
+        bindings: vec![(
+            step_name.clone(),
+            vec![Pattern::Symbol(source_name)],
+            None,
+            Box::new(step_body),
+        )],
+        body: Box::new(Expr::Call {
+            func: step_name,
+            args: vec![binding.collection.clone()],
+        }),
+    }
+}
+
+/// Expand `(for [binding coll :let [...] :when pred :while pred ...] body)`
+/// to nested lazy state machines. Every branch returns a sequence, so nested
+/// generators compose through lazy `concat` without eagerly realizing either
+/// the outer collection or the body results.
+fn expand_for(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.len() < 2 {
+        return Expr::Call {
+            func: "throw".to_string(),
+            args: vec![Expr::String(
+                "for requires a binding vector and at least one body expression".to_string(),
+            )],
+        };
+    }
+
+    let bindings = match parse_for_bindings(&args[0]) {
+        Ok(bindings) => bindings,
+        Err(message) => {
+            return Expr::Call {
+                func: "throw".to_string(),
+                args: vec![Expr::String(message)],
+            }
+        }
+    };
+    let body = if args.len() == 2 {
+        args[1].clone()
+    } else {
+        Expr::Do {
+            exprs: args[1..].to_vec(),
+        }
+    };
+
+    expand_macros_with_registry(&build_for_binding(&bindings, 0, &body, registry), registry)
+}
+
 fn expand_doseq(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     if args.is_empty() {
         return Expr::Nil;
@@ -3626,5 +4038,16 @@ mod tests {
             }
             other => panic!("Expected expanded macro call, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_for_macro_expands_to_a_lazy_generator() {
+        use crate::parser::parse_str;
+
+        let exprs = parse_str("(for [x [1 2]] (* x 2))").unwrap();
+        assert!(matches!(&exprs[0], Expr::Call { func, .. } if func == "for"));
+
+        let expanded = expand_macros(&exprs[0]);
+        assert!(matches!(expanded, Expr::Letfn { .. }));
     }
 }
