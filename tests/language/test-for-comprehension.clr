@@ -42,4 +42,15 @@
                (for [{:keys [x y]} [{:x 1 :y 2} {:x 3 :y 4}]] (+ x y))
                [3 7])
 
+    (let [seen (atom [])]
+      (assert-eq "doseq realizes nested filtered generators"
+                 (doseq [x [1 2 3]
+                         :when (odd? x)
+                         y [:a :b]]
+                   (swap! seen conj [x y]))
+                 nil)
+      (assert-eq "doseq effect order follows for"
+                 @seen
+                 [[1 :a] [1 :b] [3 :a] [3 :b]]))
+
     "PASS"))

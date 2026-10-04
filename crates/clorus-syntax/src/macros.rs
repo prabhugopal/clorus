@@ -3178,103 +3178,42 @@ fn expand_for(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
 }
 
 fn expand_doseq(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
-    if args.is_empty() {
-        return Expr::Nil;
+    if args.len() < 2 {
+        return Expr::Call {
+            func: "throw".to_string(),
+            args: vec![Expr::String(
+                "doseq requires a binding vector and at least one body expression".to_string(),
+            )],
+        };
     }
 
-    // First arg should be a vector [binding collection]
-    let bindings = match &args[0] {
-        Expr::Vector(v) if v.len() == 2 => v,
-        _ => return Expr::Nil,
-    };
-
-    let binding_name = match &bindings[0] {
-        Expr::Symbol(s) => s.clone(),
-        _ => return Expr::Nil,
-    };
-    let coll_expr = &bindings[1];
-
-    let body_exprs = &args[1..];
-
-    // Generate unique symbols
-    let coll_sym = registry.gensym(Some("coll"));
-    let len_sym = registry.gensym(Some("len"));
-    let i_sym = registry.gensym(Some("i"));
-
-    // Build: (count coll_sym)
-    let count_expr = Expr::List(vec![
-        Expr::Symbol("count".to_string()),
-        Expr::Symbol(coll_sym.clone()),
-    ]);
-
-    // Build: (< i len_sym)
-    let test_expr = Expr::List(vec![
-        Expr::Symbol("<".to_string()),
-        Expr::Symbol(i_sym.clone()),
-        Expr::Symbol(len_sym.clone()),
-    ]);
-
-    // Build: (nth coll_sym i)
-    let nth_expr = Expr::List(vec![
-        Expr::Symbol("nth".to_string()),
-        Expr::Symbol(coll_sym.clone()),
-        Expr::Symbol(i_sym.clone()),
-    ]);
-
-    // Build: (inc i)
-    let inc_expr = Expr::List(vec![
-        Expr::Symbol("+".to_string()),
-        Expr::Symbol(i_sym.clone()),
-        Expr::Double(1.0),
-    ]);
-
-    // Build inner let: (let [x (nth coll_sym i)] body...)
-    let inner_let = Expr::Let {
-        bindings: vec![(
-            crate::ast::Pattern::Symbol(binding_name),
-            Box::new(nth_expr),
-        )],
-        body: Box::new(if body_exprs.len() == 1 {
-            body_exprs[0].clone()
-        } else {
+    let mut effect_body = args[1..].to_vec();
+    // The generated sequence is consumed only for its forcing behavior. Use
+    // a non-nil sentinel because a nil value is also the current sequence
+    // exhaustion marker in the runtime's lazy boundary.
+    effect_body.push(Expr::Bool(true));
+    let generator = Expr::Call {
+        func: "for".to_string(),
+        args: vec![
+            args[0].clone(),
             Expr::Do {
-                exprs: body_exprs.to_vec(),
-            }
-        }),
-    };
-
-    // Build the when body: inner-let (recur (inc i))
-    let when_call = Expr::Call {
-        func: "when".to_string(),
-        args: vec![test_expr, inner_let, Expr::Recur { args: vec![inc_expr] }],
-    };
-
-    // Wrap in loop: (loop [i 0] when-call)
-    let loop_expr = Expr::Loop {
-        bindings: vec![(
-            crate::ast::Pattern::Symbol(i_sym),
-            Box::new(Expr::Double(0.0)),
-        )],
-        body: Box::new(when_call),
-    };
-
-    // Wrap in outer let: (let [coll_sym coll, len (count coll_sym)] loop_expr)
-    let let_expr = Expr::Let {
-        bindings: vec![
-            (
-                crate::ast::Pattern::Symbol(coll_sym.clone()),
-                Box::new(coll_expr.clone()),
-            ),
-            (
-                crate::ast::Pattern::Symbol(len_sym),
-                Box::new(count_expr),
-            ),
+                exprs: effect_body,
+            },
         ],
-        body: Box::new(loop_expr),
     };
 
-    // Expand the result
-    expand_macros_with_registry(&let_expr, registry)
+    expand_macros_with_registry(
+        &Expr::Do {
+            exprs: vec![
+                Expr::Call {
+                    func: "dorun".to_string(),
+                    args: vec![generator],
+                },
+                Expr::Nil,
+            ],
+        },
+        registry,
+    )
 }
 
 /// Expand with-open macro for resource management
