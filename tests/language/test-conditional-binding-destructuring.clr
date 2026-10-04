@@ -1,0 +1,43 @@
+(ns tests.language.test-conditional-binding-destructuring)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (do
+    (let [evaluations (atom 0)]
+      (assert-eq "if-let destructures a vector after one evaluation"
+                 (if-let [[left right] (do (swap! evaluations inc) [2 3])]
+                   (+ left right)
+                   :missing)
+                 5)
+      (assert-eq "if-let evaluates its value once" @evaluations 1))
+
+    (assert-eq "if-let keeps its falsey fallback"
+               (if-let [[x] nil] x :missing)
+               :missing)
+
+    (assert-eq "when-let destructures a map"
+               (when-let [{:keys [x y]} {:x 4 :y 5}]
+                 (+ x y))
+               9)
+
+    (assert-eq "if-some destructures a vector"
+               (if-some [[left right] [6 7]]
+                 (+ left right)
+                 :missing)
+               13)
+
+    (assert-eq "when-some destructures a map"
+               (when-some [{:keys [x y]} {:x 8 :y 9}]
+                 (+ x y))
+               17)
+
+    (assert-eq "when-first destructures the first element"
+               (when-first [[left right] [[10 11] [12 13]]]
+                 (+ left right))
+               21)
+
+    "PASS"))

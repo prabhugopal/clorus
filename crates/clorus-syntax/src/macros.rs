@@ -2327,7 +2327,9 @@ fn expand_when_not(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     }
 }
 
-/// Expand if-let macro: (if-let [x expr] then else) => (let [x expr] (if x then else))
+/// Expand if-let macro. The tested value is first held in a hygienic local so
+/// destructuring happens only on the truthy branch and the source expression
+/// is evaluated exactly once.
 fn expand_if_let(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     if args.len() < 2 {
         return Expr::Nil;
@@ -2339,11 +2341,12 @@ fn expand_if_let(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         _ => return Expr::Nil, // Invalid binding form
     };
 
-    let binding_pattern = match &bindings[0] {
-        Expr::Symbol(s) => crate::ast::Pattern::Symbol(s.clone()),
-        _ => return Expr::Nil, // For now, only simple symbols
+    let binding_pattern = match for_pattern(&bindings[0]) {
+        Ok(pattern) => pattern,
+        Err(_) => return Expr::Nil,
     };
     let binding_value = &bindings[1];
+    let value_name = registry.gensym(Some("if_let_value"));
 
     let then_expr = &args[1];
     let else_expr = if args.len() > 2 {
@@ -2352,28 +2355,29 @@ fn expand_if_let(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         &Expr::Nil
     };
 
-    // Build: (let [x expr] (if x then else))
+    // Build: (let [value expr] (if value (let [pattern value] then) else))
     let if_expr = Expr::If {
-        condition: Box::new(Expr::Symbol(
-            if let crate::ast::Pattern::Symbol(s) = &binding_pattern {
-                s.clone()
-            } else {
-                return Expr::Nil;
-            }
-        )),
-        then_branch: Box::new(expand_macros_with_registry(then_expr, registry)),
+        condition: Box::new(Expr::Symbol(value_name.clone())),
+        then_branch: Box::new(Expr::Let {
+            bindings: vec![(
+                binding_pattern,
+                Box::new(Expr::Symbol(value_name.clone())),
+            )],
+            body: Box::new(expand_macros_with_registry(then_expr, registry)),
+        }),
         else_branch: Box::new(expand_macros_with_registry(else_expr, registry)),
     };
 
     let let_expr = Expr::Let {
-        bindings: vec![(binding_pattern, Box::new(binding_value.clone()))],
+        bindings: vec![(Pattern::Symbol(value_name), Box::new(binding_value.clone()))],
         body: Box::new(if_expr),
     };
 
     expand_macros_with_registry(&let_expr, registry)
 }
 
-/// Expand when-let macro: (when-let [x expr] body) => (let [x expr] (when x body))
+/// Expand when-let macro with a separate tested value, so any supported let
+/// pattern is only destructured after the value passes the truthiness check.
 fn expand_when_let(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     if args.is_empty() {
         return Expr::Nil;
@@ -2385,33 +2389,31 @@ fn expand_when_let(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         _ => return Expr::Nil,
     };
 
-    let binding_pattern = match &bindings[0] {
-        Expr::Symbol(s) => crate::ast::Pattern::Symbol(s.clone()),
-        _ => return Expr::Nil,
+    let binding_pattern = match for_pattern(&bindings[0]) {
+        Ok(pattern) => pattern,
+        Err(_) => return Expr::Nil,
     };
     let binding_value = &bindings[1];
+    let value_name = registry.gensym(Some("when_let_value"));
 
-    let body_exprs = &args[1..];
+    let body = expand_conditional_binding_body(&args[1..], registry);
 
-    // Build: (let [x expr] (when x body))
-    let when_call = Expr::Call {
-        func: "when".to_string(),
-        args: {
-            let mut args = vec![Expr::Symbol(
-                if let crate::ast::Pattern::Symbol(s) = &binding_pattern {
-                    s.clone()
-                } else {
-                    return Expr::Nil;
-                }
-            )];
-            args.extend(body_exprs.iter().cloned());
-            args
-        },
+    // Build: (let [value expr] (if value (let [pattern value] body) nil))
+    let conditional = Expr::If {
+        condition: Box::new(Expr::Symbol(value_name.clone())),
+        then_branch: Box::new(Expr::Let {
+            bindings: vec![(
+                binding_pattern,
+                Box::new(Expr::Symbol(value_name.clone())),
+            )],
+            body: Box::new(body),
+        }),
+        else_branch: Box::new(Expr::Nil),
     };
 
     let let_expr = Expr::Let {
-        bindings: vec![(binding_pattern, Box::new(binding_value.clone()))],
-        body: Box::new(when_call),
+        bindings: vec![(Pattern::Symbol(value_name), Box::new(binding_value.clone()))],
+        body: Box::new(conditional),
     };
 
     expand_macros_with_registry(&let_expr, registry)
@@ -2428,24 +2430,31 @@ fn expand_if_some(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         Expr::Vector(bindings) if bindings.len() == 2 => bindings,
         _ => return Expr::Nil,
     };
-    let name = match &bindings[0] {
-        Expr::Symbol(name) => name.clone(),
-        _ => return Expr::Nil,
+    let binding_pattern = match for_pattern(&bindings[0]) {
+        Ok(pattern) => pattern,
+        Err(_) => return Expr::Nil,
     };
+    let value_name = registry.gensym(Some("if_some_value"));
     let else_expr = args.get(2).cloned().unwrap_or(Expr::Nil);
 
     let if_expr = Expr::If {
         condition: Box::new(Expr::Call {
             func: "nil?".to_string(),
-            args: vec![Expr::Symbol(name.clone())],
+            args: vec![Expr::Symbol(value_name.clone())],
         }),
         then_branch: Box::new(expand_macros_with_registry(&else_expr, registry)),
-        else_branch: Box::new(expand_macros_with_registry(&args[1], registry)),
+        else_branch: Box::new(Expr::Let {
+            bindings: vec![(
+                binding_pattern,
+                Box::new(Expr::Symbol(value_name.clone())),
+            )],
+            body: Box::new(expand_macros_with_registry(&args[1], registry)),
+        }),
     };
 
     expand_macros_with_registry(
         &Expr::Let {
-            bindings: vec![(Pattern::Symbol(name), Box::new(bindings[1].clone()))],
+            bindings: vec![(Pattern::Symbol(value_name), Box::new(bindings[1].clone()))],
             body: Box::new(if_expr),
         },
         registry,
@@ -2463,31 +2472,29 @@ fn expand_when_some(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         Expr::Vector(bindings) if bindings.len() == 2 => bindings,
         _ => return Expr::Nil,
     };
-    let name = match &bindings[0] {
-        Expr::Symbol(name) => name.clone(),
-        _ => return Expr::Nil,
+    let binding_pattern = match for_pattern(&bindings[0]) {
+        Ok(pattern) => pattern,
+        Err(_) => return Expr::Nil,
     };
-    let body = match args.len() {
-        1 => Expr::Nil,
-        2 => expand_macros_with_registry(&args[1], registry),
-        _ => Expr::Do {
-            exprs: args[1..]
-                .iter()
-                .map(|expr| expand_macros_with_registry(expr, registry))
-                .collect(),
-        },
-    };
+    let value_name = registry.gensym(Some("when_some_value"));
+    let body = expand_conditional_binding_body(&args[1..], registry);
 
     expand_macros_with_registry(
         &Expr::Let {
-            bindings: vec![(Pattern::Symbol(name.clone()), Box::new(bindings[1].clone()))],
+            bindings: vec![(Pattern::Symbol(value_name.clone()), Box::new(bindings[1].clone()))],
             body: Box::new(Expr::If {
                 condition: Box::new(Expr::Call {
                     func: "nil?".to_string(),
-                    args: vec![Expr::Symbol(name)],
+                    args: vec![Expr::Symbol(value_name.clone())],
                 }),
                 then_branch: Box::new(Expr::Nil),
-                else_branch: Box::new(body),
+                else_branch: Box::new(Expr::Let {
+                    bindings: vec![(
+                        binding_pattern,
+                        Box::new(Expr::Symbol(value_name)),
+                    )],
+                    body: Box::new(body),
+                }),
             }),
         },
         registry,
@@ -2506,25 +2513,16 @@ fn expand_when_first(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         Expr::Vector(bindings) if bindings.len() == 2 => bindings,
         _ => return Expr::Nil,
     };
-    let name = match &bindings[0] {
-        Expr::Symbol(name) => name.clone(),
-        _ => return Expr::Nil,
+    let binding_pattern = match for_pattern(&bindings[0]) {
+        Ok(pattern) => pattern,
+        Err(_) => return Expr::Nil,
     };
     let seq_name = registry.gensym(Some("when_first_seq"));
-    let body = match args.len() {
-        1 => Expr::Nil,
-        2 => expand_macros_with_registry(&args[1], registry),
-        _ => Expr::Do {
-            exprs: args[1..]
-                .iter()
-                .map(|expr| expand_macros_with_registry(expr, registry))
-                .collect(),
-        },
-    };
+    let body = expand_conditional_binding_body(&args[1..], registry);
 
     let bound_body = Expr::Let {
         bindings: vec![(
-            Pattern::Symbol(name),
+            binding_pattern,
             Box::new(Expr::Call {
                 func: "first".to_string(),
                 args: vec![Expr::Symbol(seq_name.clone())],
@@ -2550,6 +2548,19 @@ fn expand_when_first(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
         },
         registry,
     )
+}
+
+fn expand_conditional_binding_body(exprs: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    match exprs.len() {
+        0 => Expr::Nil,
+        1 => expand_macros_with_registry(&exprs[0], registry),
+        _ => Expr::Do {
+            exprs: exprs
+                .iter()
+                .map(|expr| expand_macros_with_registry(expr, registry))
+                .collect(),
+        },
+    }
 }
 
 /// Expand if-not macro: (if-not test then else) => (if test else then)
