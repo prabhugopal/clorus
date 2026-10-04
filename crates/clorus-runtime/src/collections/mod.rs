@@ -811,6 +811,25 @@ pub extern "C" fn clorus_drop(coll: *mut Value, n: i64) -> *mut Value {
     }
 }
 
+/// Return the unconsumed tail for a vector destructuring pattern.
+///
+/// This differs from language-level `drop` only at exhaustion: Clojure binds
+/// `[head & tail]`'s `tail` to nil when no elements remain, while `(drop n
+/// coll)` returns an empty collection. Keeping that distinction here lets the
+/// compiler use generic sequential access without changing either contract.
+#[no_mangle]
+pub extern "C" fn clorus_destructure_rest(coll: *mut Value, n: i64) -> *mut Value {
+    let remainder = clorus_drop(coll, n);
+    if remainder.is_null() || clorus_count(remainder) == 0 {
+        if !remainder.is_null() {
+            crate::value::clorus_release(remainder);
+        }
+        Value::nil()
+    } else {
+        remainder
+    }
+}
+
 /// Generic conj - add element to collection
 /// Works with vectors, lists, and sets
 /// For vectors: adds to end

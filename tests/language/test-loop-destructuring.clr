@@ -26,4 +26,19 @@
                            :total (+ total index)})))
                6)
 
+    ;; The rest value is fed directly into recur, so the next iteration must
+    ;; destructure a sequence result rather than assuming a raw vector.
+    (assert-eq "loop reuses vector rest destructuring"
+               (loop [[head & tail] [1 2 3]
+                      total 0]
+                 (if (nil? head)
+                   total
+                   (recur tail (+ total head))))
+               6)
+
+    (assert-eq "vector patterns accept list values"
+               (let [[first second & tail] '(1 2 3 4)]
+                 (+ first second (count tail)))
+               5)
+
     "PASS"))

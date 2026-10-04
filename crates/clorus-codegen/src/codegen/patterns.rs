@@ -28,11 +28,14 @@ impl<'ctx> CodeGen<'ctx> {
                 rest,
                 as_binding: _,
             } => {
-                // Get clorus_vector_nth function
+                // Vector patterns destructure sequential values, not merely
+                // ValueTag::Vector. Using the generic kernels keeps a rest
+                // binding usable as the next value of a loop/recur and also
+                // supports list inputs consistently with normal `nth`/`drop`.
                 let nth_fn = self
                     .module
-                    .get_function("clorus_vector_nth")
-                    .ok_or("clorus_vector_nth not declared")?;
+                    .get_function("clorus_nth")
+                    .ok_or("clorus_nth not declared")?;
 
                 // Extract each element
                 for (i, elem_pattern) in elements.iter().enumerate() {
@@ -57,11 +60,13 @@ impl<'ctx> CodeGen<'ctx> {
 
                 // Handle rest parameter
                 if let Some(rest_name) = rest {
-                    // Get clorus_vector_rest function (takes vector and start index)
+                    // This generic helper preserves destructuring's nil-on-
+                    // exhaustion contract while returning a collection value
+                    // suitable for another vector pattern.
                     let rest_fn = self
                         .module
-                        .get_function("clorus_vector_rest")
-                        .ok_or("clorus_vector_rest not declared")?;
+                        .get_function("clorus_destructure_rest")
+                        .ok_or("clorus_destructure_rest not declared")?;
 
                     let start_index = self
                         .context

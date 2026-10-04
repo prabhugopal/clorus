@@ -282,6 +282,7 @@ impl<'ctx> CodeGen<'ctx> {
         // ===== Sequential Operations =====
         self.declare_value_i64_fn("clorus_take");
         self.declare_value_i64_fn("clorus_drop");
+        self.declare_value_i64_fn("clorus_destructure_rest");
         self.declare_value_fn("clorus_concat", 1);
         self.declare_value_fn("clorus_interleave", 1);
         self.declare_value_fn("clorus_interpose", 2);
