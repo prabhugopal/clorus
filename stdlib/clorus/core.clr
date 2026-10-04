@@ -70,22 +70,19 @@
   ([x y] (not (= x y)))
   ([x y & more] (not (apply = x y more))))
 
-;; reverse - Reverse collection
-;; Realizes coll into a vector (if it isn't already one), then builds the
-;; result by reading that vector back-to-front. Deliberately doesn't rely on
-;; quoted empty-list literals ('()) or (conj list x) prepend semantics: '()
-;; currently evaluates to an empty vector rather than a real list (conj on
-;; it appends, not prepends), so folding onto '() cannot reverse anything --
-;; that's a separate, deeper reader/quote bug, not something to work around
-;; here. This stays correct and O(n) regardless of that bug.
+;; reverse - Reverse collection into Clojure's canonical list sequence.
+;; `cons` prepends in O(1), so the final result has real list identity:
+;; `(reverse [1 2])` is `(2 1)`, not `[2 1]`.  Traversal is index-based after
+;; one materialization step, avoiding a closure invocation for each item in a
+;; large source sequence while preserving O(n) behavior for all seqable input.
 (defn reverse [coll]
   (let [v (if (vector? coll) coll (reduce (fn [acc x] (conj acc x)) [] coll))
         len (count v)]
-    (loop [i (dec len)
-           acc []]
-      (if (< i 0)
+    (loop [i 0
+           acc '()]
+      (if (>= i len)
         acc
-        (recur (dec i) (conj acc (nth v i)))))))
+        (recur (inc i) (cons (nth v i) acc))))))
 
 ;; Reduced values are a small runtime control marker.  The public helpers
 ;; remain source-level APIs; only construction crosses the explicit private

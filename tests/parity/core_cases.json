@@ -74,6 +74,7 @@
   {"name": "sequential-map", "expr": "(sequential? {:a 1})"},
   {"name": "reductions", "expr": "(into [] (reductions + 0 [1 2 3]))"},
   {"name": "reductions-implicit-init", "expr": "(into [] (reductions + [1 2 3]))"},
+  {"name": "reverse-is-a-list-sequence", "expr": "(list? (reverse [1 2 3]))"},
   {"name": "composed-map-filter", "expr": "(into [] (filter odd? (map #(* % %) [1 2 3 4])))"},
   {"name": "take-range", "expr": "(into [] (take 3 (range 10)))"},
   {"name": "partition-by", "expr": "(mapv (fn [xs] (into [] xs)) (partition-by odd? [1 3 2 4 5]))"},
