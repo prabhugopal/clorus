@@ -1,0 +1,16 @@
+(ns tests.language.test-assert-comment-macros)
+
+(defn assert-eq [label actual expected]
+  (if (= actual expected)
+    true
+    (throw (str "assert failed [" label "] expected=" expected " actual=" actual))))
+
+(defn -main [& _args]
+  (let [message-evaluations (atom 0)]
+    ;; A passing assertion returns nil and leaves its failure message dormant.
+    (assert-eq "assert success" (assert true (swap! message-evaluations inc)) nil)
+    (assert-eq "assert does not evaluate successful message" @message-evaluations 0)
+
+    ;; `comment` removes its body before name resolution/code generation.
+    (assert-eq "comment is nil" (comment (undefined-development-helper 42)) nil)
+    (println "assert/comment macros passed")))

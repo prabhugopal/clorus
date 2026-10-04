@@ -149,6 +149,16 @@ fn expand_macros_once_with_registry(expr: &Expr, registry: &mut MacroRegistry) -
             expand_condp_once(args, registry)
         }
 
+        // Assertion macro. Keep the failure expression in the false branch so
+        // its message is evaluated only when the assertion fails.
+        Expr::Call { func, args } if func == "assert" => {
+            expand_assert_once(args, registry)
+        }
+
+        // Comment is a compile-time no-op; deliberately do not recurse into
+        // its contents, which may refer to unavailable development helpers.
+        Expr::Call { func, .. } if func == "comment" => Expr::Nil,
+
         // When macro
         Expr::Call { func, args } if func == "when" => {
             expand_when_once(args, registry)
@@ -285,6 +295,10 @@ fn expand_condp_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_condp_impl(args, false)
 }
 
+fn expand_assert_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
+    expand_assert_impl(args, false)
+}
+
 fn expand_when_once(args: &[Expr], _registry: &mut MacroRegistry) -> Expr {
     expand_when_impl(args, false)
 }
@@ -391,6 +405,11 @@ fn expand_case_impl(args: &[Expr], _recurse: bool) -> Expr {
 fn expand_condp_impl(args: &[Expr], _recurse: bool) -> Expr {
     let mut registry = MacroRegistry::new();
     expand_condp(args, &mut registry)
+}
+
+fn expand_assert_impl(args: &[Expr], _recurse: bool) -> Expr {
+    let mut registry = MacroRegistry::new();
+    expand_assert(args, &mut registry)
 }
 
 fn expand_when_impl(args: &[Expr], _recurse: bool) -> Expr {
@@ -552,6 +571,15 @@ pub fn expand_macros_with_registry(expr: &Expr, registry: &mut MacroRegistry) ->
         Expr::Call { func, args } if func == "condp" => {
             expand_condp(args, registry)
         }
+
+        // (assert test message?) returns nil on success and throws the
+        // optional message only when the test is falsey.
+        Expr::Call { func, args } if func == "assert" => {
+            expand_assert(args, registry)
+        }
+
+        // Do not expand or compile commented forms.
+        Expr::Call { func, .. } if func == "comment" => Expr::Nil,
 
         // When macro: (when test expr1 expr2) => (if test (do expr1 expr2) nil)
         Expr::Call { func, args } if func == "when" => {
@@ -2100,6 +2128,28 @@ fn expand_condp(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
     };
 
     expand_macros_with_registry(&expanded, registry)
+}
+
+/// Expand `(assert test message?)` to a conditional whose failure path throws
+/// the supplied message. The shape preserves the language's normal lazy
+/// branch evaluation: neither the message nor its effects run on success.
+fn expand_assert(args: &[Expr], registry: &mut MacroRegistry) -> Expr {
+    if args.is_empty() || args.len() > 2 {
+        return Expr::Nil;
+    }
+
+    let message = args
+        .get(1)
+        .cloned()
+        .unwrap_or_else(|| Expr::String("Assertion failed".to_string()));
+
+    Expr::If {
+        condition: Box::new(expand_macros_with_registry(&args[0], registry)),
+        then_branch: Box::new(Expr::Nil),
+        else_branch: Box::new(Expr::Throw {
+            expr: Box::new(expand_macros_with_registry(&message, registry)),
+        }),
+    }
 }
 
 fn expand_condp_clauses(
@@ -4161,5 +4211,38 @@ mod tests {
             }
             other => panic!("Expected condp to expand to a hygienic let, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_assert_macro_defers_failure_message_to_false_branch() {
+        use crate::parser::parse_str;
+
+        let exprs = parse_str("(assert condition (record-message))").unwrap();
+        let expanded = expand_macros(&exprs[0]);
+
+        match expanded {
+            Expr::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                assert_eq!(*condition, Expr::Symbol("condition".to_string()));
+                assert_eq!(*then_branch, Expr::Nil);
+                assert!(matches!(
+                    *else_branch,
+                    Expr::Throw { expr }
+                        if matches!(expr.as_ref(), Expr::Call { func, .. } if func == "record-message")
+                ));
+            }
+            other => panic!("Expected assert to expand to an if, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_comment_macro_discards_its_unresolved_body() {
+        use crate::parser::parse_str;
+
+        let exprs = parse_str("(comment (unresolved-development-helper 42))").unwrap();
+        assert_eq!(expand_macros(&exprs[0]), Expr::Nil);
     }
 }
