@@ -12,6 +12,7 @@
 /// ```
 
 use crate::value::{Value, ValueTag};
+use crate::parking::ParkedTask;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Condvar, OnceLock};
 use std::time::Duration;
@@ -28,6 +29,7 @@ struct ChannelState {
     closed: bool,
     /// Number of blocking takes waiting for a value on a rendezvous channel.
     waiting_takers: usize,
+    parked_takers: VecDeque<ParkedTask>,
 }
 
 /// A CSP-style channel
@@ -91,6 +93,7 @@ impl ClorusChannel {
                 buffer: VecDeque::new(),
                 closed: false,
                 waiting_takers: 0,
+                parked_takers: VecDeque::new(),
             })),
             capacity,
             not_full: Arc::new(Condvar::new()),
@@ -114,6 +117,16 @@ impl ClorusChannel {
 
         if state.closed {
             return false;
+        }
+
+        if let Some(task) = state.parked_takers.pop_front() {
+            // `put` borrows its argument, while a parked continuation owns
+            // the resumed value. Create that owned handoff before unlocking.
+            unsafe { (*value).header().retain(); }
+            drop(state);
+            unsafe { task.resume(value); }
+            notify_alts_waiters();
+            return true;
         }
 
         // Retain the value for storage in channel
@@ -260,12 +273,20 @@ impl ClorusChannel {
     ///
     /// No more puts allowed, but remaining values can be taken
     pub fn close(&self) {
-        self.state.lock().unwrap().closed = true;
+        let parked_takers = {
+            let mut state = self.state.lock().unwrap();
+            state.closed = true;
+            std::mem::take(&mut state.parked_takers)
+        };
 
         // Wake all waiting threads
         self.not_full.notify_all();
         self.not_empty.notify_all();
         notify_alts_waiters();
+
+        for task in parked_takers {
+            unsafe { task.resume(Value::nil()); }
+        }
     }
 
     /// Check if channel is closed
@@ -276,6 +297,9 @@ impl ClorusChannel {
     /// Whether a put can complete now. An unbuffered channel accepts exactly
     /// one value only after a blocking taker has registered its handoff.
     fn can_accept_value(&self, state: &ChannelState) -> bool {
+        if !state.parked_takers.is_empty() {
+            return true;
+        }
         match self.capacity {
             Some(0) => state.buffer.is_empty() && state.waiting_takers > 0,
             Some(capacity) => state.buffer.len() < capacity,
@@ -313,6 +337,30 @@ impl ClorusChannel {
             None
         }
     }
+
+    /// Register a continuation for a non-blocking take. The task is either
+    /// resumed with an owned value now or retained by the channel until put or
+    /// close can resume it. No worker thread waits in either case.
+    pub fn park_take(&self, task: ParkedTask) {
+        let mut task = Some(task);
+        let value = {
+            let mut state = self.state.lock().unwrap();
+            if let Some(value) = state.buffer.pop_front() {
+                self.not_full.notify_one();
+                Some(value)
+            } else if state.closed {
+                Some(Value::nil())
+            } else {
+                state.parked_takers.push_back(task.take().unwrap());
+                None
+            }
+        };
+        if let (Some(task), Some(value)) = (task, value) {
+            unsafe { task.resume(value); }
+            notify_alts_waiters();
+        }
+    }
+
 }
 
 impl Drop for ClorusChannel {
@@ -325,6 +373,7 @@ impl Drop for ClorusChannel {
             }
         }
     }
+
 }
 
 // ============================================================================
@@ -474,7 +523,19 @@ pub extern "C" fn clorus_alts(channels_vec: *mut Value) -> *mut Value {
 mod tests {
     use super::*;
     use std::sync::mpsc;
+    use std::sync::atomic::{AtomicI64, Ordering};
     use std::thread;
+
+    static PARKED_VALUE: AtomicI64 = AtomicI64::new(-1);
+
+    unsafe extern "C" fn record_parked_value(
+        _captures: *mut Value,
+        value: *mut Value,
+        _result_channel: *mut Value,
+    ) -> *mut Value {
+        PARKED_VALUE.store((*value).as_long(), Ordering::SeqCst);
+        Value::nil()
+    }
 
     #[test]
     fn test_channel_create() {
@@ -597,6 +658,22 @@ mod tests {
             finished_rx.recv_timeout(Duration::from_secs(1)).unwrap();
             producer.join().unwrap();
             crate::value::clorus_release(chan);
+        }
+    }
+
+    #[test]
+    fn test_parked_take_resumes_on_put_without_waiting_thread() {
+        unsafe {
+            PARKED_VALUE.store(-1, Ordering::SeqCst);
+            let channel = ClorusChannel::new(Some(1));
+            let task = ParkedTask::new(record_parked_value, std::ptr::null_mut(), std::ptr::null_mut());
+            channel.park_take(task);
+            assert_eq!(PARKED_VALUE.load(Ordering::SeqCst), -1);
+
+            let value = Value::long(73);
+            assert!(channel.put(value));
+            assert_eq!(PARKED_VALUE.load(Ordering::SeqCst), 73);
+            crate::value::clorus_release(value);
         }
     }
 }

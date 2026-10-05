@@ -20,6 +20,7 @@ pub mod agent;
 pub mod thread_pool;
 pub mod channel;
 pub mod go_block;
+pub mod parking;
 pub mod function;
 pub mod transducer;
 pub mod io;
