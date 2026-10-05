@@ -7,6 +7,7 @@ mod core_calls;
 mod declarations;
 mod ffi_calls;
 mod functions;
+mod go_lowering;
 mod multimethods;
 mod patterns;
 mod quotes;

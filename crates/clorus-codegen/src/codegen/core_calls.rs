@@ -2689,13 +2689,12 @@ impl<'ctx> CodeGen<'ctx> {
                 // the body as one AST node so all execution modes lower the
                 // same expression tree; the future parking-state-machine path
                 // will replace only the execution strategy, not this syntax.
-                let body = match args {
-                    [] => Expr::Nil,
-                    [expr] => expr.clone(),
-                    exprs => Expr::Do {
-                        exprs: exprs.to_vec(),
-                    },
-                };
+                let go_plan = super::go_lowering::GoBodyPlan::from_forms(args);
+                let body = go_plan.body;
+                // The continuation emitter will consume these sites. Keeping
+                // the plan here prevents the new parking syntax from becoming
+                // another ad-hoc runtime-name check.
+                let _parking_sites = go_plan.parking_sites;
 
                 // Find free variables in the body (variables accessed but not defined locally)
                 let free_vars = self.find_free_variables(&body);
