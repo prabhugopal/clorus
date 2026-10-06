@@ -30,6 +30,31 @@ struct ChannelState {
     /// Number of blocking takes waiting for a value on a rendezvous channel.
     waiting_takers: usize,
     parked_takers: VecDeque<ParkedTask>,
+    parked_putters: VecDeque<ParkedPut>,
+}
+
+/// A parked put owns both the continuation and the value retained for the
+/// channel. `take_parts` transfers them exactly once to a handoff/close path.
+struct ParkedPut {
+    task: Option<ParkedTask>,
+    value: Option<*mut Value>,
+}
+
+impl ParkedPut {
+    fn take_parts(&mut self) -> (ParkedTask, *mut Value) {
+        (
+            self.task.take().expect("parked put task already consumed"),
+            self.value.take().expect("parked put value already consumed"),
+        )
+    }
+}
+
+impl Drop for ParkedPut {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.take() {
+            unsafe { crate::value::clorus_release(value) }
+        }
+    }
 }
 
 /// A CSP-style channel
@@ -94,6 +119,7 @@ impl ClorusChannel {
                 closed: false,
                 waiting_takers: 0,
                 parked_takers: VecDeque::new(),
+                parked_putters: VecDeque::new(),
             })),
             capacity,
             not_full: Arc::new(Condvar::new()),
@@ -199,7 +225,13 @@ impl ClorusChannel {
                 if registered_rendezvous_take {
                     state.waiting_takers -= 1;
                 }
-                return self.transfer_taken_value(value);
+                let put_task = self.admit_one_parked_put(&mut state);
+                let value = self.transfer_taken_value(value);
+                drop(state);
+                if let Some(task) = put_task {
+                    unsafe { task.resume(Value::boolean(true)); }
+                }
+                return value;
             }
 
             if state.closed {
@@ -232,7 +264,13 @@ impl ClorusChannel {
                 if registered_rendezvous_take {
                     state.waiting_takers -= 1;
                 }
-                return self.transfer_taken_value(value);
+                let put_task = self.admit_one_parked_put(&mut state);
+                let value = self.transfer_taken_value(value);
+                drop(state);
+                if let Some(task) = put_task {
+                    unsafe { task.resume(Value::boolean(true)); }
+                }
+                return value;
             }
 
             if state.closed {
@@ -273,10 +311,13 @@ impl ClorusChannel {
     ///
     /// No more puts allowed, but remaining values can be taken
     pub fn close(&self) {
-        let parked_takers = {
+        let (parked_takers, parked_putters) = {
             let mut state = self.state.lock().unwrap();
             state.closed = true;
-            std::mem::take(&mut state.parked_takers)
+            (
+                std::mem::take(&mut state.parked_takers),
+                std::mem::take(&mut state.parked_putters),
+            )
         };
 
         // Wake all waiting threads
@@ -286,6 +327,10 @@ impl ClorusChannel {
 
         for task in parked_takers {
             unsafe { task.resume(Value::nil()); }
+        }
+        for mut parked in parked_putters {
+            let (task, _) = parked.take_parts();
+            unsafe { task.resume(Value::boolean(false)); }
         }
     }
 
@@ -317,6 +362,17 @@ impl ClorusChannel {
         value
     }
 
+    fn admit_one_parked_put(&self, state: &mut ChannelState) -> Option<ParkedTask> {
+        if !self.can_accept_value(state) {
+            return None;
+        }
+        let mut parked = state.parked_putters.pop_front()?;
+        let (task, value) = parked.take_parts();
+        state.buffer.push_back(value);
+        self.not_empty.notify_one();
+        Some(task)
+    }
+
     /// Get channel ID
     pub fn id(&self) -> ChannelId {
         self.id
@@ -329,7 +385,13 @@ impl ClorusChannel {
         let mut state = self.state.lock().unwrap();
 
         if let Some(value) = state.buffer.pop_front() {
-            Some(self.transfer_taken_value(value))
+            let put_task = self.admit_one_parked_put(&mut state);
+            let value = self.transfer_taken_value(value);
+            drop(state);
+            if let Some(task) = put_task {
+                unsafe { task.resume(Value::boolean(true)); }
+            }
+            Some(value)
         } else if state.closed {
             // Closed and empty
             Some(Value::nil())
@@ -359,6 +421,40 @@ impl ClorusChannel {
             unsafe { task.resume(value); }
             notify_alts_waiters();
         }
+    }
+
+    /// Register a non-blocking put. The caller lends `value`; a queued put
+    /// retains it until a taker or close resolves the operation.
+    pub fn park_put(&self, task: ParkedTask, value: *mut Value) {
+        let mut task = Some(task);
+        let mut direct_taker = None;
+        let completed = {
+            let mut state = self.state.lock().unwrap();
+            if state.closed {
+                Some(false)
+            } else if let Some(taker) = state.parked_takers.pop_front() {
+                unsafe { (*value).header().retain(); }
+                direct_taker = Some(taker);
+                Some(true)
+            } else if self.can_accept_value(&state) {
+                unsafe { (*value).header().retain(); }
+                state.buffer.push_back(value);
+                self.not_empty.notify_one();
+                Some(true)
+            } else {
+                unsafe { (*value).header().retain(); }
+                state.parked_putters.push_back(ParkedPut { task: task.take(), value: Some(value) });
+                None
+            }
+        };
+
+        if let Some(taker) = direct_taker {
+            unsafe { taker.resume(value); }
+        }
+        if let (Some(task), Some(result)) = (task, completed) {
+            unsafe { task.resume(Value::boolean(result)); }
+        }
+        notify_alts_waiters();
     }
 
 }
@@ -527,6 +623,7 @@ mod tests {
     use std::thread;
 
     static PARKED_VALUE: AtomicI64 = AtomicI64::new(-1);
+    static PARKED_PUT_RESULT: AtomicI64 = AtomicI64::new(-1);
 
     unsafe extern "C" fn record_parked_value(
         _captures: *mut Value,
@@ -534,6 +631,15 @@ mod tests {
         _result_channel: *mut Value,
     ) -> *mut Value {
         PARKED_VALUE.store((*value).as_long(), Ordering::SeqCst);
+        Value::nil()
+    }
+
+    unsafe extern "C" fn record_parked_put(
+        _captures: *mut Value,
+        value: *mut Value,
+        _result_channel: *mut Value,
+    ) -> *mut Value {
+        PARKED_PUT_RESULT.store(if (*value).as_bool() { 1 } else { 0 }, Ordering::SeqCst);
         Value::nil()
     }
 
@@ -674,6 +780,31 @@ mod tests {
             assert!(channel.put(value));
             assert_eq!(PARKED_VALUE.load(Ordering::SeqCst), 73);
             crate::value::clorus_release(value);
+        }
+    }
+
+    #[test]
+    fn test_parked_put_resumes_when_take_frees_capacity() {
+        unsafe {
+            PARKED_PUT_RESULT.store(-1, Ordering::SeqCst);
+            let channel = ClorusChannel::new(Some(1));
+            let first = Value::long(1);
+            assert!(channel.put(first));
+            let second = Value::long(2);
+            channel.park_put(
+                ParkedTask::new(record_parked_put, std::ptr::null_mut(), std::ptr::null_mut()),
+                second,
+            );
+            assert_eq!(PARKED_PUT_RESULT.load(Ordering::SeqCst), -1);
+            let taken = channel.take();
+            assert_eq!((*taken).as_long(), 1);
+            assert_eq!(PARKED_PUT_RESULT.load(Ordering::SeqCst), 1);
+            let admitted = channel.take();
+            assert_eq!((*admitted).as_long(), 2);
+            crate::value::clorus_release(first);
+            crate::value::clorus_release(second);
+            crate::value::clorus_release(taken);
+            crate::value::clorus_release(admitted);
         }
     }
 }
